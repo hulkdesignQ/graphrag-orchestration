@@ -330,6 +330,54 @@ class HippoRAG2Handler(BaseRouteHandler):
         )
 
         # ------------------------------------------------------------------
+        # Step 4.5: Exhaustive entity-doc map — short-circuit for "list ALL
+        # parties/organizations" queries (§33.25).
+        #
+        # Rationale: PPR+synthesis reads raw text and extracts every named
+        # organisation it finds, over-including incidental mentions (governing
+        # jurisdictions, arbitration bodies, job-site names).  The correct
+        # answer for exhaustive entity enumeration is the Neo4j MENTIONS index:
+        # which entities were NER-extracted from each document, filtered to those
+        # with ≥2 RELATED_TO edges (structurally indexed contracting principals).
+        # ------------------------------------------------------------------
+        if entity_scores and self._is_exhaustive_entity_query(query):
+            t0 = time.perf_counter()
+            top_entity_names = [name for name, _ in entity_scores[:20]]
+            entity_doc_map = await self._retrieve_entity_doc_map(top_entity_names)
+            if entity_doc_map:
+                lines = [
+                    f"- **{name}**: {', '.join(docs)}"
+                    for name, docs in entity_doc_map.items()
+                ]
+                response_text = (
+                    "The following named parties/organizations appear across the documents:\n\n"
+                    + "\n".join(lines)
+                )
+                timings_ms["step_entity_doc_map_ms"] = int(
+                    (time.perf_counter() - t0) * 1000
+                )
+                timings_ms["total_ms"] = int(
+                    (time.perf_counter() - t_route_start) * 1000
+                )
+                logger.info(
+                    "step_45_entity_doc_map",
+                    entity_count=len(entity_doc_map),
+                    query=query[:80],
+                )
+                return RouteResult(
+                    response=response_text,
+                    route_used=self.ROUTE_NAME,
+                    citations=[],
+                    evidence_path=top_entity_names,
+                    metadata={"exhaustive_entity_query": True,
+                               "entity_count": len(entity_doc_map)},
+                    timing=(
+                        {"total_ms": timings_ms.get("total_ms", 0)}
+                        if enable_timings else None
+                    ),
+                )
+
+        # ------------------------------------------------------------------
         # Step 5: Fetch chunk texts + synthesis
         # ------------------------------------------------------------------
         t0 = time.perf_counter()
@@ -526,6 +574,82 @@ class HippoRAG2Handler(BaseRouteHandler):
                 "detection_reason": reason,
             },
         )
+
+    # ======================================================================
+    # Exhaustive entity enumeration (§33.25)
+    # ======================================================================
+
+    @staticmethod
+    def _is_exhaustive_entity_query(query: str) -> bool:
+        """True for queries asking to list ALL named parties/organizations across
+        documents.  These bypass PPR text-synthesis and read the entity-document
+        MENTIONS index directly, which is structurally complete and hallucination-free.
+
+        Examples that match:
+          "List all named parties/organizations across the documents …"
+          "Enumerate all organizations and which document(s) each appears in"
+        """
+        return bool(
+            re.search(
+                r"\b(list|enumerate|identify|name)\b.{0,60}\ball\b.{0,80}"
+                r"\b(parties|organizations|entities|named\s+parties)\b",
+                query.lower(),
+            )
+        )
+
+    async def _retrieve_entity_doc_map(
+        self,
+        entity_names: List[str],
+        min_rel_degree: int = 2,
+    ) -> Dict[str, List[str]]:
+        """Return {entity_name: [doc_title, ...]} from the Neo4j MENTIONS index.
+
+        Filters to entities that have at least *min_rel_degree* RELATED_TO edges
+        in the knowledge graph.  Entities with multiple named relationships are
+        structurally indexed contracting principals; singletons with one edge
+        (e.g. ``Bayfront Animal Clinic LOCATED_IN …``) are incidental mentions.
+
+        Falls back to min_rel_degree=1 automatically if the stricter filter
+        returns nothing (e.g. unusually sparse graphs).
+        """
+        if not entity_names or not self.neo4j_driver:
+            return {}
+
+        group_id = self.group_id
+        cypher = """
+        UNWIND $entity_names AS ename
+        MATCH (e:Entity {group_id: $group_id}) WHERE e.name = ename
+        WITH e
+        WHERE size([(e)-[:RELATED_TO]-() | 1]) >= $min_rel_degree
+        MATCH (c:TextChunk {group_id: $group_id})-[:MENTIONS]->(e)
+        MATCH (c)-[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
+        RETURN e.name AS entity_name, collect(DISTINCT d.title) AS documents
+        ORDER BY size(collect(DISTINCT d.title)) DESC
+        """
+        driver = self.neo4j_driver
+
+        def _run():
+            with retry_session(driver) as session:
+                records = session.run(
+                    cypher,
+                    entity_names=entity_names,
+                    group_id=group_id,
+                    min_rel_degree=min_rel_degree,
+                )
+                return {
+                    r["entity_name"]: [t for t in r["documents"] if t]
+                    for r in records
+                }
+
+        try:
+            result = await asyncio.to_thread(_run)
+            # Relax filter if nothing survived (very sparse graph)
+            if not result and min_rel_degree > 1:
+                return await self._retrieve_entity_doc_map(entity_names, min_rel_degree=1)
+            return result
+        except Exception as e:
+            logger.warning("route7_entity_doc_map_failed", error=str(e))
+            return {}
 
     # ======================================================================
     # Query-to-Triple Linking + Recognition Memory
