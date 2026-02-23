@@ -209,6 +209,7 @@ class LocalSearchHandler(BaseRouteHandler):
             language_spans_by_doc=doc_language_spans if doc_language_spans else None,
             pre_fetched_chunks=pre_chunks if enable_sentence_citations else None,
             coverage_chunks=skeleton_coverage_chunks if skeleton_coverage_chunks else None,
+            ner_seed_count=len(seed_entities),
         )
         timings_ms["stage_2.3_synthesis_ms"] = int((time.perf_counter() - t0) * 1000)
         timings_ms["total_ms"] = int((time.perf_counter() - t_route_start) * 1000)
