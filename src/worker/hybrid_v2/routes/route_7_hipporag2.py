@@ -100,6 +100,14 @@ def _is_role_label(entity_name: str) -> bool:
     """Return True if the entity name is a generic role label."""
     return entity_name.strip().lower() in _ROLE_LABEL_BLOCKLIST
 
+
+# Structured relationship types to surface in the entity-doc map Role column.
+# Only these short, schema-defined labels are fetched; freeform co-occurrence
+# descriptions (up to 200-char sentence text) are excluded.
+_STRUCTURED_ROLE_TYPES: list = [
+    "PARTY_TO", "LOCATED_IN", "DEFINES", "REFERENCES", "FOUND_IN",
+]
+
 # ---------------------------------------------------------------------------
 # Voyage embedding service — shared singleton (same pattern as Route 5)
 # ---------------------------------------------------------------------------
@@ -422,28 +430,32 @@ class HippoRAG2Handler(BaseRouteHandler):
                 if entity_doc_rows:
                     header_lines = [
                         "## Entity-Document Map (from knowledge graph index)",
-                        "The following entities were extracted during document indexing "
-                        "and linked to documents via text mentions. Sorted by mention "
-                        "count (most-referenced first). NOTE: Not every entity listed "
-                        "here is a contractual party. When the query asks about "
-                        "parties/organizations, include ONLY entities that serve as "
-                        "direct parties or signatories to agreements — exclude entities "
-                        "that are merely referenced (e.g. project names, mailing "
-                        "addresses, job sites, invoice recipients).",
+                        "The following entities were extracted during document "
+                        "indexing and linked to documents via text mentions. "
+                        "The Role column shows graph-extracted relationship "
+                        "types: PARTY_TO means the entity is a direct party "
+                        "to an agreement. When answering questions about "
+                        "parties/organizations, include ONLY entities whose "
+                        "Role is PARTY_TO or whose Mention context clearly "
+                        "shows they are signatories. Exclude entities with "
+                        "Role '---' that are merely referenced (project "
+                        "names, addresses, job sites, invoice recipients).",
                         "",
-                        "| Entity | Type | Mentions | Document(s) | Mention context |",
-                        "|--------|------|----------|-------------|-----------------|",
+                        "| Entity | Type | Mentions | Document(s) | Role | Mention context |",
+                        "|--------|------|----------|-------------|------|-----------------|",
                     ]
                     for row in entity_doc_rows:
                         docs_str = ", ".join(row["documents"])
-                        snippet = self._extract_mention_snippet(
+                        snippet = self._extract_sentence_context(
                             row["entity_name"], row.get("sample_chunk", "")
                         )
                         snippet = snippet.replace("|", "\\|")
+                        role_labels = row.get("role_labels", [])
+                        role_str = ", ".join(role_labels) if role_labels else "---"
                         header_lines.append(
                             f"| {row['entity_name']} | {row['entity_type']} "
                             f"| {row.get('mention_count', 0)} "
-                            f"| {docs_str} | {snippet} |"
+                            f"| {docs_str} | {role_str} | {snippet} |"
                         )
                     graph_structural_header = "\n".join(header_lines)
 
@@ -669,31 +681,65 @@ class HippoRAG2Handler(BaseRouteHandler):
         return sorted(matched_types) if matched_types else None
 
     @staticmethod
-    def _extract_mention_snippet(
-        entity_name: str, chunk_text: str, window: int = 80
+    def _extract_sentence_context(
+        entity_name: str, chunk_text: str, max_chars: int = 300
     ) -> str:
-        """Extract a short text snippet around where the entity is mentioned."""
+        """Extract the full sentence containing the entity mention.
+
+        Scans backward/forward from the entity position for sentence
+        boundaries (``.  ?  !  \\n``).  Returns the containing sentence
+        capped at *max_chars*.  Falls back to the first *max_chars* of
+        the chunk when the entity is not found.
+        """
+        if not chunk_text:
+            return ""
+
         idx = chunk_text.lower().find(entity_name.lower())
         if idx < 0:
-            return chunk_text[:window].strip()
-        start = max(0, idx - window // 2)
-        end = min(len(chunk_text), idx + len(entity_name) + window // 2)
-        snippet = chunk_text[start:end].strip()
-        if start > 0:
-            snippet = "..." + snippet
-        if end < len(chunk_text):
-            snippet = snippet + "..."
-        return snippet
+            return chunk_text[:max_chars].strip()
+
+        # Scan backward for sentence start
+        sent_start = 0
+        for i in range(idx - 1, -1, -1):
+            if chunk_text[i] in ".?!\n" and i < idx - 1:
+                sent_start = i + 1
+                break
+
+        # Scan forward for sentence end
+        entity_end = idx + len(entity_name)
+        sent_end = len(chunk_text)
+        for i in range(entity_end, len(chunk_text)):
+            if chunk_text[i] in ".?!\n":
+                sent_end = i + 1  # include punctuation
+                break
+
+        sentence = chunk_text[sent_start:sent_end].strip()
+
+        # Truncate if too long, keeping entity visible
+        if len(sentence) > max_chars:
+            entity_pos = idx - sent_start
+            half = max_chars // 2
+            t_start = max(0, entity_pos - half)
+            t_end = min(len(sentence), t_start + max_chars)
+            sentence = sentence[t_start:t_end].strip()
+            if t_start > 0:
+                sentence = "..." + sentence
+            if t_end < len(chunk_text[sent_start:sent_end].strip()):
+                sentence = sentence + "..."
+
+        return sentence
 
     async def _query_entity_doc_map(
         self,
         entity_types: List[str],
     ) -> List[Dict[str, Any]]:
         """Query ALL entities of given types, their documents, mention count,
-        and a sample mention context snippet.
+        a sample mention context snippet, and structured role labels.
 
         Uses the MENTIONS + IN_DOCUMENT edge path — the same structural index
         that PPR traverses, but without PPR's top-K scope limitation.
+        An OPTIONAL MATCH on RELATED_TO edges collects structured role
+        labels (e.g. PARTY_TO) when available.
         Results are sorted by mention count (descending) so the most
         frequently referenced entities appear first.
         """
@@ -709,8 +755,12 @@ class HippoRAG2Handler(BaseRouteHandler):
         WITH e, collect(DISTINCT d.title) AS documents,
              count(tc) AS mention_count,
              collect(tc.text)[0] AS sample_chunk
+        OPTIONAL MATCH (e)-[r:RELATED_TO]-(e2:Entity {group_id: $group_id})
+        WHERE r.rel_type IN $role_rel_types
+        WITH e, documents, mention_count, sample_chunk,
+             collect(DISTINCT r.rel_type)[0..3] AS role_labels
         RETURN e.name AS entity_name, e.type AS entity_type,
-               documents, mention_count, sample_chunk
+               documents, mention_count, sample_chunk, role_labels
         ORDER BY mention_count DESC, entity_name
         """
         driver = self.neo4j_driver
@@ -721,6 +771,7 @@ class HippoRAG2Handler(BaseRouteHandler):
                     cypher,
                     group_id=group_id,
                     entity_types=entity_types,
+                    role_rel_types=_STRUCTURED_ROLE_TYPES,
                 )
                 return [
                     {
@@ -729,6 +780,7 @@ class HippoRAG2Handler(BaseRouteHandler):
                         "documents": [t for t in r["documents"] if t],
                         "mention_count": r["mention_count"],
                         "sample_chunk": r["sample_chunk"] or "",
+                        "role_labels": [rl for rl in (r["role_labels"] or []) if rl],
                     }
                     for r in records
                 ]

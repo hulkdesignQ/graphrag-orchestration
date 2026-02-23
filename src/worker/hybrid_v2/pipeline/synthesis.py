@@ -400,11 +400,11 @@ class EvidenceSynthesizer:
             constraint = (
                 "IMPORTANT: The Entity-Document Map above lists entities from "
                 "the knowledge graph. When the user asks about parties or "
-                "organizations, include ONLY entities that are direct parties "
-                "to, or signatories of, an agreement/contract. Exclude entities "
-                "that are merely referenced (e.g. project names, mailing "
-                "addresses, job sites, third-party mentions). Do NOT add "
-                "entities found in the raw text below that are not in the map."
+                "organizations, include ONLY entities whose Role column shows "
+                "PARTY_TO, or whose Mention context clearly indicates they are "
+                "direct parties/signatories. Exclude entities with Role '---' "
+                "that are merely referenced. Do NOT add entities from the raw "
+                "text below that are not in the map."
             )
             context = (
                 graph_structural_header + "\n\n" + constraint + "\n\n---\n\n" + context
