@@ -399,12 +399,9 @@ class EvidenceSynthesizer:
         if graph_structural_header:
             constraint = (
                 "IMPORTANT: The Entity-Document Map above is the authoritative "
-                "list of named parties/organizations extracted from the knowledge "
-                "graph index. Your answer MUST only include entities listed in "
-                "this map. Do NOT add entities found in the raw text below that "
-                "are not in the map. Role labels (e.g. 'Builder', 'Agent', "
-                "'Manufacturer') are NOT named parties unless they appear as "
-                "proper-noun entities in the map."
+                "list of named parties/organizations. Your answer MUST only "
+                "include entities listed in this map. Do NOT add entities found "
+                "in the raw text below that are not in the map."
             )
             context = (
                 graph_structural_header + "\n\n" + constraint + "\n\n---\n\n" + context

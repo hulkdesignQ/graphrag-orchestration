@@ -74,6 +74,33 @@ _CORPUS_SCOPE_RE = re.compile(
 )
 
 # ---------------------------------------------------------------------------
+# Generic role-label filter for entity-doc map.
+# Entity extraction often promotes generic role descriptors (e.g. "Builder",
+# "Customer", "Agent") to Entity nodes.  These are not named parties and
+# should be excluded from the entity-doc map to avoid over-generation.
+# Matching is case-insensitive on the normalized (stripped, lowered) name.
+# ---------------------------------------------------------------------------
+_ROLE_LABEL_BLOCKLIST: set = {
+    # contract role labels
+    "builder", "buyer", "buyer/owner", "seller", "owner", "agent",
+    "customer", "contractor", "subcontractor", "vendor", "supplier",
+    "manufacturer", "administrator", "arbitrator", "mediator",
+    "pumper", "tenant", "landlord", "lessee", "lessor", "licensee",
+    "licensor", "manager", "principal", "representative",
+    "authorized representative",
+    # generic legal/governance labels
+    "party", "parties", "claimant", "respondent", "insured",
+    "beneficiary", "guarantor", "indemnitor",
+    # governmental/institutional generics
+    "county", "state", "municipality", "city", "government",
+}
+
+
+def _is_role_label(entity_name: str) -> bool:
+    """Return True if the entity name is a generic role label."""
+    return entity_name.strip().lower() in _ROLE_LABEL_BLOCKLIST
+
+# ---------------------------------------------------------------------------
 # Voyage embedding service — shared singleton (same pattern as Route 5)
 # ---------------------------------------------------------------------------
 _voyage_service = None
@@ -387,7 +414,11 @@ class HippoRAG2Handler(BaseRouteHandler):
             detected_types = self._detect_exhaustive_entity_types(query)
             if detected_types:
                 t_edm = time.perf_counter()
-                entity_doc_rows = await self._query_entity_doc_map(detected_types)
+                entity_doc_rows_raw = await self._query_entity_doc_map(detected_types)
+                entity_doc_rows = [
+                    r for r in entity_doc_rows_raw
+                    if not _is_role_label(r["entity_name"])
+                ]
                 if entity_doc_rows:
                     header_lines = [
                         "## Entity-Document Map (from knowledge graph index)",
@@ -420,7 +451,9 @@ class HippoRAG2Handler(BaseRouteHandler):
                     logger.info(
                         "step_45_entity_doc_map_v2",
                         entity_types=detected_types,
-                        entities_found=len(entity_doc_rows),
+                        entities_total=len(entity_doc_rows_raw),
+                        entities_after_filter=len(entity_doc_rows),
+                        role_labels_removed=len(entity_doc_rows_raw) - len(entity_doc_rows),
                         query=query[:80],
                     )
 
