@@ -268,18 +268,14 @@ class ChatJobStatusResponse(BaseModel):
 # ============================================================================
 
 async def _get_hybrid_pipeline(group_id: str, folder_id: Optional[str] = None):
-    """Get or create HybridPipeline instance for the given group and folder."""
-    # Import here to avoid circular imports
-    from src.worker.hybrid_v2.orchestrator import HybridPipeline
-    from src.worker.hybrid_v2.router.main import DeploymentProfile
-    
-    # Simple singleton pattern - pipelines are stateless
-    pipeline = HybridPipeline(
-        group_id=group_id,
-        folder_id=folder_id,  # Optional folder scope
-        profile=DeploymentProfile.GENERAL_ENTERPRISE,
-    )
-    return pipeline
+    """Get or create HybridPipeline instance for the given group.
+
+    Delegates to the hybrid router's cached pipeline factory which wires up
+    all required services (LLM, Neo4j, HippoRAG, embeddings, text stores,
+    communities) and calls ``pipeline.initialize()``.
+    """
+    from src.api_gateway.routers.hybrid import _get_or_create_pipeline  # noqa: E402
+    return await _get_or_create_pipeline(group_id)
 
 
 async def _execute_query(
