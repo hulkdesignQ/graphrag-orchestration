@@ -263,8 +263,21 @@ SEMANTIC_DEDUP_THRESHOLD=${SEMANTIC_DEDUP_THRESHOLD:-0.92}
 DENOISE_VECTOR_FALLBACK=${DENOISE_VECTOR_FALLBACK:-0}
 VECTOR_FALLBACK_TOP_K=${VECTOR_FALLBACK_TOP_K:-3}
 
-# Voyage V2 Embedding API key (required for V2 vector search)
+# Voyage V2 Embedding API key (required for V2 vector search).
+# The key is stored as a Container App secret named "voyage-api-key" and
+# referenced via secretref in the env var (see ENV_VARS array below).
+# If VOYAGE_API_KEY is provided in the environment, update the secret.
 VOYAGE_API_KEY=$(get_env_value_or_default "VOYAGE_API_KEY" "" false)
+if [ -n "$VOYAGE_API_KEY" ]; then
+    echo "🔑 Updating voyage-api-key secret in container apps..."
+    for CA_NAME in "$CONTAINER_APP_API" "$CONTAINER_APP_WORKER"; do
+        az containerapp secret set \
+            --name "$CA_NAME" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --secrets "voyage-api-key=$VOYAGE_API_KEY" \
+            --only-show-errors 2>/dev/null || true
+    done
+fi
 
 # Route 3 v1 denoising vars — REMOVED in v2 (map-reduce has no chunk pipeline).
 # Kept commented for rollback reference.
@@ -312,7 +325,7 @@ ENV_VARS=(
     SEMANTIC_DEDUP_THRESHOLD="$SEMANTIC_DEDUP_THRESHOLD"
     DENOISE_VECTOR_FALLBACK="$DENOISE_VECTOR_FALLBACK"
     VECTOR_FALLBACK_TOP_K="$VECTOR_FALLBACK_TOP_K"
-    VOYAGE_API_KEY="$VOYAGE_API_KEY"
+    VOYAGE_API_KEY="secretref:voyage-api-key"
     AURA_DS_CLIENT_ID="$AURA_DS_CLIENT_ID"
     AURA_DS_CLIENT_SECRET="$AURA_DS_CLIENT_SECRET"
     SKELETON_ENRICHMENT_ENABLED="$SKELETON_ENRICHMENT_ENABLED"
