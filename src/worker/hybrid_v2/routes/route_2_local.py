@@ -144,7 +144,9 @@ class LocalSearchHandler(BaseRouteHandler):
             _escores: Dict[str, float] = {}
             _rstats: Dict[str, Any] = {}
             if enable_sentence_citations:
-                _chunks, _escores, _rstats = await self.synthesizer._retrieve_text_chunks(evidence_nodes, query=query)
+                _chunks, _escores, _rstats = await self.synthesizer._retrieve_text_chunks(
+                    evidence_nodes, query=query, ner_seed_count=len(seed_entities),
+                )
                 _doc_ids = list({c.get("metadata", {}).get("document_id", "") for c in _chunks} - {""})
                 if _doc_ids:
                     _doc_spans = await self._fetch_language_spans(_doc_ids)
