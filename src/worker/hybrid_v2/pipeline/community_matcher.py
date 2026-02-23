@@ -216,6 +216,13 @@ class CommunityMatcher:
             )
 
         results = await self._semantic_match(query, top_k)
+
+        # Post-filter: prune communities whose entities have no content
+        # in the target folder.  Only runs when folder_id is set AND we
+        # have a Neo4j service for the verification query.
+        if results and self.folder_id is not None and self.neo4j_service:
+            results = await self._filter_communities_by_folder(results)
+
         if not results:
             logger.info(
                 "community_matching_no_results_above_threshold",
@@ -279,7 +286,67 @@ class CommunityMatcher:
                    top_matches=[c.get("title", c.get("id", "?"))[:30] for c, _ in meaningful[:top_k]])
 
         return meaningful[:top_k]
-    
+
+    async def _filter_communities_by_folder(
+        self,
+        candidates: List[Tuple[Dict[str, Any], float]],
+    ) -> List[Tuple[Dict[str, Any], float]]:
+        """Remove communities that have no member entities in the target folder.
+
+        Each community is a Louvain cluster of entities.  We verify at least one
+        member entity has a MENTIONS edge to a TextChunk in a Document that
+        belongs to the target folder.  Communities that fail this check are
+        pruned from the candidate list.
+
+        Only called when ``self.folder_id is not None``.
+        """
+        community_ids = [
+            c.get("id", c.get("title", ""))
+            for c, _ in candidates
+        ]
+        if not community_ids:
+            return candidates
+
+        query = """
+        UNWIND $community_ids AS cid
+        MATCH (c:Community {id: cid, group_id: $group_id})
+              <-[:BELONGS_TO]-(e:Entity)
+              <-[:MENTIONS]-(tc:TextChunk {group_id: $group_id})
+              -[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
+              -[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})
+        RETURN DISTINCT cid
+        """
+        try:
+            async with self.neo4j_service._get_session() as session:
+                result = await session.run(
+                    query,
+                    community_ids=community_ids,
+                    group_id=self.group_id,
+                    folder_id=self.folder_id,
+                )
+                records = await result.data()
+
+            valid_ids = {r["cid"] for r in records}
+            before = len(candidates)
+            filtered = [
+                (c, s) for c, s in candidates
+                if c.get("id", c.get("title", "")) in valid_ids
+            ]
+
+            if len(filtered) < before:
+                logger.info(
+                    "community_folder_filter",
+                    folder_id=self.folder_id,
+                    before=before,
+                    after=len(filtered),
+                    pruned=before - len(filtered),
+                )
+            return filtered
+        except Exception as exc:
+            logger.warning("community_folder_filter_failed", error=str(exc))
+            # On failure, return unfiltered to avoid data loss
+            return candidates
+
     async def _get_embedding(self, text: str) -> Optional[List[float]]:
         """Get embedding for text using the configured embedding client."""
         if not self.embedding_client:

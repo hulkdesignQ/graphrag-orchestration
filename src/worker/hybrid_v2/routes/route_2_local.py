@@ -427,6 +427,9 @@ class LocalSearchHandler(BaseRouteHandler):
         OPTIONAL MATCH (sent)-[:PART_OF]->(chunk:TextChunk)
         OPTIONAL MATCH (sent)-[:IN_SECTION]->(sec:Section)
         OPTIONAL MATCH (sent)-[:IN_DOCUMENT]->(doc:Document)
+        WITH sent, score, chunk, sec, doc
+        WHERE $folder_id IS NULL OR doc IS NULL
+           OR (doc)-[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})
         RETURN sent.id AS sentence_id,
                sent.text AS text,
                sent.source AS source,
@@ -455,6 +458,7 @@ class LocalSearchHandler(BaseRouteHandler):
                         group_id=group_id,
                         top_k=top_k,
                         threshold=threshold,
+                        folder_id=self.folder_id,
                     )
                     return [dict(r) for r in records]
 
@@ -571,11 +575,13 @@ class LocalSearchHandler(BaseRouteHandler):
         CALL {
             WITH sent
             OPTIONAL MATCH path = (sent)-[:NEXT*1..2]->(fwd:Sentence)
+            WHERE fwd.group_id = $group_id
             RETURN collect(DISTINCT {node: fwd, hop_type: 'next'}) AS next_nodes
         }
         CALL {
             WITH sent
             OPTIONAL MATCH path = (sent)<-[:NEXT*1..2]-(prev:Sentence)
+            WHERE prev.group_id = $group_id
             RETURN collect(DISTINCT {node: prev, hop_type: 'prev'}) AS prev_nodes
         }
         
@@ -607,7 +613,10 @@ class LocalSearchHandler(BaseRouteHandler):
         OPTIONAL MATCH (sent)-[:PART_OF]->(chunk:TextChunk)
         OPTIONAL MATCH (sent)-[:IN_SECTION]->(sec:Section)
         OPTIONAL MATCH (sent)-[:IN_DOCUMENT]->(doc:Document)
-        
+        WITH sent, final_score, sources, chunk, sec, doc
+        WHERE $folder_id IS NULL OR doc IS NULL
+           OR (doc)-[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})
+
         RETURN sent.id AS sentence_id,
                sent.text AS text,
                sent.source AS source,
@@ -636,9 +645,10 @@ class LocalSearchHandler(BaseRouteHandler):
                         group_id=group_id,
                         top_k=top_k,
                         threshold=threshold,
+                        folder_id=self.folder_id,
                     )
                     return [dict(r) for r in records]
-            
+
             traversal_results = await loop.run_in_executor(self._executor, _run_traversal)
         except Exception as e:
             logger.warning("strategy_b_traversal_failed", error=str(e))

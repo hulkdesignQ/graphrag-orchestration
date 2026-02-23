@@ -63,10 +63,11 @@ class Neo4jTextUnitStore:
     It is intentionally read-only and returns dicts shaped for `EvidenceSynthesizer`.
     """
 
-    def __init__(self, neo4j_driver: Any, *, group_id: str, limit_per_entity: int = 12):
+    def __init__(self, neo4j_driver: Any, *, group_id: str, limit_per_entity: int = 12, folder_id: Optional[str] = None):
         self._driver = neo4j_driver
         self._group_id = group_id
         self._limit = int(limit_per_entity)
+        self._folder_id = folder_id
 
     async def get_chunks_for_entity(self, entity_name: str) -> List[Dict[str, Any]]:
         """Get chunks for a single entity (backward compatibility wrapper)."""
@@ -372,6 +373,7 @@ class Neo4jTextUnitStore:
             WHERE c.group_id = $group_id
             MATCH (c)-[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
             WHERE d.id IN $target_document_ids
+              AND ($folder_id IS NULL OR (d)-[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id}))
             OPTIONAL MATCH (c)-[:IN_SECTION]->(s:Section)
             WITH entity_name, c, d, s
             ORDER BY entity_name, coalesce(c.chunk_index, 0) ASC
@@ -396,6 +398,8 @@ class Neo4jTextUnitStore:
             OPTIONAL MATCH (c)-[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
             OPTIONAL MATCH (c)-[:IN_SECTION]->(s:Section)
             WITH entity_name, c, d, s
+            WHERE $folder_id IS NULL OR d IS NULL
+               OR (d)-[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})
             ORDER BY entity_name, coalesce(c.chunk_index, 0) ASC
             WITH entity_name, collect({chunk: c, doc: d, section: s})[0..$limit] AS items
             RETURN entity_name, items
@@ -407,6 +411,7 @@ class Neo4jTextUnitStore:
             group_id=self._group_id,
             entity_names=entity_names,
             limit=self._limit,
+            folder_id=self._folder_id,
         )
         if target_document_ids:
             query_params["target_document_ids"] = target_document_ids
