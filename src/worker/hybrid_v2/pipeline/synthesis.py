@@ -397,7 +397,18 @@ class EvidenceSynthesizer:
         # Provides synthesis with a complete entity-document table from the
         # knowledge graph, constraining enumeration to graph-indexed entities.
         if graph_structural_header:
-            context = graph_structural_header + "\n\n---\n\n" + context
+            constraint = (
+                "IMPORTANT: The Entity-Document Map above is the authoritative "
+                "list of named parties/organizations extracted from the knowledge "
+                "graph index. Your answer MUST only include entities listed in "
+                "this map. Do NOT add entities found in the raw text below that "
+                "are not in the map. Role labels (e.g. 'Builder', 'Agent', "
+                "'Manufacturer') are NOT named parties unless they appear as "
+                "proper-noun entities in the map."
+            )
+            context = (
+                graph_structural_header + "\n\n" + constraint + "\n\n---\n\n" + context
+            )
 
         # Step 3: Sub-question metadata for DRIFT.
         # Previously injected entity names + evidence counts into the context
