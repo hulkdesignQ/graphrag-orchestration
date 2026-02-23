@@ -392,9 +392,12 @@ class HippoRAG2Handler(BaseRouteHandler):
                     header_lines = [
                         "## Entity-Document Map (from knowledge graph index)",
                         "The following entities were extracted during document indexing "
-                        "and linked to documents via text mentions. For this listing "
-                        "question, base your answer on this complete map. Do not add "
-                        "entities from the raw text that are not listed here.",
+                        "and linked to documents via text mentions. Use this map to "
+                        "answer the listing question — focus on properly named "
+                        "organizations and individuals. Exclude generic role labels "
+                        "(e.g. 'Builder', 'Customer', 'Owner') that are not specific "
+                        "entity names. Use the supporting text evidence below to "
+                        "determine each entity's role in each document.",
                         "",
                         "| Entity | Type | Document(s) |",
                         "|--------|------|-------------|",
