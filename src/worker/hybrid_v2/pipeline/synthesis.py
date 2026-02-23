@@ -371,6 +371,9 @@ class EvidenceSynthesizer:
         # Sentence markers [1a], [1b] … cause citation explosion — the LLM
         # over-cites when presented with hundreds of fine-grained targets.
         # Strip to block-level [N] only; sentence text is preserved.
+        # Preserve the map as a lookup table for post-synthesis sentence
+        # matching — callers can narrow chunk citations to specific sentences.
+        _sentence_lookup = dict(sentence_citation_map)
         context = strip_sentence_markers(context)
         sentence_citation_map.clear()
 
@@ -491,6 +494,7 @@ class EvidenceSynthesizer:
             "sub_questions_addressed": sub_questions or [],
             "llm_context": context if include_context else None,
             "context_stats": context_stats,
+            "sentence_citation_map": _sentence_lookup,
         }
     
     async def synthesize_with_graph_context(

@@ -62,6 +62,10 @@ class Citation:
     # Polygon geometry for pixel-accurate highlighting
     sentences: Optional[List[Dict[str, Any]]] = None  # List of sentence spans with polygons
     page_dimensions: Optional[List[Dict[str, Any]]] = None  # Page sizes for coordinate transformation
+    # Sentence-level match (narrowed from chunk by post-synthesis matching)
+    sentence_text: Optional[str] = None  # The specific sentence within the chunk
+    sentence_offset: Optional[int] = None  # Character offset of sentence within chunk
+    sentence_length: Optional[int] = None  # Character length of the matched sentence
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for API response."""
@@ -88,6 +92,13 @@ class Citation:
             result["sentences"] = self.sentences
         if self.page_dimensions:
             result["page_dimensions"] = self.page_dimensions
+        # Include sentence-level match for precise citation
+        if self.sentence_text:
+            result["sentence_text"] = self.sentence_text
+        if self.sentence_offset is not None:
+            result["sentence_offset"] = self.sentence_offset
+        if self.sentence_length is not None:
+            result["sentence_length"] = self.sentence_length
         return result
 
 
@@ -1024,6 +1035,97 @@ class BaseRouteHandler:
                 citation.sentences = meta["sentences"]
             if not citation.page_dimensions and meta.get("page_dimensions"):
                 citation.page_dimensions = meta["page_dimensions"]
+
+    @staticmethod
+    def _match_sentence_to_claim(
+        chunk_index: int,
+        response: str,
+        sentence_map: Dict[str, Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        """Find the sentence within a chunk that best matches the LLM's claim.
+
+        Extracts ~150 chars of text surrounding the ``[N]`` marker in the
+        response, then computes word-overlap (Jaccard) against each sentence
+        entry ``[Na]``, ``[Nb]``, … in *sentence_map*.
+
+        Returns the best-matching entry dict, or ``None`` if no match found.
+        """
+        # Extract claim text surrounding [N] in the response
+        marker = f"[{chunk_index}]"
+        pos = response.find(marker)
+        if pos < 0:
+            return None
+
+        # Window: 100 chars before marker, 50 chars after
+        start = max(0, pos - 100)
+        end = min(len(response), pos + len(marker) + 50)
+        claim_text = response[start:end]
+
+        # Tokenize claim into word set
+        claim_words = set(re.findall(r"[a-z0-9]+", claim_text.lower()))
+        if not claim_words:
+            return None
+
+        # Find all sentence entries for this chunk: [Na], [Nb], [Nc] ...
+        best_match: Optional[Dict[str, Any]] = None
+        best_score = 0.0
+        for key, entry in sentence_map.items():
+            # Keys are like "[1a]", "[1b]" — check if the number matches
+            m = re.match(r"^\[(\d+)[a-z]\]$", key)
+            if not m or int(m.group(1)) != chunk_index:
+                continue
+
+            sent_text = entry.get("sentence_text", "")
+            if not sent_text:
+                continue
+
+            sent_words = set(re.findall(r"[a-z0-9]+", sent_text.lower()))
+            if not sent_words:
+                continue
+
+            # Jaccard similarity
+            inter = len(claim_words & sent_words)
+            union = len(claim_words | sent_words)
+            score = inter / union if union > 0 else 0.0
+
+            if score > best_score:
+                best_score = score
+                best_match = entry
+
+        # Require minimum overlap to avoid false matches
+        return best_match if best_score >= 0.15 else None
+
+    def _narrow_citations_to_sentences(
+        self,
+        citations: List[Citation],
+        response: str,
+        sentence_map: Dict[str, Dict[str, Any]],
+    ) -> None:
+        """Narrow chunk-level citations to specific sentences.
+
+        For each citation ``[N]``, finds the sentence within that chunk
+        that best matches the LLM's claim text near the ``[N]`` marker.
+        Sets ``sentence_text``, ``sentence_offset``, and ``sentence_length``
+        on the Citation object.
+
+        Does not alter the LLM prompt — this is purely post-synthesis
+        processing using the preserved sentence lookup table.
+        """
+        if not citations or not sentence_map or not response:
+            return
+
+        for citation in citations:
+            if citation.sentence_text:
+                # Already has sentence-level data
+                continue
+
+            match = self._match_sentence_to_claim(
+                citation.index, response, sentence_map
+            )
+            if match:
+                citation.sentence_text = match.get("sentence_text")
+                citation.sentence_offset = match.get("sentence_offset")
+                citation.sentence_length = match.get("sentence_length")
 
     def _diversify_chunks_by_section(
         self,

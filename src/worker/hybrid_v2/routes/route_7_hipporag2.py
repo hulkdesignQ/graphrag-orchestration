@@ -555,6 +555,14 @@ class HippoRAG2Handler(BaseRouteHandler):
                     )
                 )
 
+        # Post-synthesis: narrow chunk citations to specific sentences
+        sentence_map = synthesis_result.get("sentence_citation_map", {})
+        if sentence_map:
+            self._narrow_citations_to_sentences(
+                citations, synthesis_result.get("response", ""), sentence_map
+            )
+        self._enrich_citations_with_geometry(citations)
+
         # ------------------------------------------------------------------
         # Assemble metadata
         # ------------------------------------------------------------------
