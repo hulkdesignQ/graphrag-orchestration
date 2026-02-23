@@ -930,7 +930,100 @@ class BaseRouteHandler:
                 text_preview=preview,
             ))
         
+        self._enrich_citations_with_geometry(citations)
         return citations
+
+    def _enrich_citations_with_geometry(self, citations: List[Citation]) -> None:
+        """Enrich citations with polygon geometry from Neo4j chunk metadata.
+
+        After citations are built (typically 5-15 items), fetches the metadata
+        JSON blob for each cited TextChunk in a single batch query. Attaches
+        ``page_number``, ``sentences`` (polygon coords), and
+        ``page_dimensions`` so the frontend can render click-to-highlight
+        overlays on source PDFs.
+
+        Community-report citations (``community_*``) are skipped since they
+        have no document geometry.  Sentence-level citations
+        (``*_sent_N``) are mapped to their parent TextChunk.
+        """
+        if not citations or not self.neo4j_driver:
+            return
+
+        # Collect chunk IDs, skipping community reports
+        chunk_ids_to_enrich = [
+            c.chunk_id for c in citations
+            if c.chunk_id and not c.chunk_id.startswith("community_")
+        ]
+        if not chunk_ids_to_enrich:
+            return
+
+        # Separate sentence IDs from TextChunk IDs
+        text_chunk_ids: set = set()
+        sentence_parent_map: Dict[str, str] = {}  # sent_chunk_id -> parent_chunk_id
+        for cid in chunk_ids_to_enrich:
+            m = re.match(r"^(.+)_sent_(\d+)$", cid)
+            if m:
+                parent_id = m.group(1)
+                sentence_parent_map[cid] = parent_id
+                text_chunk_ids.add(parent_id)
+            else:
+                text_chunk_ids.add(cid)
+
+        if not text_chunk_ids:
+            return
+
+        # Batch fetch metadata from Neo4j
+        query = (
+            "MATCH (t:TextChunk) "
+            "WHERE t.id IN $ids AND t.group_id = $group_id "
+            "RETURN t.id AS id, t.metadata AS metadata"
+        )
+        metadata_map: Dict[str, Dict[str, Any]] = {}
+        try:
+            with self.neo4j_driver.session() as session:
+                result = session.run(query, ids=list(text_chunk_ids), group_id=self.group_id)
+                for record in result:
+                    raw = record["metadata"]
+                    meta: Dict[str, Any] = {}
+                    if isinstance(raw, str):
+                        try:
+                            meta = json.loads(raw)
+                        except (json.JSONDecodeError, TypeError):
+                            pass
+                    elif isinstance(raw, dict):
+                        meta = raw
+                    if meta:
+                        metadata_map[record["id"]] = meta
+        except Exception as e:
+            logger.warning("citation_geometry_enrichment_failed", error=str(e))
+            return
+
+        if not metadata_map:
+            return
+
+        # Attach geometry to each citation
+        for citation in citations:
+            cid = citation.chunk_id
+            if not cid or cid.startswith("community_"):
+                continue
+            # For sentence citations, use parent chunk's metadata
+            if cid in sentence_parent_map:
+                meta = metadata_map.get(sentence_parent_map[cid], {})
+            else:
+                meta = metadata_map.get(cid, {})
+            if not meta:
+                continue
+
+            if citation.page_number is None and meta.get("page_number") is not None:
+                citation.page_number = meta["page_number"]
+            if citation.start_offset is None and meta.get("start_offset") is not None:
+                citation.start_offset = meta["start_offset"]
+            if citation.end_offset is None and meta.get("end_offset") is not None:
+                citation.end_offset = meta["end_offset"]
+            if not citation.sentences and meta.get("sentences"):
+                citation.sentences = meta["sentences"]
+            if not citation.page_dimensions and meta.get("page_dimensions"):
+                citation.page_dimensions = meta["page_dimensions"]
 
     def _diversify_chunks_by_section(
         self,

@@ -11,7 +11,7 @@ Phase 4 Implementation:
 - Integration with HybridPipeline orchestrator
 """
 
-from typing import List, Optional, AsyncGenerator, Dict, Any
+from typing import List, Optional, AsyncGenerator, Dict, Any, Tuple
 from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel, Field
@@ -348,6 +348,7 @@ async def _execute_query(
             },
             "thoughts": thoughts,
             "context": result.get("context", {}),
+            "citations": result.get("citations", []),
         }
     except Exception as e:
         logger.error("query_execution_failed", error=str(e), approach=approach)
@@ -877,6 +878,7 @@ class FrontendDataPoints(BaseModel):
     text: List[str] = Field(default_factory=list)
     images: List[str] = Field(default_factory=list)
     citations: List[str] = Field(default_factory=list)
+    structured_citations: Optional[List[Dict[str, Any]]] = None
 
 
 class FrontendThought(BaseModel):
@@ -902,6 +904,64 @@ class FrontendChatResponse(BaseModel):
     message: ChatMessage
     context: FrontendResponseContext
     session_state: Optional[Any] = None
+
+
+def _build_frontend_citations(
+    raw_citations: List[Dict[str, Any]],
+    max_citations: int = 15,
+) -> Tuple[List[str], List[str], Optional[List[Dict[str, Any]]]]:
+    """Build frontend citation data from pipeline citation dicts.
+
+    Returns:
+        (flat_citations, text_points, structured_citations)
+        - flat_citations: simple string list for backward compat
+        - text_points: text preview snippets
+        - structured_citations: rich metadata with polygon geometry
+    """
+    flat_citations: List[str] = []
+    text_points: List[str] = []
+    structured: List[Dict[str, Any]] = []
+
+    for cit in raw_citations[:max_citations]:
+        if not isinstance(cit, dict):
+            continue
+
+        doc_title = cit.get("document_title", "")
+        doc_url = cit.get("document_url", "")
+        if doc_url:
+            flat_citations.append(doc_url)
+        elif doc_title:
+            flat_citations.append(doc_title)
+
+        preview = cit.get("text_preview", "")
+        if preview:
+            text_points.append(preview[:500])
+
+        sc: Dict[str, Any] = {
+            "source": doc_title,
+            "document_id": cit.get("document_id", ""),
+            "document_title": doc_title,
+            "document_url": doc_url,
+            "chunk_id": cit.get("chunk_id", ""),
+            "text_preview": preview,
+            "score": cit.get("score", 0.0),
+        }
+        if cit.get("section_path"):
+            sc["section_path"] = cit["section_path"]
+        if cit.get("page_number") is not None:
+            sc["page_number"] = cit["page_number"]
+        if cit.get("start_offset") is not None:
+            sc["start_offset"] = cit["start_offset"]
+        if cit.get("end_offset") is not None:
+            sc["end_offset"] = cit["end_offset"]
+        if cit.get("sentences"):
+            sc["sentences"] = cit["sentences"]
+        if cit.get("page_dimensions"):
+            sc["page_dimensions"] = cit["page_dimensions"]
+
+        structured.append(sc)
+
+    return flat_citations, text_points, structured if structured else None
 
 
 @router.post("", response_model=FrontendChatResponse)
@@ -957,20 +1017,11 @@ async def frontend_chat(
             for t in result.get("thoughts", [])
         ]
         
-        # Extract citations from context
-        context_data = result.get("context", {})
-        chunks = context_data.get("chunks", [])
-        citations = []
-        text_points = []
-        for chunk in chunks[:10]:  # Limit to 10 citations
-            if isinstance(chunk, dict):
-                source = chunk.get("source", chunk.get("file_name", ""))
-                content = chunk.get("content", chunk.get("text", ""))
-                if source:
-                    citations.append(source)
-                if content:
-                    text_points.append(content[:500])  # Truncate long content
-        
+        # Build citations from pipeline result
+        flat_citations, text_points, structured_citations = _build_frontend_citations(
+            result.get("citations", [])
+        )
+
         # Generate followup questions if requested
         followup_questions = None
         if overrides and overrides.suggest_followup_questions:
@@ -990,7 +1041,8 @@ async def frontend_chat(
             context=FrontendResponseContext(
                 data_points=FrontendDataPoints(
                     text=text_points,
-                    citations=citations,
+                    citations=flat_citations,
+                    structured_citations=structured_citations,
                 ),
                 followup_questions=followup_questions,
                 thoughts=thoughts,
@@ -1088,27 +1140,19 @@ async def _frontend_stream_response(
         
         # Extract context data
         thoughts = result.get("thoughts", [])
-        context_data = result.get("context", {})
-        chunks = context_data.get("chunks", [])
-        
-        # Build citations and text points
-        citations = []
-        text_points = []
-        for chunk in chunks[:10]:
-            if isinstance(chunk, dict):
-                source = chunk.get("source", chunk.get("file_name", ""))
-                content = chunk.get("content", chunk.get("text", ""))
-                if source:
-                    citations.append(source)
-                if content:
-                    text_points.append(content[:500])
-        
+
+        # Build citations from pipeline result
+        flat_citations, text_points, structured_citations = _build_frontend_citations(
+            result.get("citations", [])
+        )
+
         # Build context for streaming
         stream_context = {
             "data_points": {
                 "text": text_points,
                 "images": [],
-                "citations": citations,
+                "citations": flat_citations,
+                "structured_citations": structured_citations,
             },
             "thoughts": thoughts,
             "followup_questions": [

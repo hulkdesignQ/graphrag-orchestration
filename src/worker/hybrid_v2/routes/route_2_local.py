@@ -284,7 +284,8 @@ class LocalSearchHandler(BaseRouteHandler):
                     sentences=c.get("sentences"),
                     page_dimensions=c.get("page_dimensions"),
                 ))
-        
+
+        self._enrich_citations_with_geometry(citations)
         return RouteResult(
             response=synthesis_result["response"],
             route_used=self.ROUTE_NAME,

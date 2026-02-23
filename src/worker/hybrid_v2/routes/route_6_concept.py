@@ -288,6 +288,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         citations = self._build_citations(
             community_data, community_scores, sentence_evidence,
         )
+        self._enrich_citations_with_geometry(citations)
 
         # ================================================================
         # Assemble metadata
