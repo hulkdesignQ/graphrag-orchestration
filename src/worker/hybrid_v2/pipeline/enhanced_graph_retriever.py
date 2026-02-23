@@ -347,12 +347,20 @@ class EnhancedGraphRetriever:
             """
         else:
             # Fallback to 2-hop traversal
+            # Phase B: Support both Sentence-based and TextChunk-based MENTIONS
             query = """
             UNWIND $entity_names AS entity_name
-            MATCH (e:Entity)<-[:MENTIONS]-(c:TextChunk)-[:IN_SECTION]->(s:Section)
+            MATCH (e:Entity)<-[:MENTIONS]-(src)
             WHERE (toLower(e.name) = toLower(entity_name) OR e.id = entity_name
                    OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = toLower(entity_name)))
-              AND c.group_id = $group_id
+              AND src.group_id = $group_id
+            // Resolve to TextChunk: if src is Sentence, follow PART_OF
+            WITH entity_name, CASE WHEN src:TextChunk THEN src ELSE NULL END AS direct_chunk, src
+            OPTIONAL MATCH (src)-[:PART_OF]->(parent_chunk:TextChunk)
+            WHERE direct_chunk IS NULL
+            WITH entity_name, coalesce(direct_chunk, parent_chunk) AS c
+            WHERE c IS NOT NULL
+            MATCH (c)-[:IN_SECTION]->(s:Section)
             WITH entity_name, s, count(c) AS mention_count
             RETURN 
                 entity_name,
@@ -435,12 +443,21 @@ class EnhancedGraphRetriever:
             """
         else:
             # Fallback to 3-hop traversal
+            # Phase B: Support both Sentence-based and TextChunk-based MENTIONS
             query = f"""
             UNWIND $entity_names AS entity_name
-            MATCH (e:Entity)<-[:MENTIONS]-(c:TextChunk)-[:IN_DOCUMENT]->(d:Document)
+            MATCH (e:Entity)<-[:MENTIONS]-(src)
             WHERE (toLower(e.name) = toLower(entity_name) OR e.id = entity_name
                    OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = toLower(entity_name)))
-              AND c.group_id = $group_id
+              AND src.group_id = $group_id
+            // Resolve to TextChunk: if src is Sentence, follow PART_OF
+            WITH entity_name, CASE WHEN src:TextChunk THEN src ELSE NULL END AS direct_chunk, src
+            OPTIONAL MATCH (src)-[:PART_OF]->(parent_chunk:TextChunk)
+            WHERE direct_chunk IS NULL
+            WITH entity_name, coalesce(direct_chunk, parent_chunk) AS c
+            WHERE c IS NOT NULL
+            MATCH (c)-[:IN_DOCUMENT]->(d:Document)
+            WHERE c.group_id = $group_id
             {folder_filter}
             OPTIONAL MATCH (c)-[:IN_SECTION]->(s:Section)
             WITH entity_name, d, count(DISTINCT c) AS mention_count, count(DISTINCT s) AS section_count
@@ -990,14 +1007,24 @@ class EnhancedGraphRetriever:
         
         # Simplified query for current hybrid pipeline schema
         # Includes alias support for flexible entity matching
+        # Phase B: Support both Sentence-based and TextChunk-based MENTIONS.
+        # - TextChunk MENTIONS: direct path (fast, created by propagation)
+        # - Sentence MENTIONS: fallback via PART_OF → parent TextChunk
+        #   (needed for data indexed before MENTIONS propagation was added)
         query = f"""
                 UNWIND $entity_names AS entity_name
-                MATCH (t:TextChunk)-[:MENTIONS]->(e)
+                MATCH (src)-[:MENTIONS]->(e)
                 WHERE (e:Entity OR e:`__Entity__`)
                   AND (toLower(e.name) = toLower(entity_name)
                        OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = toLower(entity_name)))
-                    AND t.group_id = $group_id
+                    AND src.group_id = $group_id
                     AND e.group_id = $group_id
+                // Resolve to TextChunk: if src is Sentence, follow PART_OF; if src is TextChunk, use directly
+                WITH entity_name, CASE WHEN src:TextChunk THEN src ELSE NULL END AS direct_chunk, src
+                OPTIONAL MATCH (src)-[:PART_OF]->(parent_chunk:TextChunk)
+                WHERE direct_chunk IS NULL AND parent_chunk.group_id = $group_id
+                WITH entity_name, coalesce(direct_chunk, parent_chunk) AS t
+                WHERE t IS NOT NULL
                 OPTIONAL MATCH (t)-[:IN_SECTION]->(s:Section)
                 OPTIONAL MATCH (t)-[:IN_DOCUMENT]->(d:Document)
                 {folder_filter_clause}
