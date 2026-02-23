@@ -146,6 +146,7 @@ class LocalSearchHandler(BaseRouteHandler):
             if enable_sentence_citations:
                 _chunks, _escores, _rstats = await self.synthesizer._retrieve_text_chunks(
                     evidence_nodes, query=query, ner_seed_count=len(seed_entities),
+                    doc_scope_enabled=False,
                 )
                 _doc_ids = list({c.get("metadata", {}).get("document_id", "") for c in _chunks} - {""})
                 if _doc_ids:
@@ -212,6 +213,7 @@ class LocalSearchHandler(BaseRouteHandler):
             pre_fetched_chunks=pre_chunks if enable_sentence_citations else None,
             coverage_chunks=skeleton_coverage_chunks if skeleton_coverage_chunks else None,
             ner_seed_count=len(seed_entities),
+            doc_scope_enabled=False,
         )
         timings_ms["stage_2.3_synthesis_ms"] = int((time.perf_counter() - t0) * 1000)
         timings_ms["total_ms"] = int((time.perf_counter() - t_route_start) * 1000)
@@ -443,7 +445,7 @@ class LocalSearchHandler(BaseRouteHandler):
         try:
             # Run sync Neo4j query in executor to avoid blocking
             loop = asyncio.get_event_loop()
-            
+
             def _run_query():
                 with self.neo4j_driver.session() as session:
                     records = session.run(
@@ -454,7 +456,7 @@ class LocalSearchHandler(BaseRouteHandler):
                         threshold=threshold,
                     )
                     return [dict(r) for r in records]
-            
+
             sentence_results = await loop.run_in_executor(self._executor, _run_query)
         except Exception as e:
             logger.warning("skeleton_vector_query_failed", error=str(e))
@@ -468,8 +470,10 @@ class LocalSearchHandler(BaseRouteHandler):
         # merging them into the context window alongside entity-retrieved chunks.
         coverage_chunks = []
         for result in sentence_results:
-            # Use parent_text for richer context, fall back to sentence text
-            display_text = result.get("parent_text") or result.get("text", "")
+            # Use sentence text directly — parent_text is the coarse parent chunk
+            # which gets deduped against entity-retrieved chunks, losing fine-grained
+            # sentence content that sentence-level chunking was designed to capture.
+            display_text = result.get("text") or result.get("parent_text", "")
             if not display_text:
                 continue
             
@@ -652,8 +656,8 @@ class LocalSearchHandler(BaseRouteHandler):
             chunk_id = result.get("chunk_id", "")
             sentence_id = result.get("sentence_id", "")
             
-            # Use parent_text for richer sentence context, fall back to sentence text
-            display_text = result.get("parent_text") or result.get("text", "")
+            # Use sentence text directly — parent_text causes dedup with entity chunks
+            display_text = result.get("text") or result.get("parent_text", "")
             if not display_text:
                 continue
             

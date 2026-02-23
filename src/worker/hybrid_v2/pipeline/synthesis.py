@@ -211,6 +211,7 @@ class EvidenceSynthesizer:
         language_spans_by_doc: Optional[Dict[str, List[Dict[str, Any]]]] = None,
         pre_fetched_chunks: Optional[List[Dict[str, Any]]] = None,
         ner_seed_count: Optional[int] = None,
+        doc_scope_enabled: Optional[bool] = None,
     ) -> Dict[str, Any]:
         """
         Generate a comprehensive response with evidence citations.
@@ -239,6 +240,7 @@ class EvidenceSynthesizer:
             text_chunks, entity_scores, retrieval_stats = await self._retrieve_text_chunks(
                 evidence_nodes, query=query, is_drift=sub_questions is not None,
                 ner_seed_count=ner_seed_count,
+                doc_scope_enabled=doc_scope_enabled,
             )
         
         # Step 1.5: Merge coverage chunks if provided — with dedup against entity-retrieved chunks.
@@ -1245,11 +1247,12 @@ Response:"""
         return [top_id], stats
     
     async def _retrieve_text_chunks(
-        self, 
+        self,
         evidence_nodes: List[Tuple[str, float]],
         query: Optional[str] = None,
         is_drift: bool = False,
         ner_seed_count: Optional[int] = None,
+        doc_scope_enabled: Optional[bool] = None,
     ) -> Tuple[List[Dict[str, Any]], Dict[str, float], Dict[str, Any]]:
         """Retrieve raw text chunks for the evidence nodes.
         
@@ -1306,12 +1309,12 @@ Response:"""
         # Resolve which document(s) the query targets using IDF-weighted
         # entity→document voting.  Super-connector entities (appearing in
         # many docs) get proportionally less voting power.
-        # Toggle: DOC_SCOPE_ENABLED=0 to disable.
-        doc_scope_enabled = os.environ.get("DOC_SCOPE_ENABLED", "1") == "1"
+        # Toggle: DOC_SCOPE_ENABLED=0 to disable, or pass doc_scope_enabled param.
+        _doc_scope_on = doc_scope_enabled if doc_scope_enabled is not None else (os.environ.get("DOC_SCOPE_ENABLED", "1") == "1")
         target_document_ids: Optional[List[str]] = None
-        doc_scope_stats: Dict[str, Any] = {"enabled": doc_scope_enabled}
+        doc_scope_stats: Dict[str, Any] = {"enabled": _doc_scope_on}
 
-        if doc_scope_enabled and self.text_store and hasattr(self.text_store, 'get_entity_document_coverage'):
+        if _doc_scope_on and self.text_store and hasattr(self.text_store, 'get_entity_document_coverage'):
             try:
                 doc_coverage = await self.text_store.get_entity_document_coverage(selected_entities)
                 if doc_coverage:
