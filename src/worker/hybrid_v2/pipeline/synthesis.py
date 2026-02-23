@@ -1223,7 +1223,7 @@ Response:"""
             logger.info("doc_scope_skip", reason="cross_document", ratio=round(top_score / total_seeds, 3))
             return None, stats
 
-        if len(ranked) > 1 and second_score > 0 and top_score / second_score < 1.5:
+        if len(ranked) > 1 and second_score > 0 and top_score / second_score < 1.2:
             # Two nearly-equal documents — include both
             second_id = ranked[1][0]
             target = [top_id, second_id]
