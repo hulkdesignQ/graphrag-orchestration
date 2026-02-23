@@ -9932,3 +9932,250 @@ Q-N1–Q-N10 remain unchanged — these test hallucination resistance across all
 | Q-R6-5 = Q-G5 (2/3) | R6 synthesis | Synthesis misses legal-fee-recovery clause | R6 retrieval/prompt improvement for dispute-mechanism coverage |
 | Q-R6-6 = Q-G7 (2/3) | R6 synthesis | Synthesis misses PMA 60-day notice | R6 prompt or retrieval tuning for notice-type completeness |
 | Q-R7-5 = Q-D5 (2/3 occasional) | R7 minor | LLM judge phrasing variance | Monitor — likely resolves on re-run |
+
+---
+
+### §33.25 — Entity-Document Map Enrichment: Sentence Context + PARTY_TO Role Labels (2026-02-23)
+
+#### Motivation
+
+Q-G6 ("List all named parties/organizations across the documents") scored 1/3 on both Route 6 and Route 7 (Section 33.16). The root cause was that the entity-doc map — a Markdown table of all ORGANIZATION/PERSON entities injected into synthesis context — contained noisy entities that the synthesis LLM could not distinguish from actual contracting parties.
+
+Two categories of noise:
+
+1. **Generic role labels as entities**: The knowledge graph stores role descriptors ("Builder", "Administrator", "Customer", "Party", "Arbitrator") as Entity nodes. The synthesis constraint "only use entities from the map" was ineffective because these role labels *were* in the map.
+2. **Proper-noun discrimination**: Real named entities like "Fabrikam Construction" (a shipping address on the invoice) and "Bayfront Animal Clinic" (a job name in Exhibit A) were indistinguishable from actual agreement parties like "Fabrikam Inc." using entity names alone.
+
+#### Solution: Three-Layer Filtering
+
+**Layer 1 — Role-Label Blocklist** (`route_7_hipporag2.py`):
+
+A static blocklist of ~30 generic role descriptors filters entities before table formatting, removing non-proper-noun noise at the data level.
+
+```python
+_ROLE_LABEL_BLOCKLIST: set = {
+    "builder", "buyer", "buyer/owner", "seller", "owner", "agent",
+    "customer", "contractor", "subcontractor", "vendor", "supplier",
+    "manufacturer", "administrator", "arbitrator", "mediator",
+    "pumper", "tenant", "landlord", "lessee", "lessor", "licensee",
+    "licensor", "manager", "principal", "representative",
+    "authorized representative",
+    "party", "parties", "claimant", "respondent", "insured",
+    "beneficiary", "guarantor", "indemnitor",
+    "county", "state", "municipality", "city", "government",
+}
+```
+
+**Layer 2 — Enriched Entity-Doc Map Table**:
+
+Two signals replace the original 80-char snippet window, providing the synthesis LLM with enough context to discriminate parties from incidental mentions:
+
+| Signal | Source | Purpose |
+|--------|--------|---------|
+| **Full sentence context** (up to 300 chars) | `_extract_sentence_context()` — scans for sentence boundaries (`.?!\n`) around the entity mention in the chunk text | Shows *how* the entity is used: "SHIP TO: Fabrikam Construction" (address) vs "provided by Fabrikam Inc. (hereinafter 'Builder')" (contracting party) |
+| **Role labels** from RELATED_TO edges | Cypher `OPTIONAL MATCH` for edges with `rel_type IN ['PARTY_TO', 'LOCATED_IN', 'DEFINES', 'REFERENCES', 'FOUND_IN']` | Structural signal from the knowledge graph: `PARTY_TO` means the entity is a direct party to an agreement |
+
+Enriched table format:
+
+```
+| Entity | Type | Mentions | Document(s) | Role | Mention context |
+|--------|------|----------|-------------|------|-----------------|
+| Contoso Ltd. | ORGANIZATION | 12 | PMA, HTC | PARTY_TO | ...provided by Contoso Ltd. (hereinafter "Owner")... |
+| Fabrikam Construction | ORGANIZATION | 3 | Invoice | --- | ...SHIP TO: Fabrikam Construction, 123 Main St... |
+```
+
+**Layer 3 — Synthesis Constraint** (`synthesis.py` + table header):
+
+Dual-placement constraint instructs the LLM to include only entities whose Role is `PARTY_TO` or whose mention context clearly shows they are signatories, and to exclude entities with Role `---` that are merely referenced.
+
+The constraint is placed both:
+- In the entity-doc map table header description (encountered before entity rows)
+- Prepended to synthesis context via `graph_structural_header`
+
+#### Cypher Query (Entity-Doc Map with Role Labels)
+
+```cypher
+MATCH (e:Entity {group_id: $group_id})
+      <-[:MENTIONS]-(tc:TextChunk {group_id: $group_id})
+      -[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
+WHERE e.type IN $entity_types
+WITH e, collect(DISTINCT d.title) AS documents,
+     count(tc) AS mention_count,
+     collect(tc.text)[0] AS sample_chunk
+OPTIONAL MATCH (e)-[r:RELATED_TO]-(e2:Entity {group_id: $group_id})
+WHERE r.rel_type IN $role_rel_types
+WITH e, documents, mention_count, sample_chunk,
+     collect(DISTINCT r.rel_type)[0..3] AS role_labels
+RETURN e.name AS entity_name, e.type AS entity_type,
+       documents, mention_count, sample_chunk, role_labels
+ORDER BY mention_count DESC, entity_name
+```
+
+#### Files Modified
+
+| File | Change |
+|------|--------|
+| `src/worker/hybrid_v2/routes/route_7_hipporag2.py` | Added `_ROLE_LABEL_BLOCKLIST`, `_is_role_label()`, `_extract_sentence_context()`, `_STRUCTURED_ROLE_TYPES`; expanded Cypher query with `OPTIONAL MATCH` for role labels; enriched table formatting with Role column + sentence context |
+| `src/worker/hybrid_v2/pipeline/synthesis.py` | Updated synthesis constraint to reference Role column and PARTY_TO labels |
+
+#### Benchmark Results
+
+| Test | Entity selection | Score | Notes |
+|------|-----------------|-------|-------|
+| Quick probe (single query) | 4/4 correct | — | Only Contoso Ltd., Fabrikam Inc., Walt Flood Realty, Contoso Lifts LLC |
+| 3-repeat benchmark (T172316Z) | 4/4 correct entities | 1/3 | Judge now penalises for over-detailed document-role associations, not for wrong entities |
+
+**Key improvement:** The entity selection problem (Section 33.16) is solved. The enriched map reliably returns only the 4 ground-truth agreement parties. The remaining 1/3 score is a different issue — the response associates entities with more documents than the ground truth specifies (e.g., listing Contoso Ltd. in 4 docs when ground truth shows 2), which the judge calls "extra roles and appearances not supported by the ground truth."
+
+#### Relationship to Section 33.16
+
+This implementation corresponds to **Option A** (synthesis prompt variant) + elements of **Option B** (indexing-time contracting party tagging) from Section 33.16. The PARTY_TO role labels on RELATED_TO edges serve as a lightweight alternative to full `is_contracting_party` tagging on Entity nodes — they are already present in the graph from ingestion and require no additional indexing pass.
+
+#### Commits
+
+| Commit | Description |
+|--------|-------------|
+| `d002099` | fix: filter role-label entities from entity-doc map to reduce over-generation |
+| `4501af3` | fix: tighten synthesis constraint to exclude non-party entity references |
+| `2fee1d7` | fix: embed party-filtering instruction in entity-doc map header |
+| `f839bda` | feat: enrich entity-doc map with sentence context and PARTY_TO role labels |
+
+---
+
+### §33.26 — Entity-Doc Map v3: Per-Document Granularity + Grouped Bullet Format (2026-02-23)
+
+#### Motivation
+
+After §33.25, Q-G6 entity *selection* was solved (4/4 correct parties), but the judge still scored 1/3 because the response over-detailed document-role associations. Root cause: the entity-doc map had **one row per entity** with ALL documents listed and a **single entity-level Role**. The LLM saw `Contoso Ltd. | PARTY_TO | PMA, HTC, Warranty, Invoice` and reported Contoso in all 4 documents when the ground truth only expected PMA and HTC (where Contoso is a formal contracting party).
+
+Two structural issues:
+1. **Role labels were entity-level, not per-document** — a PARTY_TO edge anywhere showed PARTY_TO for all documents
+2. **Sentence context was from one arbitrary chunk** — `collect(tc.text)[0]` picked one chunk regardless of document
+
+Additionally, the Markdown table format was suboptimal: long 300-char sentence contexts broke column alignment, making the pipe-delimited rows hard for the LLM to parse.
+
+#### Solution: Per-Document Rows + Grouped Bullet Format
+
+Restructured the entity-doc map from one-row-per-entity to **one-entry-per-(entity, document) pair**, presented as a **grouped bullet list** instead of a Markdown table.
+
+**Cypher query change** — group by `(entity, document)`:
+
+```cypher
+MATCH (e:Entity {group_id: $group_id})
+      <-[:MENTIONS]-(tc:TextChunk {group_id: $group_id})
+      -[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
+WHERE e.type IN $entity_types
+WITH e, d, count(tc) AS doc_mentions,
+     collect(tc.text)[0] AS doc_sample_chunk
+OPTIONAL MATCH (e)-[r:RELATED_TO]-(e2:Entity {group_id: $group_id})
+WHERE r.rel_type IN $role_rel_types
+  AND EXISTS {
+    MATCH (e2)<-[:MENTIONS]-(:TextChunk {group_id: $group_id})
+          -[:IN_DOCUMENT]->(d)
+  }
+WITH e, d, doc_mentions, doc_sample_chunk,
+     collect(DISTINCT r.rel_type)[0..3] AS doc_role_labels
+RETURN e.name AS entity_name, e.type AS entity_type,
+       d.title AS document_title, doc_mentions,
+       doc_sample_chunk, doc_role_labels
+ORDER BY entity_name, doc_mentions DESC
+```
+
+Key differences from v2 (§33.25):
+- `WITH e, d` instead of `WITH e` — groups by (entity, document) pair
+- `doc_sample_chunk` is from TextChunks in THAT specific document (not global)
+- `EXISTS` subquery scopes PARTY_TO per-document: only shown when the related entity also appears in the same document
+- Returns `document_title` as scalar, not a list
+
+**Output format change** — grouped bullet list:
+
+```
+## Entity-Document Map (from knowledge graph index)
+
+Each entity below lists the documents where it appears.
+[PARTY_TO] = direct party/signatory to the agreement in that document.
+[---] = merely referenced (address, job site, invoice recipient).
+When answering about parties/organizations, include ONLY
+[PARTY_TO] entries or entries whose context clearly shows a
+signatory role.
+
+### Contoso Ltd. [ORGANIZATION]
+- PMA [PARTY_TO]: "...provided by Contoso Ltd. (hereinafter 'Owner')..."
+- HTC [PARTY_TO]: "...the owner, Contoso Ltd., agrees to..."
+- Invoice [---]: "...Bill To: Contoso Ltd., 789 Elm Street..."
+
+### Fabrikam Inc. [ORGANIZATION]
+- Warranty [PARTY_TO]: "...provided by Fabrikam Inc. (hereinafter 'Builder')..."
+- Purchase Contract [PARTY_TO]: "...Fabrikam Inc. ('Customer')..."
+```
+
+Benefits of grouped bullet list over Markdown table:
+- Long sentence contexts sit naturally on their own line instead of breaking pipe alignment
+- Entity → document → role → context follows top-down reading/reasoning flow
+- Per-document entries make role scoping explicit to the LLM
+
+**Synthesis constraint updated** (`synthesis.py`):
+
+```python
+constraint = (
+    "IMPORTANT: The Entity-Document Map above lists entities "
+    "grouped by name, with per-document entries. When the user "
+    "asks about parties or organizations, include ONLY entries "
+    "marked [PARTY_TO] or whose context clearly shows a "
+    "signatory role. Exclude [---] entries (addresses, job "
+    "sites, invoice recipients). Do NOT add entities from the "
+    "raw text below that are not in the map."
+)
+```
+
+#### Files Modified
+
+| File | Change |
+|------|--------|
+| `src/worker/hybrid_v2/routes/route_7_hipporag2.py` | Restructured Cypher to per-(entity, document) with `EXISTS` subquery for per-doc role scoping; replaced Markdown table with grouped bullet list; added `from collections import defaultdict`; updated telemetry logging |
+| `src/worker/hybrid_v2/pipeline/synthesis.py` | Updated synthesis constraint to reference grouped format with `[PARTY_TO]` / `[---]` tags |
+
+#### Benchmark Results (T183848Z)
+
+| Question | Previous (v2) | Now (v3) | Delta | Notes |
+|----------|---------------|----------|-------|-------|
+| Q-G1 | 3/3 | 3/3 | — | |
+| Q-G2 | 3/3 | 3/3 | — | |
+| Q-G3 | 2/3 | 2/3 | — | Still missing 10-business-day filing detail |
+| Q-G4 | 1/3 | 1/3 | — | PMA monthly statement now retrieved but over-includes other clauses |
+| Q-G5 | 3/3 | 3/3 | — | |
+| Q-G6 | 1/3 | 1/3 | — | Entities correct; new issue: role *assignment* inversion (see below) |
+| Q-G7 | 2/3 | **3/3** | **+1** | Over-generation fixed — judge now says "adds non-contradictory detail" |
+| Q-G8–G10 | 3/3 each | 3/3 each | — | |
+| Q-N1–N10 | 3/3 each | 3/3 each | — | |
+| **Total** | **51/57** | **52/57** | **+1** | |
+
+#### Remaining Issues
+
+**Q-G6 (1/3) — Role assignment inversion:**
+
+The 4 entities are all correct, and per-document breakdown is present. However, the LLM inverts the roles: it says Contoso Ltd. is "Buyer/Owner" (correct for some docs) and Fabrikam Inc. "signs on behalf of Walt Flood Realty" (incorrect — Fabrikam is the Builder/Pumper/Customer). The ground truth expects:
+- Fabrikam Inc.: builder (warranty), pumper (holding tank), customer (purchase contract)
+- Contoso Ltd.: owner (property management), holding tank owner
+
+This is a **synthesis accuracy issue** — the entity-doc map provides the per-document sentence context showing correct roles, but the LLM conflates or inverts them in the response. Potential fixes:
+- (A) Include explicit role names from preamble text in the entity-doc map entries (not just PARTY_TO)
+- (B) Extract specific party roles during indexing (e.g., "Builder", "Owner") and store as properties on Entity or RELATED_TO edges
+- (C) Add a synthesis constraint instructing the LLM to quote the exact role designation from the sentence context
+
+**Q-G4 (1/3) — Synthesis over-inclusion:**
+
+Retrieval improved — PMA monthly statement chunks are now surfacing (they were entirely missing in v2). But the LLM over-includes other clauses as "reporting/record-keeping" (filing contracts, warranty letters, arbitration awards, etc.). The ground truth expects only 2 obligations. This is a synthesis precision issue, not retrieval.
+
+**Q-G3 (2/3) — Minor synthesis omission:**
+
+Missing "owner files contract changes within 10 business days" from holding tank. Retrieval appears adequate; the detail is deprioritized by the synthesis LLM.
+
+#### Updated Remaining Gaps
+
+| Gap | Type | Root Cause | Potential Fix |
+|-----|------|------------|---------------|
+| Q-G6 (1/3) | Synthesis | Role assignment inversion — LLM confuses which entity holds which role | Extract/surface explicit party role designations; synthesis constraint to quote roles from context |
+| Q-G4 (1/3) | Synthesis | Over-includes non-reporting clauses as reporting obligations | Tighter synthesis scoping for reporting/record-keeping category |
+| Q-G3 (2/3) | Synthesis | Omits one niche holding tank filing detail | Minor — 10-business-day requirement is a small detail in a comprehensive answer |
+| Q-G7 (3/3) | **Resolved** | Previously over-generated; now fixed by per-document entity-doc map | — |
