@@ -1018,6 +1018,14 @@ class HybridIndexDocumentsRequest(BaseModel):
         default=False,
         description="If true, delete existing group data before indexing",
     )
+    reextract_entities: bool = Field(
+        default=False,
+        description=(
+            "If true, delete only Entity/Community nodes and MENTIONS edges, "
+            "then re-run entity extraction on existing Sentences (skips "
+            "parse/chunk/embed steps). Faster than full reindex."
+        ),
+    )
     # KNN tuning parameters (for testing different configurations)
     knn_enabled: bool = Field(
         default=True,
@@ -1062,6 +1070,7 @@ async def _run_indexing_job(
     group_id: str,
     docs_for_pipeline: List[Dict[str, Any]],
     reindex: bool,
+    reextract_entities: bool,
     ingestion: str,
     run_community_detection: bool,
     run_raptor: bool,
@@ -1087,6 +1096,7 @@ async def _run_indexing_job(
             group_id=group_id,
             documents=docs_for_pipeline,
             reindex=reindex,
+            reextract_entities=reextract_entities,
             ingestion=ingestion,
             run_community_detection=run_community_detection,
             run_raptor=run_raptor,
@@ -1181,6 +1191,7 @@ async def hybrid_index_documents(
         group_id,
         docs_for_pipeline,
         body.reindex,
+        body.reextract_entities,
         body.ingestion,
         body.run_community_detection,
         body.run_raptor,

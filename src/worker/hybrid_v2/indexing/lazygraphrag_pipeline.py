@@ -176,6 +176,7 @@ class LazyGraphRAGIndexingPipeline:
         group_id: str,
         documents: List[Dict[str, Any]],
         reindex: bool = False,
+        reextract_entities: bool = False,
         ingestion: str = "none",
         # These parameters exist on the hybrid endpoint; LazyGraphRAG prefers on-demand
         # community/raptor work, so we ignore them but keep signature compatibility.
@@ -212,6 +213,73 @@ class LazyGraphRAGIndexingPipeline:
 
         if reindex:
             self.neo4j_store.delete_group_data(group_id)
+
+        # ── Re-extract entities only (skip parse/chunk/embed) ──────
+        # When reextract_entities=True, we keep existing Sentences,
+        # TextChunks, Documents, and Sections.  Only Entity nodes,
+        # Community nodes, and MENTIONS edges are deleted and rebuilt.
+        if reextract_entities and not reindex:
+            logger.info("reextract_entities_mode: deleting entities/mentions only")
+            del_stats = self.neo4j_store.delete_entities_only(group_id)
+            stats["reextract_deleted"] = del_stats
+
+            # Fetch existing sentences for entity extraction
+            existing_sentences = self.neo4j_store.get_sentences_by_group(group_id)
+            if not existing_sentences:
+                stats["skipped"].append("no_sentences_for_reextraction")
+                stats["elapsed_s"] = round(time.time() - start_time, 2)
+                return stats
+
+            # Jump to step 5: entity extraction on existing sentences
+            entities: List[Entity] = []
+            relationships: List[Relationship] = []
+            if self.llm is None:
+                stats["skipped"].append("no_llm_entity_extraction")
+            else:
+                entities, relationships = await self._extract_entities_and_relationships(
+                    group_id=group_id,
+                    chunks=[],  # empty — will use sentences from Neo4j
+                )
+                logger.info(
+                    f"reextract_entity_extraction_complete: "
+                    f"{len(entities)} entities, {len(relationships)} relationships"
+                )
+
+            # Steps 6-7: dedup + validate + commit
+            if entities:
+                entities, relationships, dedup_stats = self._deduplicate_entities(
+                    group_id=group_id,
+                    entities=entities,
+                    relationships=relationships,
+                )
+                stats["deduplication"] = dedup_stats
+
+            commit_result = await self._validate_and_commit_entities(
+                group_id=group_id,
+                entities=entities,
+                relationships=relationships,
+                dry_run=dry_run,
+            )
+            stats["validation_passed"] = commit_result.get("passed", False)
+            stats["entities"] = len(entities)
+            stats["relationships"] = len(relationships)
+
+            # Step 8: GDS algorithms
+            try:
+                gds_stats = await self._run_gds_graph_algorithms(
+                    group_id=group_id,
+                    knn_top_k=knn_top_k,
+                    knn_similarity_cutoff=knn_similarity_cutoff,
+                    knn_config=knn_config,
+                )
+                stats["gds_knn_edges"] = gds_stats.get("knn_edges", 0)
+                stats["gds_communities"] = gds_stats.get("communities", 0)
+            except Exception as e:
+                logger.warning(f"reextract_gds_failed: {e}")
+
+            stats["elapsed_s"] = round(time.time() - start_time, 2)
+            logger.info(f"reextract_entities_complete: {stats}")
+            return stats
 
         # Initialize GroupMeta node for lifecycle tracking.
         # This creates or updates the GroupMeta node to track GDS staleness, etc.
@@ -1238,9 +1306,14 @@ class LazyGraphRAGIndexingPipeline:
     ) -> Tuple[List[Entity], List[Relationship]]:
         """Extract entities from Sentence nodes using native neo4j-graphrag extractor.
 
-        Batches sentences into groups of 6, creates virtual TextChunks from each batch,
-        and runs the native extractor. Entity text_unit_ids point to Sentence IDs.
+        Batches sentences into groups of 6, respecting section boundaries so
+        that sentences from different document sections are never mixed in the
+        same batch.  The first sentence of every non-first batch gets a
+        [Context] prefix with the previous sentence for anaphora resolution.
+
+        Entity text_unit_ids point to Sentence IDs.
         """
+        from itertools import groupby
         from src.core.config import settings
 
         BATCH_SIZE = 6
@@ -1271,20 +1344,47 @@ class LazyGraphRAGIndexingPipeline:
         )
         entity_schema = self._build_extraction_schema()
 
-        # Build batches: group sentences and create virtual text chunks
-        batches: List[Tuple[List[Dict], str]] = []  # (sentence_list, batch_uid)
-        for i in range(0, len(sentences), BATCH_SIZE):
-            batch = sentences[i:i + BATCH_SIZE]
-            batch_text = "\n".join(s["text"] for s in batch)
-            # Use a composite UID encoding all sentence IDs for provenance tracking
-            batch_uid = "|".join(s["id"] for s in batch)
-            batches.append((batch, batch_uid))
+        # ── Section-boundary-aware batching with anaphora context ────
+        # Group sentences by (document_id, section_path) so that batches
+        # never cross section boundaries.  For the first sentence of each
+        # non-first batch within a section, prepend the previous sentence
+        # as [Context] to help the LLM resolve pronouns / anaphora.
+        def _section_key(s: Dict[str, Any]) -> Tuple[str, str]:
+            return (s["document_id"], s.get("section_path", ""))
+
+        section_groups: List[Tuple[Tuple[str, str], List[Dict[str, Any]]]] = []
+        for key, grp in groupby(sentences, key=_section_key):
+            section_groups.append((key, list(grp)))
+
+        # Build batches within each section group
+        batches: List[Tuple[List[Dict], str, str]] = []  # (sentence_list, batch_uid, batch_text)
+        for (_doc_id, _sec_path), section_sents in section_groups:
+            for i in range(0, len(section_sents), BATCH_SIZE):
+                batch = section_sents[i:i + BATCH_SIZE]
+                batch_uid = "|".join(s["id"] for s in batch)
+
+                # Cross-batch anaphora: prepend previous sentence as context
+                if i > 0:
+                    prev_sent = section_sents[i - 1]
+                    context_prefix = f"[Context] {prev_sent['text']}\n"
+                else:
+                    context_prefix = ""
+
+                batch_text = context_prefix + "\n".join(
+                    s["text"] for s in batch
+                )
+                batches.append((batch, batch_uid, batch_text))
+
+        logger.info(
+            f"Section-aware batching: {len(section_groups)} section groups "
+            f"→ {len(batches)} batches"
+        )
 
         native_chunks = []
         batch_sentence_map: Dict[str, List[Dict]] = {}  # batch_uid → sentence list
-        for batch, batch_uid in batches:
+        for batch, batch_uid, batch_text in batches:
             native_chunks.append(NativeTextChunk(
-                text="\n".join(s["text"] for s in batch),
+                text=batch_text,
                 index=len(native_chunks),
                 metadata={"sentence_ids": [s["id"] for s in batch]},
                 uid=batch_uid,

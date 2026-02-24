@@ -234,6 +234,7 @@ class HippoRAG2Handler(BaseRouteHandler):
         # Config from env
         triple_top_k = int(os.getenv("ROUTE7_TRIPLE_TOP_K", "5"))
         dpr_top_k = int(os.getenv("ROUTE7_DPR_TOP_K", "20"))
+        dpr_sentence_top_k = int(os.getenv("ROUTE7_DPR_SENTENCE_TOP_K", "60"))
         ppr_damping = float(os.getenv("ROUTE7_DAMPING", "0.5"))
         passage_node_weight = float(os.getenv("ROUTE7_PASSAGE_NODE_WEIGHT", "0.05"))
         ppr_passage_top_k = int(os.getenv("ROUTE7_PPR_PASSAGE_TOP_K", "20"))
@@ -281,9 +282,9 @@ class HippoRAG2Handler(BaseRouteHandler):
             self._query_to_triple_linking(query, query_embedding, triple_top_k)
         )
 
-        # 2b. DPR passage search
+        # 2b. DPR passage search (sentence-level Small-to-Big)
         dpr_task = asyncio.create_task(
-            self._dpr_passage_search(query_embedding, dpr_top_k)
+            self._dpr_passage_search(query_embedding, dpr_top_k, dpr_sentence_top_k)
         )
 
         # 2c. Optional sentence search (Phase 2)
@@ -861,21 +862,69 @@ class HippoRAG2Handler(BaseRouteHandler):
         return surviving
 
     # ======================================================================
-    # DPR Passage Search (chunk_embeddings_v2 vector index)
+    # DPR Passage Search (Small-to-Big: sentence → parent chunk)
     # ======================================================================
 
     async def _dpr_passage_search(
         self,
         query_embedding: List[float],
         top_k: int = 20,
+        sentence_top_k: int = 60,
     ) -> List[Tuple[str, float]]:
-        """Dense Passage Retrieval via Neo4j chunk vector index."""
+        """Dense Passage Retrieval via sentence-level vector search (Small-to-Big).
+
+        Searches sentence_embeddings_v2 for sharp single-sentence matches,
+        then maps each sentence to its parent TextChunk via PART_OF.
+        Multiple sentences in the same chunk → take max score.
+        Falls back to chunk_embeddings_v2 if no sentence results.
+        """
         if not self.neo4j_driver:
             return []
 
         group_id = self.group_id
 
-        cypher = """CYPHER 25
+        # Step 1: Try sentence-level DPR (sharp, single-sentence embeddings)
+        sentence_cypher = """CYPHER 25
+        CALL () {
+            MATCH (s:Sentence)
+            SEARCH s IN (VECTOR INDEX sentence_embeddings_v2 FOR $embedding WHERE s.group_id = $group_id LIMIT $sentence_top_k)
+            SCORE AS score
+            MATCH (s)-[:PART_OF]->(c:TextChunk {group_id: $group_id})
+            RETURN c.id AS chunk_id, score
+        }
+        RETURN chunk_id, max(score) AS score
+        ORDER BY score DESC
+        LIMIT $top_k
+        """
+
+        try:
+            driver = self.neo4j_driver
+
+            def _run_sentence():
+                with retry_session(driver) as session:
+                    records = session.run(
+                        sentence_cypher,
+                        embedding=query_embedding,
+                        group_id=group_id,
+                        sentence_top_k=sentence_top_k,
+                        top_k=top_k,
+                    )
+                    return [(r["chunk_id"], r["score"]) for r in records]
+
+            results = await asyncio.to_thread(_run_sentence)
+            if results:
+                logger.debug(
+                    "route7_dpr_sentence_complete", hits=len(results)
+                )
+                return results
+            logger.info("route7_dpr_sentence_empty_fallback_to_chunk")
+        except Exception as e:
+            logger.warning(
+                "route7_dpr_sentence_failed_fallback", error=str(e)
+            )
+
+        # Step 2: Fallback to chunk-level DPR (backward compat)
+        chunk_cypher = """CYPHER 25
         CALL () {
             MATCH (c:TextChunk)
             SEARCH c IN (VECTOR INDEX chunk_embeddings_v2 FOR $embedding WHERE c.group_id = $group_id LIMIT $top_k)
@@ -887,20 +936,20 @@ class HippoRAG2Handler(BaseRouteHandler):
         """
 
         try:
-            driver = self.neo4j_driver
-
-            def _run():
+            def _run_chunk():
                 with retry_session(driver) as session:
                     records = session.run(
-                        cypher,
+                        chunk_cypher,
                         embedding=query_embedding,
                         group_id=group_id,
                         top_k=top_k,
                     )
                     return [(r["chunk_id"], r["score"]) for r in records]
 
-            results = await asyncio.to_thread(_run)
-            logger.debug("route7_dpr_complete", hits=len(results))
+            results = await asyncio.to_thread(_run_chunk)
+            logger.debug(
+                "route7_dpr_chunk_fallback_complete", hits=len(results)
+            )
             return results
         except Exception as e:
             logger.warning("route7_dpr_failed", error=str(e))
