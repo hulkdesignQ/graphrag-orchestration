@@ -49,11 +49,14 @@ class DeterministicTracer:
             hipporag_instance: An initialized HippoRAG instance.
             graph_store: Fallback graph store if HippoRAG is not available.
             async_neo4j: AsyncNeo4jService for native async Neo4j queries (preferred).
-            group_id: Tenant ID for multi-tenant isolation.
+            group_id: Tenant ID for multi-tenant isolation (required).
             folder_id: Optional folder ID for scoped search (None = all folders).
             embed_model: Embedding model for Strategy 6 vector fallback.
                         Should have get_query_embedding(text) or embed_query(text) method.
         """
+        if not group_id:
+            raise ValueError("group_id is required for DeterministicTracer to ensure tenant isolation")
+        
         self.hipporag = hipporag_instance
         self.graph_store = graph_store
         self.async_neo4j = async_neo4j
@@ -146,10 +149,6 @@ class DeterministicTracer:
         """
         if not self.async_neo4j:
             logger.warning("async_neo4j_not_available", reason="Service not initialized")
-            return await self._trace_with_fallback(query, seed_entities, top_k)
-        
-        if not self.group_id:
-            logger.warning("async_neo4j_no_group_id")
             return await self._trace_with_fallback(query, seed_entities, top_k)
 
         # If we have no seeds at all, don't log this as a warning.
@@ -354,8 +353,8 @@ class DeterministicTracer:
         Returns:
             List of (entity_name, accumulated_score) sorted descending.
         """
-        if not self.async_neo4j or not self.group_id:
-            logger.warning("semantic_beam_not_available", reason="async_neo4j/group_id missing")
+        if not self.async_neo4j:
+            logger.warning("semantic_beam_not_available", reason="async_neo4j missing")
             return await self.trace(query, seed_entities, top_k=beam_width)
 
         try:

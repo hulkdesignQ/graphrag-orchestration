@@ -328,6 +328,12 @@ class Neo4jStoreV3:
         #   1. DROP old indexes
         #   2. Convert properties: SET e.embedding = null then use db.create.setVectorProperty
         #   3. CREATE new indexes with updated config
+        #
+        # ISOLATION NOTE: V1 indexes below lack WITH [group_id] pre-filter property.
+        # Queries still apply group_id filtering via post-search WHERE clause, so tenant
+        # isolation is preserved. However, LIMIT $top_k in SEARCH may return fewer
+        # results than expected after post-filtering. V2 indexes (below) include
+        # WITH [group_id] for in-index pre-filtering which avoids this issue.
         vector_indexes = [
             """
             CREATE VECTOR INDEX entity_embedding IF NOT EXISTS
@@ -426,15 +432,19 @@ class Neo4jStoreV3:
 
     # ==================== Extraction Cache (Determinism) ====================
 
-    async def aget_extraction_cache_batch(self, keys: List[str]) -> Dict[str, str]:
+    async def aget_extraction_cache_batch(self, keys: List[str], group_id: str = "") -> Dict[str, str]:
         """Fetch extraction-cache payloads by key.
 
         Returns a dict of key -> payload_json for the keys that exist.
+        Keys are internally prefixed with group_id to ensure tenant isolation.
         """
         if not keys:
             return {}
 
         await self._aensure_extraction_cache_schema()
+
+        # Prefix keys with group_id for tenant isolation
+        prefixed_keys = [f"{group_id}:{k}" if group_id else k for k in keys]
 
         query = """
         UNWIND $keys AS k
@@ -446,27 +456,40 @@ class Neo4jStoreV3:
             with self.get_retry_session() as session:
                 result = session.run(query, keys=keys_arg)
                 out: Dict[str, str] = {}
+                prefix_len = len(group_id) + 1 if group_id else 0
                 for record in result:
                     key = cast(str, record.get("key"))
                     payload = record.get("payload")
                     if key and payload:
-                        out[key] = cast(str, payload)
+                        # Strip prefix before returning to caller
+                        original_key = key[prefix_len:] if prefix_len else key
+                        out[original_key] = cast(str, payload)
                 return out
 
-        return await asyncio.to_thread(_sync_get, keys)
+        return await asyncio.to_thread(_sync_get, prefixed_keys)
 
     async def aput_extraction_cache_batch(
         self,
         items: List[Dict[str, Any]],
+        group_id: str = "",
     ) -> int:
         """Upsert extraction-cache payloads.
 
         Each item should include: key, payload, model (optional), params_hash (optional).
+        Keys are internally prefixed with group_id to ensure tenant isolation.
         """
         if not items:
             return 0
 
         await self._aensure_extraction_cache_schema()
+
+        # Prefix keys with group_id for tenant isolation
+        prefixed_items = []
+        for item in items:
+            pi = dict(item)
+            if group_id:
+                pi["key"] = f"{group_id}:{pi['key']}"
+            prefixed_items.append(pi)
 
         query = """
         UNWIND $items AS item
@@ -492,7 +515,7 @@ class Neo4jStoreV3:
                 record = result.single()
                 return cast(int, record["count"]) if record and record.get("count") is not None else 0
 
-        return await asyncio.to_thread(_sync_put, items)
+        return await asyncio.to_thread(_sync_put, prefixed_items)
     
     # ==================== Entity Operations ====================
     
@@ -1786,13 +1809,13 @@ class Neo4jStoreV3:
         MERGE (table)-[:IN_CHUNK]->(chunk)
         
         WITH table, chunk
-        OPTIONAL MATCH (chunk)-[:IN_SECTION]->(s:Section)
+        OPTIONAL MATCH (chunk)-[:IN_SECTION]->(s:Section {group_id: $group_id})
         FOREACH (_ IN CASE WHEN s IS NOT NULL THEN [1] ELSE [] END |
             MERGE (table)-[:IN_SECTION]->(s)
         )
         
         WITH table, chunk
-        MATCH (chunk)-[:IN_DOCUMENT]->(d:Document)
+        MATCH (chunk)-[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
         MERGE (table)-[:IN_DOCUMENT]->(d)
         
         RETURN count(table) AS count
@@ -1846,13 +1869,13 @@ class Neo4jStoreV3:
         MERGE (sb)-[:IN_CHUNK]->(chunk)
 
         WITH sb, chunk
-        OPTIONAL MATCH (chunk)-[:IN_SECTION]->(s:Section)
+        OPTIONAL MATCH (chunk)-[:IN_SECTION]->(s:Section {group_id: $group_id})
         FOREACH (_ IN CASE WHEN s IS NOT NULL THEN [1] ELSE [] END |
             MERGE (sb)-[:IN_SECTION]->(s)
         )
 
         WITH sb, chunk
-        MATCH (chunk)-[:IN_DOCUMENT]->(d:Document)
+        MATCH (chunk)-[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
         MERGE (sb)-[:IN_DOCUMENT]->(d)
 
         RETURN count(sb) AS count
@@ -2081,13 +2104,13 @@ class Neo4jStoreV3:
         
         query = """
         UNWIND $pairs AS p
-        MATCH (a:Sentence {id: p.from_id})
-        MATCH (b:Sentence {id: p.to_id})
+        MATCH (a:Sentence {id: p.from_id, group_id: $group_id})
+        MATCH (b:Sentence {id: p.to_id, group_id: $group_id})
         MERGE (a)-[:NEXT]->(b)
         """
         
         with self.get_retry_session() as session:
-            session.run(query, pairs=next_pairs)
+            session.run(query, pairs=next_pairs, group_id=group_id)
     
     def create_sentence_related_to_edges(
         self,

@@ -2229,9 +2229,8 @@ Output:
                     result = session.run(
                         """
                         UNWIND $barcodes AS bc
-                        MERGE (b:Barcode {id: bc.id})
-                        SET b.group_id = bc.group_id,
-                            b.kind = bc.kind,
+                        MERGE (b:Barcode {id: bc.id, group_id: bc.group_id})
+                        SET b.kind = bc.kind,
                             b.value = bc.value,
                             b.confidence = bc.confidence,
                             b.page_number = bc.page_number,
@@ -2265,9 +2264,8 @@ Output:
                     result = session.run(
                         """
                         UNWIND $figures AS fig
-                        MERGE (f:Figure {id: fig.id})
-                        SET f.group_id = fig.group_id,
-                            f.di_id = fig.di_id,
+                        MERGE (f:Figure {id: fig.id, group_id: fig.group_id})
+                        SET f.di_id = fig.di_id,
                             f.caption = fig.caption,
                             f.footnotes = fig.footnotes,
                             f.element_count = fig.element_count,
@@ -2300,10 +2298,11 @@ Output:
                         session.run(
                             """
                             UNWIND $refs AS r
-                            MATCH (f:Figure {id: r.figure_id})
+                            MATCH (f:Figure {id: r.figure_id, group_id: $group_id})
                             SET f.element_refs = coalesce(f.element_refs, []) + [r.ref_path]
                             """,
                             refs=ref_edges,
+                            group_id=group_id,
                         )
                         stats["figure_ref_edges"] += len(ref_edges)
                     

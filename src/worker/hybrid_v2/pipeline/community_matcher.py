@@ -127,7 +127,7 @@ class CommunityMatcher:
         query = """
         MATCH (c:Community {group_id: $group_id})
         WHERE c.title IS NOT NULL AND c.title <> ''
-        OPTIONAL MATCH (c)<-[:BELONGS_TO]-(e:Entity)
+        OPTIONAL MATCH (c)<-[:BELONGS_TO]-(e:Entity {group_id: $group_id})
         WITH c, collect(e.name) AS entity_names
         RETURN c.id AS id,
                c.title AS title,

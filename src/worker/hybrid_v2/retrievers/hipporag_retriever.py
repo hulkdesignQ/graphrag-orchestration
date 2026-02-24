@@ -109,8 +109,11 @@ class HippoRAGRetriever(BaseRetriever):
             embed_model: Embedding model for semantic entity matching
             config: Retriever configuration
             callback_manager: LlamaIndex callback manager
-            group_id: Tenant ID for multi-tenant filtering
+            group_id: Tenant ID for multi-tenant filtering (required)
         """
+        if not group_id:
+            raise ValueError("group_id is required for HippoRAGRetriever to ensure tenant isolation")
+        
         super().__init__(callback_manager=callback_manager)
         
         self.graph_store = graph_store
@@ -151,17 +154,13 @@ class HippoRAGRetriever(BaseRetriever):
                 logger.warning("hipporag_no_driver", msg="Graph store has no _driver attribute")
                 return
             
-            # Build group filter for multi-tenant isolation
-            group_filter = ""
-            params: Dict[str, Any] = {}
-            if self.group_id:
-                group_filter = "WHERE n.group_id = $group_id AND m.group_id = $group_id AND r.group_id = $group_id"
-                params["group_id"] = self.group_id
+            # Build group filter for multi-tenant isolation (always applied)
+            params: Dict[str, Any] = {"group_id": self.group_id}
             
             # Query all relationships to build adjacency
-            query = f"""
+            query = """
             MATCH (n)-[r]->(m)
-            {group_filter}
+            WHERE n.group_id = $group_id AND m.group_id = $group_id
             RETURN n.id AS source, m.id AS target, type(r) AS rel_type
             """
             
@@ -185,9 +184,9 @@ class HippoRAGRetriever(BaseRetriever):
             
             # Also query node properties for context retrieval
             # Include aliases for Entity nodes and key for KeyValue nodes
-            props_query = f"""
+            props_query = """
             MATCH (n)
-            {group_filter.replace('AND m.group_id = $group_id', '')}
+            WHERE n.group_id = $group_id
             RETURN n.id AS node_id, n.name AS name, n.text AS text, labels(n) AS labels,
                    coalesce(n.aliases, []) AS aliases,
                    n.key AS kvp_key

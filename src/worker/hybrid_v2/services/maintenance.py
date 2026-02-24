@@ -460,17 +460,24 @@ class MaintenanceService:
         group_id: str,
         dry_run: bool,
     ) -> tuple[Dict[str, int], List[str]]:
-        """Check for nodes/edges missing group_id."""
+        """Check for nodes/edges missing group_id.
+        
+        Note: This intentionally scans globally (not scoped to group_id) to find
+        orphan nodes across the database. A LIMIT is applied to avoid expensive
+        full-table scans on large databases.
+        """
         errors = []
         
         with self.driver.session(database=self.database) as session:
-            # Check nodes
+            # Check nodes — limit scan to avoid performance issues on large DBs
             result = session.run(
                 """
                 MATCH (n)
                 WHERE n.group_id IS NULL
                   AND (n:Entity OR n:TextChunk OR n:Document OR n:Section OR n:Table OR n:Figure OR n:KeyValue)
-                RETURN labels(n)[0] AS label, count(n) AS count
+                WITH labels(n)[0] AS label, n
+                LIMIT 10000
+                RETURN label, count(n) AS count
                 """,
             )
             
