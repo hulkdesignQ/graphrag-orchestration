@@ -414,7 +414,13 @@ class EvidenceSynthesizer:
                 "(e.g. 'By: X Its Principal Broker' does NOT mean X is "
                 "the broker — it is a title of the individual signing). "
                 "Use the [PARTY_TO] context sentences to determine "
-                "each entity's actual contractual role."
+                "each entity's actual contractual role.\n"
+                "5. The Entity-Document Map is the EXCLUSIVE source for "
+                "party-to-document associations. If entity X appears in "
+                "raw passage text from Document Y but the Map marks X "
+                "as [---] for Document Y (or does not list X under "
+                "Document Y at all), do NOT report X as a party to "
+                "Document Y."
             )
             context = (
                 graph_structural_header + "\n\n" + constraint + "\n\n---\n\n" + context
@@ -2594,7 +2600,11 @@ Instructions:
 5. Include citations [N] for factual claims (aim for every sentence that states a fact).
 6. If the evidence contains explicit numeric values (e.g., dollar amounts, time periods/deadlines, percentages, counts), include them verbatim.
 7. Prefer concrete obligations/thresholds over general paraphrases.
-8. If the question is asking for obligations, reporting/record-keeping, remedies, default/breach, or dispute-resolution: enumerate each distinct obligation/mechanism that is explicitly present in the Evidence Context; do not omit items just because another item is more prominent.
+8. SCOPE DISCIPLINE: If the question asks for a specific CATEGORY (e.g., "reporting obligations", "notice mechanisms", "dispute resolution"):
+   - Include ONLY items that squarely belong to that category as described in the source document.
+   - EXCLUDE adjacent concepts. Examples: "reporting/record-keeping" excludes general written-notice requirements, arbitration procedural steps, and confidentiality clauses; "notice/delivery mechanisms" excludes arbitration filing rules and assignment consent requirements.
+   - A focused answer with 2–3 on-target items is better than a comprehensive one with 8 off-topic extras.
+   - When in doubt whether an item fits the category, omit it.
 {document_guidance}
 
 Respond using this format:
