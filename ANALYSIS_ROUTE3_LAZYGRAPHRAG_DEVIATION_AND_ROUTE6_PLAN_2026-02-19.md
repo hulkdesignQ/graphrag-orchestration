@@ -339,3 +339,77 @@ Step 5: Single LLM synthesis call
 Route 3's MAP-REDUCE architecture is load-bearing — removing the MAP phase changes the entire pipeline structure, prompt design, and result merging logic. It's cleaner to build Route 6 with the right architecture than to surgically remove MAP from Route 3.
 
 Route 3 continues to serve as the existing global search route. Route 6 is purpose-built for concept search with a streamlined pipeline.
+
+---
+
+## 8. R6-XII: Entity-Centric Sentence Expansion (2026-02-24)
+
+### Problem
+
+Route 6's sentence retrieval relies on vector similarity (Voyage-Context-3 embeddings). This works well for sentences that are lexically or semantically close to the query, but misses sentences that are **topically connected via shared entities** without matching the query's phrasing.
+
+Example:
+- Query: "What are the budget implications of Project X?"
+- Retrieved: "Project X was approved in Q3 2025" (high vector similarity)
+- **Missed**: "The budget for Project X was $5M, a 20% increase from Q2" (different phrasing, lower vector score, but shares the "Project X" entity)
+
+This is the "entity-centric jump" gap — the one missing piece from the sentence-level chunking architecture that the Gemini discussion on LazyGraphRAG quality identified.
+
+### Solution
+
+Added Step 1b to the Route 6 pipeline: after the initial vector search retrieves seed sentences, traverse the graph via shared entities to discover additional related sentences.
+
+```
+Seed Sentence -[:MENTIONS]-> Entity <-[:MENTIONS]- Expanded Sentence
+```
+
+### Updated Route 6 Pipeline
+
+```
+Step 1:  Community Match + Sentence Search + Section Heading Search + Entity-Doc Map (parallel)
+Step 1b: Entity-centric sentence expansion via shared MENTIONS edges (R6-XII)
+Step 2:  Denoise + Diversity + Rerank sentence evidence (includes expanded sentences)
+Step 3:  Single LLM synthesis call
+```
+
+### How It Works
+
+1. After Step 1 sentence vector search completes, the top 10 seed sentences (highest vector scores) are selected
+2. A Cypher query traverses `(Sentence)-[:MENTIONS]->(Entity)<-[:MENTIONS]-(Sentence)` to find sentences that share entities with the seeds
+3. Results are ordered by `shared_entity_count DESC` (sentences sharing more entities are ranked higher)
+4. Expanded sentences are merged into the pool **before** Step 2 (denoise/diversity/rerank), so they pass through the full quality pipeline
+5. The Voyage reranker (`rerank-2.5`) assigns proper relevance scores, ensuring only truly relevant expanded sentences make it into synthesis
+
+### Design Decisions
+
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| Insertion point | After Step 1, before Step 2 | Expanded sentences pass through the same denoise/diversity/rerank pipeline as vector results |
+| Synthetic score | `min(seed_scores) * 0.8` | Below genuine vector matches; reranker controls final ordering |
+| Default state | Disabled (`ROUTE6_ENTITY_EXPANSION=0`) | Ship off, enable after benchmarking |
+| No prompt changes | Synthesis prompt unchanged | Expanded sentences are indistinguishable from vector results after reranking |
+| No extra API calls | Pure graph traversal (Cypher only) | ~30-50ms added latency, no Voyage embedding calls |
+
+### Configuration
+
+| Env Var | Default | Purpose |
+|---------|---------|---------|
+| `ROUTE6_ENTITY_EXPANSION` | `"0"` | Master switch |
+| `ROUTE6_ENTITY_EXPANSION_SEEDS` | `"10"` | Number of top-scoring seed sentences |
+| `ROUTE6_ENTITY_EXPANSION_TOP_K` | `"20"` | Max expanded sentences to add |
+| `ROUTE6_ENTITY_EXPANSION_MIN_OVERLAP` | `"1"` | Min shared entities to qualify |
+
+### Graph Schema Used
+
+Leverages existing edges created at index time (no schema changes):
+- `(Sentence)-[:MENTIONS]->(Entity)` — direct, sentence-first with TextChunk fallback
+- `(Sentence)-[:NEXT]->(Sentence)` — sequential context window
+- `(Sentence)-[:PART_OF]->(TextChunk)` — parent chunk text
+- `(Sentence)-[:IN_DOCUMENT]->(Document)` — folder isolation
+- `(Document)-[:IN_FOLDER]->(Folder)` — folder scope filter
+
+### Expected Impact
+
+- **Multi-hop queries** should improve (facts spanning multiple documents connected by entity mentions)
+- **Cross-document concept queries** should find related clauses/provisions that vector search misses
+- **Zero risk to existing quality** — disabled by default; when enabled, expanded sentences are filtered by the same reranker that already works well

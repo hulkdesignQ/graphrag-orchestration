@@ -7,6 +7,7 @@ Best for thematic/cross-document concept queries:
 
 Architecture (3 steps, 1 LLM call):
   1. Community Match + Sentence Search + Section Heading Search  (parallel)
+  1b. Entity-centric sentence expansion via shared MENTIONS edges (R6-XII)
   2. Denoise + Rerank sentence evidence
   3. Synthesize community summaries + section headings + sentence evidence (single LLM call)
 
@@ -184,6 +185,46 @@ class ConceptSearchHandler(BaseRouteHandler):
         )
 
         # ================================================================
+        # Step 1b: R6-XII Entity-centric sentence expansion
+        # After seed sentences are retrieved, traverse shared entities to
+        # find additional related sentences for multi-hop reasoning.
+        # ================================================================
+        expansion_enabled = os.getenv(
+            "ROUTE6_ENTITY_EXPANSION", "0"
+        ).strip().lower() in {"1", "true", "yes"}
+        expansion_count = 0
+
+        if expansion_enabled and sentence_evidence:
+            t_exp = time.perf_counter()
+            exp_seeds = int(os.getenv("ROUTE6_ENTITY_EXPANSION_SEEDS", "10"))
+            exp_top_k = int(os.getenv("ROUTE6_ENTITY_EXPANSION_TOP_K", "20"))
+            exp_min_overlap = int(
+                os.getenv("ROUTE6_ENTITY_EXPANSION_MIN_OVERLAP", "1")
+            )
+
+            try:
+                expanded = await self._expand_sentences_via_entities(
+                    seed_evidence=sentence_evidence,
+                    seed_count=exp_seeds,
+                    top_k=exp_top_k,
+                    min_overlap=exp_min_overlap,
+                )
+                if expanded:
+                    expansion_count = len(expanded)
+                    sentence_evidence.extend(expanded)
+                    logger.info(
+                        "route6_entity_expansion_merged",
+                        expanded_count=expansion_count,
+                        total_pool=len(sentence_evidence),
+                    )
+            except Exception as e:
+                logger.warning("route6_entity_expansion_failed", error=str(e))
+
+            timings_ms["step_1b_entity_expansion_ms"] = int(
+                (time.perf_counter() - t_exp) * 1000
+            )
+
+        # ================================================================
         # Step 2: Denoise + Rerank sentence evidence
         # ================================================================
         if sentence_evidence:
@@ -306,6 +347,8 @@ class ConceptSearchHandler(BaseRouteHandler):
             },
             "sentence_evidence_count": len(sentence_evidence),
             "entity_doc_map_count": len(entity_doc_map),
+            "entity_expansion_enabled": expansion_enabled,
+            "entity_expansion_count": expansion_count,
             "route_description": "Concept search — direct community synthesis (v2 + section headings)",
             "version": "v2",
         }
@@ -335,6 +378,7 @@ class ConceptSearchHandler(BaseRouteHandler):
                     "source": s.get("document_title", ""),
                     "section_path": s.get("section_path", ""),
                     "score": round(s.get("score", 0), 4),
+                    "expansion_source": s.get("expansion_source", ""),
                 }
                 for s in sentence_evidence[:10]
             ]
@@ -638,6 +682,168 @@ class ConceptSearchHandler(BaseRouteHandler):
             results_raw=len(results),
             evidence_deduped=len(evidence),
             top_scores=[round(e["score"], 4) for e in evidence[:5]],
+            top_docs=list(set(e["document_title"] for e in evidence[:10])),
+        )
+
+        return evidence
+
+    # ==================================================================
+    # R6-XII: Entity-Centric Sentence Expansion
+    # ==================================================================
+
+    async def _expand_sentences_via_entities(
+        self,
+        seed_evidence: List[Dict[str, Any]],
+        seed_count: int = 10,
+        top_k: int = 20,
+        min_overlap: int = 1,
+    ) -> List[Dict[str, Any]]:
+        """Expand sentence pool via shared-entity graph traversal.
+
+        After the initial vector search retrieves seed sentences, this method
+        traverses (Sentence)-[:MENTIONS]->(Entity)<-[:MENTIONS]-(Sentence)
+        edges to discover additional sentences that share entities with the
+        seeds.  This helps multi-hop reasoning where relevant facts live in
+        sentences that don't have high vector similarity to the query but
+        are topically connected via entities.
+
+        Args:
+            seed_evidence: Sentence evidence dicts from vector search (sorted
+                by score descending).
+            seed_count: Number of top-scoring seeds to use for expansion.
+            top_k: Max expanded sentences to return.
+            min_overlap: Minimum number of distinct shared entities for a
+                sentence to qualify.
+
+        Returns:
+            List of evidence dicts matching the schema of
+            ``_retrieve_sentence_evidence`` output, with additional fields
+            ``expansion_source`` and ``shared_entity_count``.
+        """
+        if not self.neo4j_driver:
+            logger.warning("route6_entity_expansion_no_neo4j_driver")
+            return []
+
+        # Use top seed_count sentences as expansion seeds
+        seeds = seed_evidence[:seed_count]
+        seed_ids = [s["sentence_id"] for s in seeds if s.get("sentence_id")]
+        if not seed_ids:
+            return []
+
+        # Exclude ALL sentences already in the pool to avoid duplicates
+        exclude_ids = [
+            s["sentence_id"] for s in seed_evidence if s.get("sentence_id")
+        ]
+
+        # Synthetic score: position expanded sentences below genuine vector
+        # matches so the reranker controls final ordering.
+        seed_scores = [s.get("score", 0) for s in seeds if s.get("score")]
+        synthetic_score = min(seed_scores) * 0.8 if seed_scores else 0.3
+
+        group_id = self.group_id
+        folder_id = self.folder_id
+
+        # R6-1: folder scope filter (same pattern as sentence vector search)
+        folder_filter_clause = (
+            "// R6-1: folder scope filter (no-op when $folder_id IS NULL)\n"
+            "        WITH expanded, shared_entity_count, chunk, doc, sec,"
+            " prev_sent, next_sent\n"
+            "        WHERE $folder_id IS NULL OR doc IS NULL"
+            " OR (doc)-[:IN_FOLDER]->(:Folder {id: $folder_id,"
+            " group_id: $group_id})\n"
+        )
+
+        cypher = f"""
+        UNWIND $seed_ids AS seed_id
+        MATCH (seed:Sentence {{id: seed_id, group_id: $group_id}})
+              -[:MENTIONS]->(e:Entity {{group_id: $group_id}})
+              <-[:MENTIONS]-(expanded:Sentence {{group_id: $group_id}})
+        WHERE NOT expanded.id IN $exclude_ids
+
+        WITH expanded, count(DISTINCT e) AS shared_entity_count
+        WHERE shared_entity_count >= $min_overlap
+
+        OPTIONAL MATCH (expanded)-[:PART_OF]->(chunk:TextChunk)
+        OPTIONAL MATCH (expanded)-[:IN_DOCUMENT]->(doc:Document)
+        OPTIONAL MATCH (expanded)-[:IN_SECTION]->(sec:Section)
+        OPTIONAL MATCH (expanded)-[:NEXT]->(next_sent:Sentence)
+        OPTIONAL MATCH (prev_sent:Sentence)-[:NEXT]->(expanded)
+
+        {folder_filter_clause}
+        RETURN DISTINCT expanded.id AS sentence_id,
+               expanded.text AS text,
+               expanded.source AS source,
+               expanded.section_path AS section_path,
+               sec.path_key AS section_key,
+               expanded.page AS page,
+               chunk.text AS chunk_text,
+               doc.title AS document_title,
+               doc.id AS document_id,
+               shared_entity_count,
+               prev_sent.text AS prev_text,
+               next_sent.text AS next_text
+        ORDER BY shared_entity_count DESC
+        LIMIT $top_k
+        """
+
+        try:
+            loop = asyncio.get_event_loop()
+            driver = self.neo4j_driver
+
+            def _run_expansion():
+                with driver.session() as session:
+                    records = session.run(
+                        cypher,
+                        seed_ids=seed_ids,
+                        exclude_ids=exclude_ids,
+                        group_id=group_id,
+                        folder_id=folder_id,
+                        min_overlap=min_overlap,
+                        top_k=top_k,
+                    )
+                    return [dict(r) for r in records]
+
+            results = await loop.run_in_executor(self._executor, _run_expansion)
+        except Exception as e:
+            logger.warning("route6_entity_expansion_query_failed", error=str(e))
+            return []
+
+        if not results:
+            logger.info("route6_entity_expansion_empty",
+                        seed_count=len(seed_ids))
+            return []
+
+        # Build evidence dicts matching _retrieve_sentence_evidence schema
+        evidence: List[Dict[str, Any]] = []
+        for r in results:
+            parts = []
+            if r.get("prev_text"):
+                parts.append(r["prev_text"].strip())
+            parts.append(r.get("text", "").strip())
+            if r.get("next_text"):
+                parts.append(r["next_text"].strip())
+            passage = " ".join(parts)
+
+            chunk_text = (r.get("chunk_text") or "").strip()
+            evidence.append({
+                "text": passage,
+                "sentence_text": r.get("text", ""),
+                "chunk_text": chunk_text,
+                "score": synthetic_score,
+                "document_title": r.get("document_title", "Unknown"),
+                "document_id": r.get("document_id", ""),
+                "section_path": r.get("section_key") or r.get("section_path", ""),
+                "page": r.get("page"),
+                "sentence_id": r.get("sentence_id", ""),
+                "expansion_source": "entity",
+                "shared_entity_count": r.get("shared_entity_count", 0),
+            })
+
+        logger.info(
+            "route6_entity_expansion_complete",
+            seed_count=len(seed_ids),
+            expanded=len(evidence),
+            top_overlap=[e["shared_entity_count"] for e in evidence[:5]],
             top_docs=list(set(e["document_title"] for e in evidence[:10])),
         )
 
