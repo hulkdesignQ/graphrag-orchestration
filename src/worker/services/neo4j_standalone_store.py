@@ -70,7 +70,7 @@ class StandaloneNeo4jStore:
             import neo4j
             self._driver_version = tuple(int(x) for x in neo4j.__version__.split('.')[:2])
             self._supports_native_vector = self._driver_version >= (6, 0)
-        except:
+        except Exception:
             self._driver_version = (5, 0)
             self._supports_native_vector = False
         

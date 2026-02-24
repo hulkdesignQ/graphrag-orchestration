@@ -10,6 +10,9 @@ from src.core.services.cosmos_client import get_cosmos_client
 
 logger = structlog.get_logger(__name__)
 
+# Strong references for fire-and-forget background tasks (prevent GC)
+_background_tasks: set = set()
+
 
 class UsageTracker:
     """
@@ -149,7 +152,9 @@ class UsageTracker:
         """
         try:
             # Write immediately (non-blocking)
-            asyncio.create_task(self._cosmos_client.write_usage_record(record))
+            task = asyncio.create_task(self._cosmos_client.write_usage_record(record))
+            _background_tasks.add(task)
+            task.add_done_callback(_background_tasks.discard)
         except Exception as e:
             # Fallback: just log to structlog
             logger.warning("cosmos_write_failed_using_structlog",

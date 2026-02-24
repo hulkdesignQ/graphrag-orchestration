@@ -26,6 +26,7 @@ See: VOYAGE_V2_CONTEXTUAL_CHUNKING_PLAN_2026-01-25.md
      PROPOSED_NEO4J_DOC_TITLE_FIX_2026-01-26.md
 """
 
+import asyncio
 import logging
 from typing import List, Optional
 
@@ -33,6 +34,9 @@ from src.core.config import settings
 from src.core.services.usage_tracker import get_usage_tracker
 
 logger = logging.getLogger(__name__)
+
+# Strong references for fire-and-forget background tasks (prevent GC)
+_background_tasks: set = set()
 
 # Graceful import - module may not be installed yet
 try:
@@ -291,10 +295,9 @@ class VoyageEmbedService:
         
         # Log usage (fire-and-forget)
         if total_tokens_used > 0:
-            import asyncio
             try:
                 loop = asyncio.get_event_loop()
-                loop.create_task(get_usage_tracker().log_embedding_usage(
+                task = loop.create_task(get_usage_tracker().log_embedding_usage(
                     partition_id=group_id or "indexing",
                     model=self.model_name,
                     total_tokens=total_tokens_used,
@@ -302,6 +305,8 @@ class VoyageEmbedService:
                     chunk_count=total_chunks,
                     user_id=user_id,
                 ))
+                _background_tasks.add(task)
+                task.add_done_callback(_background_tasks.discard)
             except Exception:
                 pass  # Fire-and-forget: ignore failures
         
@@ -369,10 +374,9 @@ class VoyageEmbedService:
         
         # Track usage (Voyage API returns usage in result)
         if hasattr(result, 'usage') and result.usage:
-            import asyncio
             try:
                 loop = asyncio.get_event_loop()
-                loop.create_task(get_usage_tracker().log_embedding_usage(
+                task = loop.create_task(get_usage_tracker().log_embedding_usage(
                     partition_id=group_id or "unknown",
                     model=self.model_name,
                     total_tokens=result.usage.total_tokens,
@@ -380,6 +384,8 @@ class VoyageEmbedService:
                     chunk_count=1,
                     user_id=user_id,
                 ))
+                _background_tasks.add(task)
+                task.add_done_callback(_background_tasks.discard)
             except Exception:
                 pass  # Fire-and-forget: ignore failures
         
@@ -411,10 +417,9 @@ class VoyageEmbedService:
         
         # Track usage
         if hasattr(result, 'usage') and result.usage:
-            import asyncio
             try:
                 loop = asyncio.get_event_loop()
-                loop.create_task(get_usage_tracker().log_embedding_usage(
+                task = loop.create_task(get_usage_tracker().log_embedding_usage(
                     partition_id=group_id or "unknown",
                     model=self.model_name,
                     total_tokens=result.usage.total_tokens,
@@ -422,6 +427,8 @@ class VoyageEmbedService:
                     chunk_count=len(queries),
                     user_id=user_id,
                 ))
+                _background_tasks.add(task)
+                task.add_done_callback(_background_tasks.discard)
             except Exception:
                 pass  # Fire-and-forget: ignore failures
         

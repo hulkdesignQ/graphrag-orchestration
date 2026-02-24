@@ -2209,11 +2209,13 @@ Output:
                 }
             )
             
-            def _write_di_metadata(session):
+            def _write_di_metadata(session, *, _barcodes=barcodes, _figures=figures,
+                                   _doc_id=doc_id, _languages=languages,
+                                   _selection_marks=selection_marks, _all_kvps=all_kvps):
                 # 1. Create Barcode nodes and FOUND_IN edges
-                if barcodes:
+                if _barcodes:
                     barcode_data = []
-                    for bc in barcodes:
+                    for bc in _barcodes:
                         bc_id = self._stable_barcode_id(group_id, bc.get("value", ""))
                         barcode_data.append({
                             "id": bc_id,
@@ -2223,14 +2225,15 @@ Output:
                             "confidence": bc.get("confidence", 0.0),
                             "page_number": bc.get("page_number", 1),
                             "entity_type": bc.get("entity_type", "BARCODE"),
-                            "doc_id": doc_id,
+                            "doc_id": _doc_id,
                         })
 
                     result = session.run(
                         """
                         UNWIND $barcodes AS bc
-                        MERGE (b:Barcode {id: bc.id, group_id: bc.group_id})
-                        SET b.kind = bc.kind,
+                        MERGE (b:Barcode {id: bc.id})
+                        SET b.group_id = bc.group_id,
+                            b.kind = bc.kind,
                             b.value = bc.value,
                             b.confidence = bc.confidence,
                             b.page_number = bc.page_number,
@@ -2244,12 +2247,12 @@ Output:
                         barcodes=barcode_data,
                     )
                     stats["barcodes_created"] += result.single()["count"]
-                    logger.info(f"📊 Created {result.single()['count'] if result else 0} Barcode nodes for {doc_id}")
+                    logger.info(f"📊 Created {result.single()['count'] if result else 0} Barcode nodes for {_doc_id}")
                 
                 # 2. Create Figure nodes with captions (cross-references captured via element_refs)
-                if figures:
+                if _figures:
                     figure_data = []
-                    for fig in figures:
+                    for fig in _figures:
                         fig_id = self._stable_figure_id(group_id, fig.get("id", ""))
                         figure_data.append({
                             "id": fig_id,
@@ -2258,14 +2261,15 @@ Output:
                             "caption": fig.get("caption", ""),
                             "footnotes": fig.get("footnotes", []),
                             "element_count": fig.get("element_count", 0),
-                            "doc_id": doc_id,
+                            "doc_id": _doc_id,
                         })
                     
                     result = session.run(
                         """
                         UNWIND $figures AS fig
-                        MERGE (f:Figure {id: fig.id, group_id: fig.group_id})
-                        SET f.di_id = fig.di_id,
+                        MERGE (f:Figure {id: fig.id})
+                        SET f.group_id = fig.group_id,
+                            f.di_id = fig.di_id,
                             f.caption = fig.caption,
                             f.footnotes = fig.footnotes,
                             f.element_count = fig.element_count,
@@ -2282,7 +2286,7 @@ Output:
                     
                     # Create REFERENCES edges from figures to elements (cross-section graph edges!)
                     ref_edges = []
-                    for fig in figures:
+                    for fig in _figures:
                         fig_id = self._stable_figure_id(group_id, fig.get("id", ""))
                         for ref in fig.get("element_refs", []):
                             # refs are like {"kind": "paragraphs", "index": 42, "ref": "/paragraphs/42"}
@@ -2298,24 +2302,23 @@ Output:
                         session.run(
                             """
                             UNWIND $refs AS r
-                            MATCH (f:Figure {id: r.figure_id, group_id: $group_id})
+                            MATCH (f:Figure {id: r.figure_id})
                             SET f.element_refs = coalesce(f.element_refs, []) + [r.ref_path]
                             """,
                             refs=ref_edges,
-                            group_id=group_id,
                         )
                         stats["figure_ref_edges"] += len(ref_edges)
                     
-                    logger.info(f"📈 Created {count} Figure nodes with {len(ref_edges)} element references for {doc_id}")
+                    logger.info(f"📈 Created {count} Figure nodes with {len(ref_edges)} element references for {_doc_id}")
                 
                 # 3. Update Document nodes with detected languages (including spans for sentence-level extraction)
-                if languages:
+                if _languages:
                     import json as json_module
                     # Find primary language (most spans)
-                    primary_lang = max(languages, key=lambda x: x.get("span_count", 0))
-                    all_locales = [lang.get("locale", "") for lang in languages if lang.get("locale")]
+                    primary_lang = max(_languages, key=lambda x: x.get("span_count", 0))
+                    all_locales = [lang.get("locale", "") for lang in _languages if lang.get("locale")]
                     # Store full language data with spans for sentence-level context extraction
-                    language_spans_json = json_module.dumps(languages)
+                    language_spans_json = json_module.dumps(_languages)
                     
                     result = session.run(
                         """
@@ -2326,33 +2329,33 @@ Output:
                             d.language_updated_at = datetime()
                         RETURN count(d) AS count
                         """,
-                        doc_id=doc_id,
+                        doc_id=_doc_id,
                         group_id=group_id,
                         primary_lang=primary_lang.get("locale", ""),
                         all_langs=all_locales,
                         language_spans=language_spans_json,
                     )
                     stats["languages_updated"] += result.single()["count"]
-                    total_spans = sum(lang.get("span_count", 0) for lang in languages)
-                    logger.info(f"🌐 Updated language metadata for {doc_id}: primary={primary_lang.get('locale')}, locales={all_locales}, total_spans={total_spans}")
+                    total_spans = sum(lang.get("span_count", 0) for lang in _languages)
+                    logger.info(f"🌐 Updated language metadata for {_doc_id}: primary={primary_lang.get('locale')}, locales={all_locales}, total_spans={total_spans}")
                 
                 # 4. Log selection marks for future enhancement
-                if selection_marks:
-                    selected = sum(1 for m in selection_marks if m.get("state") == "selected")
+                if _selection_marks:
+                    selected = sum(1 for m in _selection_marks if m.get("state") == "selected")
                     logger.info(
-                        f"☑️ Selection marks detected in {doc_id}: {len(selection_marks)} total, {selected} selected",
-                        extra={"doc_id": doc_id, "total": len(selection_marks), "selected": selected}
+                        f"☑️ Selection marks detected in {_doc_id}: {len(_selection_marks)} total, {selected} selected",
+                        extra={"doc_id": _doc_id, "total": len(_selection_marks), "selected": selected}
                     )
                 
                 # 5. Create KeyValuePair nodes with FOUND_IN edges
-                if all_kvps:
+                if _all_kvps:
                     kvp_data = []
-                    for kvp in all_kvps:
+                    for kvp in _all_kvps:
                         key_text = kvp.get("key", "")
                         value_text = kvp.get("value", "")
                         if not key_text:
                             continue
-                        kvp_id = self._stable_kvp_id(group_id, doc_id, key_text, value_text)
+                        kvp_id = self._stable_kvp_id(group_id, _doc_id, key_text, value_text)
                         kvp_data.append({
                             "id": kvp_id,
                             "group_id": group_id,
@@ -2363,7 +2366,7 @@ Output:
                             "section_id": kvp.get("section_id", ""),
                             "section_path": kvp.get("section_path", []),
                             "searchable_text": f"{key_text}: {value_text}",  # For embedding
-                            "doc_id": doc_id,
+                            "doc_id": _doc_id,
                         })
                     
                     if kvp_data:
@@ -2389,7 +2392,7 @@ Output:
                         )
                         count = result.single()["count"]
                         stats["kvps_created"] += count
-                        logger.info(f"🔑 Created {count} KeyValuePair nodes for {doc_id}")
+                        logger.info(f"🔑 Created {count} KeyValuePair nodes for {_doc_id}")
 
             await self.neo4j_store.arun_in_session(_write_di_metadata)
 

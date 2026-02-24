@@ -72,6 +72,13 @@ class InstrumentationHooks:
         self._buffer_size = 100
         self._flush_interval = 60  # seconds
         self._last_flush = time.time()
+        self._background_tasks: set = set()
+    
+    def _create_background_task(self, coro):
+        """Create a background task with strong reference to prevent GC."""
+        task = asyncio.create_task(coro)
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
     
     def track_query(
         self,
@@ -109,7 +116,7 @@ class InstrumentationHooks:
                 query_id = f"{group_id}-{int(time.time() * 1000)}"
             
             # Log immediately (fire-and-forget)
-            asyncio.create_task(self._log_query_async(
+            self._create_background_task(self._log_query_async(
                 query_id=query_id,
                 group_id=group_id,
                 query=query[:100],  # Truncate for logging
@@ -187,7 +194,7 @@ class InstrumentationHooks:
             metadata: Additional context
         """
         try:
-            asyncio.create_task(self._log_error_async(
+            self._create_background_task(self._log_error_async(
                 group_id=group_id,
                 error_type=error_type,
                 message=message,
@@ -241,7 +248,7 @@ class InstrumentationHooks:
         Delegates to UsageTracker for Cosmos DB persistence.
         """
         try:
-            asyncio.create_task(self._usage_tracker.log_llm_usage(
+            self._create_background_task(self._usage_tracker.log_llm_usage(
                 partition_id=group_id,
                 model=model,
                 prompt_tokens=prompt_tokens,
@@ -271,7 +278,7 @@ class InstrumentationHooks:
         Delegates to UsageTracker for Cosmos DB persistence.
         """
         try:
-            asyncio.create_task(self._usage_tracker.log_embedding_usage(
+            self._create_background_task(self._usage_tracker.log_embedding_usage(
                 partition_id=group_id,
                 model=model,
                 total_tokens=total_tokens,
@@ -298,7 +305,7 @@ class InstrumentationHooks:
         Delegates to UsageTracker for Cosmos DB persistence.
         """
         try:
-            asyncio.create_task(self._usage_tracker.log_doc_intel_usage(
+            self._create_background_task(self._usage_tracker.log_doc_intel_usage(
                 partition_id=group_id,
                 pages_analyzed=pages_analyzed,
                 document_id=document_id,

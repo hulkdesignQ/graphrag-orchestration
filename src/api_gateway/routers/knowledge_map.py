@@ -30,6 +30,9 @@ from src.worker.services.simple_document_analysis_service import (
 
 logger = logging.getLogger(__name__)
 
+# Strong references for fire-and-forget background tasks (prevent GC)
+_background_tasks: set = set()
+
 router = APIRouter(
     prefix="/api/v1/knowledge-map",
     tags=["knowledge-map"],
@@ -384,7 +387,9 @@ async def process_documents(request: ProcessRequest) -> ProcessStartResponse:
     await _operation_store.create(operation_id, request.model_dump())
     
     # Start background processing
-    asyncio.create_task(_process_documents(operation_id, request))
+    task = asyncio.create_task(_process_documents(operation_id, request))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
     
     logger.info(f"Started operation {operation_id} with {len(request.inputs)} documents")
     

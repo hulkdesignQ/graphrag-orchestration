@@ -602,5 +602,5 @@ class FastGraphRAGQueryEngine(CustomQueryEngine):
             messages = [ChatMessage(role="user", content=prompt)]
             response = self.llm.chat(messages)
             return str(response).strip()
-        except:
+        except Exception:
             return answers[0]

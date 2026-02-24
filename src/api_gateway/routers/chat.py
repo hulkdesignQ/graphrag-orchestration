@@ -33,6 +33,9 @@ from src.core.config import settings
 
 logger = structlog.get_logger(__name__)
 
+# Strong references for fire-and-forget background tasks (prevent GC)
+_background_tasks: set = set()
+
 # Routes that should use async pattern (typically >5s execution time)
 ASYNC_ROUTES = {"global", "drift"}
 
@@ -566,7 +569,9 @@ async def _submit_async_job(
     )
     
     # Start background execution
-    asyncio.create_task(_execute_async_job(job_id, query, approach, group_id, folder_id))
+    task = asyncio.create_task(_execute_async_job(job_id, query, approach, group_id, folder_id))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
     
     # Build poll URL
     base_url = str(request.base_url).rstrip("/")

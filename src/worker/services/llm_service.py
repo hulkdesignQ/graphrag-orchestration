@@ -5,6 +5,7 @@ Provides a centralized LLM and Embedding service for all GraphRAG operations.
 """
 
 from typing import Optional, Dict, Any, Callable
+import asyncio
 import logging
 import os
 
@@ -13,6 +14,9 @@ from src.core.services.usage_tracker import UsageTracker
 from src.core.models.usage import UsageType
 
 logger = logging.getLogger(__name__)
+
+# Strong references for fire-and-forget background tasks (prevent GC)
+_background_tasks: set = set()
 
 
 class LLMService:
@@ -292,16 +296,17 @@ class LLMService:
             usage = response.raw.get('usage', {})
             if usage and (group_id or user_id):
                 # Fire-and-forget: schedule async task but don't await
-                import asyncio
                 try:
                     loop = asyncio.get_event_loop()
-                    loop.create_task(UsageTracker().log_llm_usage(
+                    task = loop.create_task(UsageTracker().log_llm_usage(
                         partition_id=group_id or "unknown",
                         user_id=user_id,
                         model=settings.AZURE_OPENAI_DEPLOYMENT_NAME,
                         prompt_tokens=usage.get('prompt_tokens', 0),
                         completion_tokens=usage.get('completion_tokens', 0)
                     ))
+                    _background_tasks.add(task)
+                    task.add_done_callback(_background_tasks.discard)
                 except Exception:
                     pass  # Fire-and-forget: ignore failures
         
@@ -319,16 +324,17 @@ class LLMService:
         
         # Track usage
         if group_id or user_id:
-            import asyncio
             try:
                 loop = asyncio.get_event_loop()
-                loop.create_task(UsageTracker().log_embedding_usage(
+                task = loop.create_task(UsageTracker().log_embedding_usage(
                     partition_id=group_id or "unknown",
                     user_id=user_id,
                     model=settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT,
                     total_tokens=estimated_tokens,
                     dimensions=settings.AZURE_OPENAI_EMBEDDING_DIMENSIONS
                 ))
+                _background_tasks.add(task)
+                task.add_done_callback(_background_tasks.discard)
             except Exception:
                 pass  # Fire-and-forget: ignore failures
         
@@ -346,10 +352,9 @@ class LLMService:
         
         # Track usage
         if group_id or user_id:
-            import asyncio
             try:
                 loop = asyncio.get_event_loop()
-                loop.create_task(UsageTracker().log_embedding_usage(
+                task = loop.create_task(UsageTracker().log_embedding_usage(
                     partition_id=group_id or "unknown",
                     user_id=user_id,
                     model=settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT,
@@ -357,6 +362,8 @@ class LLMService:
                     dimensions=settings.AZURE_OPENAI_EMBEDDING_DIMENSIONS,
                     chunk_count=len(texts)
                 ))
+                _background_tasks.add(task)
+                task.add_done_callback(_background_tasks.discard)
             except Exception:
                 pass  # Fire-and-forget: ignore failures
         

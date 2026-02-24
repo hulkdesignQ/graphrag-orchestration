@@ -707,7 +707,7 @@ class HybridPipeline:
                     continue
                 try:
                     rows = json_lib.loads(rows_json) if isinstance(rows_json, str) else rows_json
-                except:
+                except Exception:
                     continue
                 parsed_tables.append({"headers": headers, "rows": rows})
             
@@ -1196,7 +1196,7 @@ Instructions:
                 try:
                     val = float(m.replace(',', '').replace(' ', ''))
                     all_matches.append((val, "$" + m, 'currency'))
-                except: continue
+                except Exception: continue
                 
             # Add implied matches (medium confidence)
             for m in matches_implied:
@@ -1205,7 +1205,7 @@ Instructions:
                     # Avoid duplicates
                     if not any(existing[0] == val for existing in all_matches):
                         all_matches.append((val, "$" + m, 'implied'))
-                except: continue
+                except Exception: continue
 
             if all_matches:
                 # If query asks for "total", prefer largest amount
@@ -1334,7 +1334,7 @@ Instructions:
                     try:
                         val = float(m.replace('$', '').replace(',', ''))
                         amounts.append((val, m))
-                    except:
+                    except Exception:
                         continue
                 if amounts:
                     if "total" in query_lower:

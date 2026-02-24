@@ -352,7 +352,7 @@ class VectorRAGHandler(BaseRouteHandler):
                     continue
                 try:
                     rows = json.loads(rows_json) if isinstance(rows_json, str) else rows_json
-                except:
+                except Exception:
                     continue
                 parsed_tables.append({"headers": headers, "rows": rows})
             
