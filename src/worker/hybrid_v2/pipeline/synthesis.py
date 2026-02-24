@@ -213,6 +213,7 @@ class EvidenceSynthesizer:
         ner_seed_count: Optional[int] = None,
         doc_scope_enabled: Optional[bool] = None,
         graph_structural_header: Optional[str] = None,
+        language: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Generate a comprehensive response with evidence citations.
@@ -449,6 +450,7 @@ class EvidenceSynthesizer:
             sub_questions=sub_questions,
             prompt_variant=prompt_variant,
             synthesis_model=synthesis_model,
+            language=language,
         )
         
         # Step 4b: Post-process v1_concise — strip any residual bracket
@@ -493,6 +495,26 @@ class EvidenceSynthesizer:
                    is_drift_mode=sub_questions is not None,
                    **context_stats)
         
+        # Determine evidence language from chunk metadata
+        evidence_languages = set()
+        for chunk in text_chunks:
+            lang = (chunk.get("metadata", {}) or {}).get("language") or chunk.get("language")
+            if lang:
+                evidence_languages.add(lang)
+        evidence_language = next(iter(evidence_languages)) if len(evidence_languages) == 1 else (
+            list(evidence_languages) if evidence_languages else None
+        )
+        # Detect language mismatch between requested language and evidence
+        language_mismatch = False
+        if language and evidence_language:
+            req_prefix = language.split("-")[0].lower()
+            if isinstance(evidence_language, str):
+                language_mismatch = evidence_language.split("-")[0].lower() != req_prefix
+            elif isinstance(evidence_language, list):
+                language_mismatch = any(
+                    el.split("-")[0].lower() != req_prefix for el in evidence_language
+                )
+
         return {
             "response": response,
             "citations": citations,
@@ -502,6 +524,8 @@ class EvidenceSynthesizer:
             "llm_context": context if include_context else None,
             "context_stats": context_stats,
             "sentence_citation_map": _sentence_lookup,
+            "evidence_language": evidence_language,
+            "language_mismatch": language_mismatch,
         }
     
     async def synthesize_with_graph_context(
@@ -2295,6 +2319,7 @@ Response:"""
         sub_questions: Optional[List[str]] = None,
         prompt_variant: Optional[str] = None,
         synthesis_model: Optional[str] = None,
+        language: Optional[str] = None,
     ) -> str:
         """Generate the final response with citation requirements."""
         
@@ -2339,6 +2364,10 @@ Response:"""
                     "audit_trail": self._get_audit_trail_prompt(query, context)
                 }
                 prompt = prompts.get(response_type, prompts["detailed_report"])
+        
+        # Inject language instruction if specified
+        if language:
+            prompt += f"\n\nIMPORTANT: Respond entirely in {language}."
         
         try:
             response = await llm.acomplete(prompt)

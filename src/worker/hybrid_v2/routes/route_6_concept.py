@@ -78,6 +78,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         prompt_variant: Optional[str] = None,
         synthesis_model: Optional[str] = None,
         include_context: bool = False,
+        language: Optional[str] = None,
     ) -> RouteResult:
         """Execute Route 6: Community-aware concept synthesis.
 
@@ -310,6 +311,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         response_text = await self._synthesize(
             query, community_data, section_headings, sentence_evidence,
             entity_doc_map=entity_doc_map,
+            language=language,
         )
         timings_ms["step_3_synthesis_ms"] = int(
             (time.perf_counter() - t0) * 1000
@@ -411,6 +413,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         section_headings: List[Dict[str, Any]],
         sentence_evidence: List[Dict[str, Any]],
         entity_doc_map: Optional[Dict[str, List[str]]] = None,
+        language: Optional[str] = None,
     ) -> str:
         """Synthesize community summaries + section headings + sentence evidence in one LLM call.
 
@@ -511,6 +514,10 @@ class ConceptSearchHandler(BaseRouteHandler):
             sentence_evidence=evidence_text,
             entity_coverage=entity_coverage_text,
         )
+
+        # Inject language instruction if specified
+        if language:
+            prompt += f"\n\nIMPORTANT: Respond entirely in {language}."
 
         try:
             response = await self.llm.acomplete(prompt)

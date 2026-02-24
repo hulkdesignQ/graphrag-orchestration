@@ -349,6 +349,7 @@ class HybridPipeline:
         prompt_variant: Optional[str] = None,
         synthesis_model: Optional[str] = None,
         include_context: bool = False,
+        language: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Execute a query through the appropriate route.
@@ -389,6 +390,7 @@ class HybridPipeline:
                 prompt_variant=prompt_variant,
                 synthesis_model=synthesis_model,
                 include_context=include_context,
+                language=language,
                 **extra_kwargs,
             )
             # Convert RouteResult to dict for API compatibility
@@ -2202,6 +2204,7 @@ Sub-questions:"""
         synthesis_model: Optional[str] = None,
         include_context: bool = False,
         weight_profile: Optional[str] = None,
+        language: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Force a specific route regardless of classification.
@@ -2230,6 +2233,7 @@ Sub-questions:"""
                 prompt_variant=prompt_variant,
                 synthesis_model=synthesis_model,
                 include_context=include_context,
+                language=language,
                 **extra_kwargs,
             )
             return result.to_dict()

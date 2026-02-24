@@ -179,5 +179,20 @@
 
     "overallSettings": "Algemene instellingen",
     "searchSettings": "Zoekinstellingen",
-    "llmSettings": "LLM-instellingen"
+    "llmSettings": "LLM-instellingen",
+
+    "fileToolbar": {
+        "searchPlaceholder": "Bestanden zoeken...",
+        "fileCount_one": "{{count}} bestand",
+        "fileCount_other": "{{count}} bestanden",
+        "selected": "{{count}} geselecteerd",
+        "sortByName": "Sorteren op naam",
+        "name": "Naam",
+        "sortByType": "Sorteren op type",
+        "type": "Type",
+        "deselect": "Deselecteren",
+        "delete": "Verwijderen ({{count}})",
+        "selectAll": "Alles selecteren",
+        "refresh": "Vernieuwen"
+    }
 }

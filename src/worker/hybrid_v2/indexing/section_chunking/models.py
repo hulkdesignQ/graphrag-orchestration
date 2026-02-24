@@ -7,6 +7,17 @@ to enable structure-aware retrieval and coverage control.
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from ...utils.language import estimate_tokens_cjk, is_cjk
+
+
+def _estimate_tokens(text: str, locale: Optional[str] = None) -> int:
+    """Estimate token count, using CJK-aware counting when appropriate."""
+    if not text:
+        return 0
+    if locale and is_cjk(locale):
+        return estimate_tokens_cjk(text)
+    return len(text.split())
+
 
 @dataclass
 class SectionNode:
@@ -45,11 +56,13 @@ class SectionNode:
     # Token count (computed during processing)
     token_count: int = 0
     
+    # Language locale for CJK-aware token counting
+    locale: Optional[str] = None
+    
     def __post_init__(self):
         """Compute token count from content."""
         if self.content and self.token_count == 0:
-            # Simple whitespace tokenization; override with tiktoken if needed
-            self.token_count = len(self.content.split())
+            self.token_count = _estimate_tokens(self.content, self.locale)
 
 
 @dataclass

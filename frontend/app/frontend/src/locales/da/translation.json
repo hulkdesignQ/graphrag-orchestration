@@ -159,5 +159,20 @@
     },
     "overallSettings": "Overordnede indstillinger",
     "searchSettings": "Søgeindstillinger",
-    "llmSettings": "LLM-indstillinger"
+    "llmSettings": "LLM-indstillinger",
+
+    "fileToolbar": {
+        "searchPlaceholder": "Søg filer...",
+        "fileCount_one": "{{count}} fil",
+        "fileCount_other": "{{count}} filer",
+        "selected": "{{count}} valgt",
+        "sortByName": "Sortér efter navn",
+        "name": "Navn",
+        "sortByType": "Sortér efter type",
+        "type": "Type",
+        "deselect": "Fravælg",
+        "delete": "Slet ({{count}})",
+        "selectAll": "Vælg alle",
+        "refresh": "Opdater"
+    }
 }

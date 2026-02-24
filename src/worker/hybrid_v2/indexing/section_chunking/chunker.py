@@ -21,7 +21,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from .models import SectionChunk, SectionNode, is_summary_section
+from .models import SectionChunk, SectionNode, is_summary_section, _estimate_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +84,7 @@ class SectionAwareChunker:
             return []
         
         # Step 1: Extract section tree from DI metadata
-        sections = self._extract_sections_from_di(di_units, doc_id)
+        sections = self._extract_sections_from_di(di_units, doc_id, doc_language)
         
         if not sections:
             # Fallback: No sections found, use fixed chunking
@@ -120,6 +120,7 @@ class SectionAwareChunker:
         self,
         di_units: Sequence[Any],
         doc_id: str,
+        doc_language: Optional[str] = None,
     ) -> List[SectionNode]:
         """Extract section structure from DI LlamaDocuments.
         
@@ -189,6 +190,8 @@ class SectionAwareChunker:
                     # Polygon geometry for pixel-accurate highlighting
                     sentences=sentences,
                     page_dimensions=page_dimensions,
+                    # Language locale for CJK-aware token counting
+                    locale=doc_language,
                 )
             )
         
@@ -411,7 +414,7 @@ class SectionAwareChunker:
             if not para:
                 continue
             
-            para_tokens = len(para.split())
+            para_tokens = _estimate_tokens(para, doc_language)
             
             if current_tokens + para_tokens <= max_tokens:
                 # Add to current chunk
@@ -467,7 +470,7 @@ class SectionAwareChunker:
                     words = current_text.split()
                     overlap_text = " ".join(words[-overlap:]) if len(words) > overlap else ""
                     current_text = overlap_text + "\n\n" + para if overlap_text else para
-                    current_tokens = len(current_text.split())
+                    current_tokens = _estimate_tokens(current_text, doc_language)
                 else:
                     current_text = para
                     current_tokens = para_tokens
@@ -564,7 +567,7 @@ class SectionAwareChunker:
                     section_path=[],
                     section_chunk_index=idx,
                     section_chunk_total=len(nodes),
-                    tokens=len(text.split()),
+                    tokens=_estimate_tokens(text, doc_language),
                     is_section_start=(idx == 0),
                     is_summary_section=(idx == 0),  # First chunk as pseudo-summary
                     language=doc_language,

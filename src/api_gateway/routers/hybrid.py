@@ -211,6 +211,10 @@ class HybridQueryRequest(BaseModel):
         default=False,
         description="If true, include the full LLM context (retrieved evidence assembled into the prompt) in the response metadata under 'llm_context'. Useful for debugging retrieval vs LLM issues."
     )
+    language: Optional[str] = Field(
+        default=None,
+        description="ISO 639-1 language code for the response (e.g., 'en', 'fr', 'ja'). When set, the synthesis LLM is instructed to respond in this language. If None, the LLM responds in the language of the query."
+    )
 
 
 class HybridQueryResponse(BaseModel):
@@ -506,9 +510,10 @@ async def hybrid_query(request: Request, body: HybridQueryRequest):
                 prompt_variant=body.prompt_variant,
                 synthesis_model=body.synthesis_model,
                 include_context=body.include_context,
+                language=body.language,
             )
         else:
-            result = await pipeline.query(body.query, body.response_type, knn_config=body.knn_config, prompt_variant=body.prompt_variant, synthesis_model=body.synthesis_model, include_context=body.include_context)
+            result = await pipeline.query(body.query, body.response_type, knn_config=body.knn_config, prompt_variant=body.prompt_variant, synthesis_model=body.synthesis_model, include_context=body.include_context, language=body.language)
         
         # Fire-and-forget instrumentation tracking
         latency_ms = (time.time() - start_time) * 1000

@@ -1,3 +1,5 @@
+import { useTranslation } from "react-i18next";
+
 import styles from "../../pages/files/Files.module.css";
 
 interface FileToolbarProps {
@@ -27,6 +29,7 @@ export const FileToolbar = ({
     onDeleteSelected,
     onRefresh,
 }: FileToolbarProps) => {
+    const { t } = useTranslation();
     const arrow = sortAsc ? "↑" : "↓";
 
     return (
@@ -34,48 +37,48 @@ export const FileToolbar = ({
             <input
                 className={styles.searchBox}
                 type="text"
-                placeholder="Search files..."
+                placeholder={t("fileToolbar.searchPlaceholder")}
                 value={searchQuery}
                 onChange={(e) => onSearchChange(e.target.value)}
             />
 
             <span className={styles.toolbarMeta}>
-                {fileCount} file{fileCount !== 1 ? "s" : ""}
-                {selectedCount > 0 && ` · ${selectedCount} selected`}
+                {t("fileToolbar.fileCount", { count: fileCount })}
+                {selectedCount > 0 && ` · ${t("fileToolbar.selected", { count: selectedCount })}`}
             </span>
 
             <button
                 className={`${styles.toolbarBtn} ${sortBy === "name" ? styles.sortActive : ""}`}
                 onClick={() => onSortChange("name")}
-                title="Sort by name"
+                title={t("fileToolbar.sortByName")}
             >
-                Name {sortBy === "name" ? arrow : ""}
+                {t("fileToolbar.name")} {sortBy === "name" ? arrow : ""}
             </button>
 
             <button
                 className={`${styles.toolbarBtn} ${sortBy === "ext" ? styles.sortActive : ""}`}
                 onClick={() => onSortChange("ext")}
-                title="Sort by type"
+                title={t("fileToolbar.sortByType")}
             >
-                Type {sortBy === "ext" ? arrow : ""}
+                {t("fileToolbar.type")} {sortBy === "ext" ? arrow : ""}
             </button>
 
             {selectedCount > 0 ? (
                 <>
                     <button className={styles.toolbarBtn} onClick={onSelectNone}>
-                        Deselect
+                        {t("fileToolbar.deselect")}
                     </button>
                     <button className={styles.toolbarBtnDanger} onClick={onDeleteSelected}>
-                        🗑️ Delete ({selectedCount})
+                        🗑️ {t("fileToolbar.delete", { count: selectedCount })}
                     </button>
                 </>
             ) : (
                 <button className={styles.toolbarBtn} onClick={onSelectAll}>
-                    Select All
+                    {t("fileToolbar.selectAll")}
                 </button>
             )}
 
-            <button className={styles.toolbarBtn} onClick={onRefresh} title="Refresh">
+            <button className={styles.toolbarBtn} onClick={onRefresh} title={t("fileToolbar.refresh")}>
                 🔄
             </button>
         </div>

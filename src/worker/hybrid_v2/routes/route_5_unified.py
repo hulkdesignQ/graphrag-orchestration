@@ -94,6 +94,7 @@ class UnifiedSearchHandler(BaseRouteHandler):
         synthesis_model: Optional[str] = None,
         include_context: bool = False,
         weight_profile: Optional[str] = None,
+        language: Optional[str] = None,
     ) -> RouteResult:
         """Execute Route 5: Unified Hierarchical Seed PPR.
 
@@ -470,6 +471,7 @@ class UnifiedSearchHandler(BaseRouteHandler):
             synthesis_model=synthesis_model,
             include_context=include_context,
             ner_seed_count=len(entity_seed_names),
+            language=language,
         )
 
         timings_ms["step_5_synthesis_ms"] = int(

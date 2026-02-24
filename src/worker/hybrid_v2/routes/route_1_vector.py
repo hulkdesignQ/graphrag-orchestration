@@ -44,6 +44,7 @@ class VectorRAGHandler(BaseRouteHandler):
         prompt_variant: Optional[str] = None,
         synthesis_model: Optional[str] = None,
         include_context: bool = False,
+        language: Optional[str] = None,
     ) -> RouteResult:
         """
         Execute Route 1: Vector RAG for fast fact lookups.

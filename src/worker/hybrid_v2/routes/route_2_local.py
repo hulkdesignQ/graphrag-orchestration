@@ -78,6 +78,7 @@ class LocalSearchHandler(BaseRouteHandler):
         prompt_variant: Optional[str] = None,
         synthesis_model: Optional[str] = None,
         include_context: bool = False,
+        language: Optional[str] = None,
     ) -> RouteResult:
         """
         Execute Route 2: LazyGraphRAG for entity-focused queries.
@@ -211,6 +212,7 @@ class LocalSearchHandler(BaseRouteHandler):
             coverage_chunks=skeleton_coverage_chunks if skeleton_coverage_chunks else None,
             ner_seed_count=len(seed_entities),
             doc_scope_enabled=False,
+            language=language,
         )
         timings_ms["stage_2.3_synthesis_ms"] = int((time.perf_counter() - t0) * 1000)
         timings_ms["total_ms"] = int((time.perf_counter() - t_route_start) * 1000)

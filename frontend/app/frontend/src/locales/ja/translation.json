@@ -176,5 +176,20 @@
     },
     "overallSettings": "全体設定",
     "searchSettings": "検索設定",
-    "llmSettings": "LLM設定"
+    "llmSettings": "LLM設定",
+
+    "fileToolbar": {
+        "searchPlaceholder": "ファイルを検索...",
+        "fileCount_one": "{{count}} ファイル",
+        "fileCount_other": "{{count}} ファイル",
+        "selected": "{{count}} 件選択中",
+        "sortByName": "名前で並べ替え",
+        "name": "名前",
+        "sortByType": "種類で並べ替え",
+        "type": "種類",
+        "deselect": "選択解除",
+        "delete": "削除 ({{count}})",
+        "selectAll": "すべて選択",
+        "refresh": "更新"
+    }
 }

@@ -223,6 +223,7 @@ class HippoRAG2Handler(BaseRouteHandler):
         synthesis_model: Optional[str] = None,
         include_context: bool = False,
         weight_profile: Optional[str] = None,
+        language: Optional[str] = None,
     ) -> RouteResult:
         """Execute Route 7: True HippoRAG 2 retrieval pipeline."""
         enable_timings = os.getenv(
@@ -531,6 +532,7 @@ class HippoRAG2Handler(BaseRouteHandler):
             include_context=include_context,
             pre_fetched_chunks=pre_fetched_chunks,
             graph_structural_header=graph_structural_header,
+            language=language,
         )
 
         timings_ms["step_5_synthesis_ms"] = int((time.perf_counter() - t0) * 1000)
@@ -1096,10 +1098,15 @@ class HippoRAG2Handler(BaseRouteHandler):
             {n.lower() for n in entity_names} if entity_names else set()
         )
 
+        _MAX_FALLBACK_SENTS = 8   # cap non-entity chunks to first N sentences
+
         def _focused_text(
             sentence_texts: List[str], full_text: str
         ) -> str:
             if not sentence_texts or not ent_lower:
+                # No sentence data or no entities — use capped fallback
+                if sentence_texts and len(sentence_texts) > _MAX_FALLBACK_SENTS:
+                    return " ".join(sentence_texts[:_MAX_FALLBACK_SENTS])
                 return full_text
 
             # Find indices of sentences mentioning any PPR entity
@@ -1112,7 +1119,10 @@ class HippoRAG2Handler(BaseRouteHandler):
                         break
 
             if not hit_indices:
-                return full_text  # no entity matches → keep full
+                # No entity matches — return capped first sentences
+                if len(sentence_texts) > _MAX_FALLBACK_SENTS:
+                    return " ".join(sentence_texts[:_MAX_FALLBACK_SENTS])
+                return full_text
 
             # Expand each hit ±1 and merge overlapping ranges
             ranges: list[tuple[int, int]] = []
@@ -1145,6 +1155,8 @@ class HippoRAG2Handler(BaseRouteHandler):
             key = (r.get("document_id", ""), r.get("section_title", ""))
             section_groups[key].append(r)
 
+        _MAX_MERGE = 2  # merge at most 2 consecutive chunks to prevent mega-blocks
+
         merged_results: list[dict] = []
         for _key, group in section_groups.items():
             group.sort(key=lambda x: x.get("chunk_index", 0))
@@ -1153,7 +1165,8 @@ class HippoRAG2Handler(BaseRouteHandler):
                 prev = merged[-1]
                 prev_idx = prev.get("chunk_index", 0)
                 curr_idx = r.get("chunk_index", 0)
-                if curr_idx == prev_idx + 1:
+                merge_count = len(prev.get("_merged_ids", [prev.get("chunk_id", "")]))
+                if curr_idx == prev_idx + 1 and merge_count < _MAX_MERGE:
                     # Adjacent — merge sentences and text
                     prev_sents = prev.get("sentence_texts") or []
                     curr_sents = r.get("sentence_texts") or []

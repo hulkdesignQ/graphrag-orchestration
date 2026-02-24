@@ -103,6 +103,7 @@ class DRIFTHandler(BaseRouteHandler):
         prompt_variant: Optional[str] = None,
         synthesis_model: Optional[str] = None,
         include_context: bool = False,
+        language: Optional[str] = None,
     ) -> RouteResult:
         """
         Execute Route 4: DRIFT for complex multi-hop queries.
@@ -435,6 +436,7 @@ class DRIFTHandler(BaseRouteHandler):
             synthesis_model=synthesis_model,
             include_context=include_context,
             ner_seed_count=len(all_seeds),
+            language=language,
         )
         logger.info("stage_4.4_complete")
         

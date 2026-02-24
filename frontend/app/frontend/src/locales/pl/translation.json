@@ -179,5 +179,22 @@
 
     "overallSettings": "Overall settings",
     "searchSettings": "Search settings",
-    "llmSettings": "LLM settings"
+    "llmSettings": "LLM settings",
+
+    "fileToolbar": {
+        "searchPlaceholder": "Szukaj plików...",
+        "fileCount_one": "{{count}} plik",
+        "fileCount_few": "{{count}} pliki",
+        "fileCount_many": "{{count}} plików",
+        "fileCount_other": "{{count}} plików",
+        "selected": "{{count}} zaznaczonych",
+        "sortByName": "Sortuj według nazwy",
+        "name": "Nazwa",
+        "sortByType": "Sortuj według typu",
+        "type": "Typ",
+        "deselect": "Odznacz",
+        "delete": "Usuń ({{count}})",
+        "selectAll": "Zaznacz wszystko",
+        "refresh": "Odśwież"
+    }
 }

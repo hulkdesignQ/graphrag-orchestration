@@ -77,6 +77,7 @@ class GlobalSearchHandler(BaseRouteHandler):
         prompt_variant: Optional[str] = None,
         synthesis_model: Optional[str] = None,
         include_context: bool = False,
+        language: Optional[str] = None,
     ) -> RouteResult:
         """Execute Route 3 v3: Sentence-enriched Map-Reduce global search.
 
@@ -269,6 +270,7 @@ class GlobalSearchHandler(BaseRouteHandler):
         t0 = time.perf_counter()
         response_text = await self._reduce_with_evidence(
             query, response_type, all_claims, sentence_evidence,
+            language=language,
         )
         timings_ms["step_3_reduce_ms"] = int((time.perf_counter() - t0) * 1000)
         timings_ms["total_ms"] = int((time.perf_counter() - t_route_start) * 1000)
@@ -672,6 +674,7 @@ class GlobalSearchHandler(BaseRouteHandler):
         response_type: str,
         all_claims: List[str],
         sentence_evidence: List[Dict[str, Any]],
+        language: Optional[str] = None,
     ) -> str:
         """Synthesize MAP claims + sentence evidence into final response.
 
@@ -718,6 +721,10 @@ class GlobalSearchHandler(BaseRouteHandler):
             community_claims=claims_text,
             sentence_evidence=evidence_text,
         )
+
+        # Inject language instruction if specified
+        if language:
+            prompt += f"\n\nIMPORTANT: Respond entirely in {language}."
 
         try:
             response = await self.llm.acomplete(prompt)

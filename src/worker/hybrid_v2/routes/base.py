@@ -151,7 +151,7 @@ class BaseRouteHandler:
     All shared retrieval methods are defined here.
     
     Subclasses must implement:
-        async def execute(self, query: str, response_type: str = "summary", knn_config: Optional[str] = None, prompt_variant: Optional[str] = None, synthesis_model: Optional[str] = None, include_context: bool = False) -> RouteResult
+        async def execute(self, query: str, response_type: str = "summary", knn_config: Optional[str] = None, prompt_variant: Optional[str] = None, synthesis_model: Optional[str] = None, include_context: bool = False, language: Optional[str] = None) -> RouteResult
     """
 
     # Route identifier (override in subclasses)
@@ -238,7 +238,7 @@ class BaseRouteHandler:
             logger.warning("language_spans_fetch_failed", error=str(e))
             return {}
 
-    async def execute(self, query: str, response_type: str = "summary", knn_config: Optional[str] = None, prompt_variant: Optional[str] = None, synthesis_model: Optional[str] = None, include_context: bool = False) -> RouteResult:
+    async def execute(self, query: str, response_type: str = "summary", knn_config: Optional[str] = None, prompt_variant: Optional[str] = None, synthesis_model: Optional[str] = None, include_context: bool = False, language: Optional[str] = None) -> RouteResult:
         """Execute the route on a query.
         
         Args:

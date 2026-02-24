@@ -179,5 +179,20 @@
 
     "overallSettings": "Genel ayarlar",
     "searchSettings": "Arama ayarları",
-    "llmSettings": "LLM ayarları"
+    "llmSettings": "LLM ayarları",
+
+    "fileToolbar": {
+        "searchPlaceholder": "Dosya ara...",
+        "fileCount_one": "{{count}} dosya",
+        "fileCount_other": "{{count}} dosya",
+        "selected": "{{count}} seçili",
+        "sortByName": "Ada göre sırala",
+        "name": "Ad",
+        "sortByType": "Türe göre sırala",
+        "type": "Tür",
+        "deselect": "Seçimi kaldır",
+        "delete": "Sil ({{count}})",
+        "selectAll": "Tümünü seç",
+        "refresh": "Yenile"
+    }
 }

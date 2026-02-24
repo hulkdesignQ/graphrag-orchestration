@@ -180,5 +180,20 @@
 
     "overallSettings": "Impostazioni generali",
     "searchSettings": "Impostazioni di ricerca",
-    "llmSettings": "Impostazioni LLM"
+    "llmSettings": "Impostazioni LLM",
+
+    "fileToolbar": {
+        "searchPlaceholder": "Cerca file...",
+        "fileCount_one": "{{count}} file",
+        "fileCount_other": "{{count}} file",
+        "selected": "{{count}} selezionato/i",
+        "sortByName": "Ordina per nome",
+        "name": "Nome",
+        "sortByType": "Ordina per tipo",
+        "type": "Tipo",
+        "deselect": "Deseleziona",
+        "delete": "Elimina ({{count}})",
+        "selectAll": "Seleziona tutto",
+        "refresh": "Aggiorna"
+    }
 }
