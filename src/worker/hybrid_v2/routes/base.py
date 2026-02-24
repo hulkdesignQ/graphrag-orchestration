@@ -571,6 +571,7 @@ class BaseRouteHandler:
 
         await self._ensure_textchunk_fulltext_index()
         group_id = self.group_id
+        folder_id = self.folder_id
 
         if use_phrase_boost:
             bm25_query = self._build_phrase_aware_fulltext_query(query_text)
@@ -585,6 +586,14 @@ class BaseRouteHandler:
         driver = self.neo4j_driver
 
         def _run_sync():
+            # Build folder filter clause - applied after document join
+            folder_filter = ""
+            if folder_id:
+                folder_filter = (
+                    "\n            WITH node, rrfScore, hasBM25, hasVector, d, top_k"
+                    "\n            WHERE d IS NULL OR (d)-[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})"
+                )
+
             cypher = f"""
             CYPHER 25
             WITH $bm25_query AS bm25_query, $group_id AS group_id,
@@ -630,6 +639,7 @@ class BaseRouteHandler:
                  vectorRank IS NOT NULL AS hasVector
 
             OPTIONAL MATCH (node)-[:IN_DOCUMENT]->(d:Document {{group_id: group_id}})
+            {folder_filter}
             OPTIONAL MATCH (node)-[:IN_SECTION]->(s:Section)
 
             RETURN node.id AS id, node.text AS text,
@@ -645,8 +655,7 @@ class BaseRouteHandler:
             rows = []
             try:
                 with driver.session() as session:
-                    result = session.run(
-                        cypher,
+                    params = dict(
                         bm25_query=bm25_query,
                         embedding=embedding,
                         group_id=group_id,
@@ -655,6 +664,9 @@ class BaseRouteHandler:
                         rrf_k=rrf_k,
                         top_k=top_k,
                     )
+                    if folder_id:
+                        params["folder_id"] = folder_id
+                    result = session.run(cypher, **params)
                     for r in result:
                         chunk = {
                             "id": r["id"],
@@ -705,6 +717,7 @@ class BaseRouteHandler:
 
         await self._ensure_textchunk_fulltext_index()
         group_id = self.group_id
+        folder_id = self.folder_id
         driver = self.neo4j_driver
 
         if use_phrase_boost:
@@ -716,12 +729,19 @@ class BaseRouteHandler:
             return []
 
         def _run_sync():
-            cypher = """
+            # Build folder filter clause
+            folder_filter = ""
+            if folder_id:
+                folder_filter = "AND (d)-[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})"
+
+            cypher = f"""
             CALL db.index.fulltext.queryNodes('textchunk_fulltext', $search_query)
             YIELD node AS chunk, score AS bm25_score
             WHERE chunk.group_id = $group_id
 
-            OPTIONAL MATCH (chunk)-[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
+            OPTIONAL MATCH (chunk)-[:IN_DOCUMENT]->(d:Document {{group_id: $group_id}})
+            WITH chunk, d, bm25_score
+            WHERE d IS NULL OR d IS NOT NULL {folder_filter}
             OPTIONAL MATCH (chunk)-[:IN_SECTION]->(s:Section)
 
             RETURN chunk.id AS id, chunk.text AS text,
@@ -737,12 +757,14 @@ class BaseRouteHandler:
             rows = []
             try:
                 with driver.session() as session:
-                    result = session.run(
-                        cypher,
+                    params = dict(
                         search_query=search_query,
                         group_id=group_id,
                         top_k=top_k,
                     )
+                    if folder_id:
+                        params["folder_id"] = folder_id
+                    result = session.run(cypher, **params)
                     for r in result:
                         chunk = {
                             "id": r["id"],

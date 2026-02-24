@@ -775,6 +775,8 @@ class HippoRAG2Handler(BaseRouteHandler):
               <-[:MENTIONS]-(tc:TextChunk {group_id: $group_id})
               -[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
         WHERE e.type IN $entity_types
+          AND ($folder_id IS NULL
+               OR (d)-[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id}))
         WITH e, d, count(tc) AS doc_mentions,
              collect(tc.text)[0] AS doc_sample_chunk
         OPTIONAL MATCH (e)-[r:RELATED_TO]-(e2:Entity {group_id: $group_id})
@@ -799,6 +801,7 @@ class HippoRAG2Handler(BaseRouteHandler):
                     group_id=group_id,
                     entity_types=entity_types,
                     role_rel_types=_STRUCTURED_ROLE_TYPES,
+                    folder_id=self.folder_id,
                 )
                 return [
                     {
@@ -882,6 +885,7 @@ class HippoRAG2Handler(BaseRouteHandler):
             return []
 
         group_id = self.group_id
+        folder_id = self.folder_id
 
         # Step 1: Try sentence-level DPR (sharp, single-sentence embeddings)
         sentence_cypher = """CYPHER 25
@@ -890,6 +894,10 @@ class HippoRAG2Handler(BaseRouteHandler):
             SEARCH s IN (VECTOR INDEX sentence_embeddings_v2 FOR $embedding WHERE s.group_id = $group_id LIMIT $sentence_top_k)
             SCORE AS score
             MATCH (s)-[:PART_OF]->(c:TextChunk {group_id: $group_id})
+            OPTIONAL MATCH (c)-[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
+            WITH c, score, d
+            WHERE $folder_id IS NULL OR d IS NULL
+               OR (d)-[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})
             RETURN c.id AS chunk_id, score
         }
         RETURN chunk_id, max(score) AS score
@@ -908,6 +916,7 @@ class HippoRAG2Handler(BaseRouteHandler):
                         group_id=group_id,
                         sentence_top_k=sentence_top_k,
                         top_k=top_k,
+                        folder_id=folder_id,
                     )
                     return [(r["chunk_id"], r["score"]) for r in records]
 
@@ -929,6 +938,10 @@ class HippoRAG2Handler(BaseRouteHandler):
             MATCH (c:TextChunk)
             SEARCH c IN (VECTOR INDEX chunk_embeddings_v2 FOR $embedding WHERE c.group_id = $group_id LIMIT $top_k)
             SCORE AS score
+            OPTIONAL MATCH (c)-[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
+            WITH c, score, d
+            WHERE $folder_id IS NULL OR d IS NULL
+               OR (d)-[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})
             RETURN c.id AS chunk_id, score
         }
         RETURN chunk_id, score
@@ -943,6 +956,7 @@ class HippoRAG2Handler(BaseRouteHandler):
                         embedding=query_embedding,
                         group_id=group_id,
                         top_k=top_k,
+                        folder_id=folder_id,
                     )
                     return [(r["chunk_id"], r["score"]) for r in records]
 
@@ -979,6 +993,9 @@ class HippoRAG2Handler(BaseRouteHandler):
         UNWIND $chunk_ids AS cid
         MATCH (c:TextChunk {id: cid, group_id: $group_id})
         OPTIONAL MATCH (c)-[:IN_DOCUMENT]->(d:Document)
+        WITH c, d
+        WHERE $folder_id IS NULL OR d IS NULL
+           OR (d)-[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})
         OPTIONAL MATCH (c)-[:IN_SECTION]->(s:Section)
         RETURN c.id AS chunk_id, c.text AS text,
                c.chunk_index AS chunk_index,
@@ -995,6 +1012,7 @@ class HippoRAG2Handler(BaseRouteHandler):
                         cypher,
                         chunk_ids=chunk_ids,
                         group_id=group_id,
+                        folder_id=self.folder_id,
                     )
                     return [dict(r) for r in records]
 
@@ -1188,6 +1206,9 @@ class HippoRAG2Handler(BaseRouteHandler):
 
         OPTIONAL MATCH (sent)-[:PART_OF]->(chunk:TextChunk)
         OPTIONAL MATCH (sent)-[:IN_DOCUMENT]->(doc:Document)
+        WITH sent, score, chunk, doc
+        WHERE $folder_id IS NULL OR doc IS NULL
+           OR (doc)-[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})
 
         RETURN sent.id AS sentence_id,
                sent.text AS text,
@@ -1212,6 +1233,7 @@ class HippoRAG2Handler(BaseRouteHandler):
                         group_id=group_id,
                         top_k=top_k,
                         threshold=threshold,
+                        folder_id=self.folder_id,
                     )
                     return [dict(r) for r in records]
 
