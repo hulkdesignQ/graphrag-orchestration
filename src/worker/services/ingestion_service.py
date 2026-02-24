@@ -12,12 +12,46 @@ For PDFs, uses a lightweight local parser (pypdf).
 """
 
 from typing import Any, Dict, List, Union
+import ipaddress
 import logging
 import io
+from urllib.parse import urlparse
 
 import requests
 
 logger = logging.getLogger(__name__)
+
+# IP ranges that must be blocked to prevent SSRF attacks
+_BLOCKED_IP_RANGES = [
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("169.254.0.0/16"),  # Cloud metadata
+    ipaddress.ip_network("::1/128"),
+    ipaddress.ip_network("fc00::/7"),
+    ipaddress.ip_network("fe80::/10"),
+]
+
+
+def _validate_url(url: str) -> None:
+    """Block requests to internal/private networks."""
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"Unsupported URL scheme: {parsed.scheme}")
+    hostname = parsed.hostname
+    if not hostname:
+        raise ValueError("URL has no hostname")
+    import socket
+    try:
+        resolved = socket.getaddrinfo(hostname, None)
+        for _, _, _, _, sockaddr in resolved:
+            addr = ipaddress.ip_address(sockaddr[0])
+            for blocked in _BLOCKED_IP_RANGES:
+                if addr in blocked:
+                    raise ValueError(f"URL resolves to blocked IP range")
+    except socket.gaierror:
+        raise ValueError(f"Cannot resolve hostname: {hostname}")
 
 
 class IngestionService:
@@ -44,6 +78,7 @@ class IngestionService:
         return "\n".join([t for t in text_parts if t])
 
     def _fetch_url_text(self, url: str) -> str:
+        _validate_url(url)
         resp = requests.get(url, timeout=30)
         resp.raise_for_status()
         ctype = (resp.headers.get("content-type") or "").lower()

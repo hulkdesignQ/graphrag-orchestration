@@ -287,8 +287,9 @@ app.add_middleware(
         "http://localhost:50505",  # Legacy Quart port (if still used locally)
     ],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Group-ID", "X-Algorithm-Version",
+                   "X-Admin-Key", "X-Correlation-ID", "Accept", "Accept-Language"],
 )
 
 # Custom Middleware (order matters: first added = last executed)
@@ -304,11 +305,19 @@ app.add_middleware(VersionHeaderMiddleware)
 app.add_middleware(GroupIsolationMiddleware)
 
 # 4. JWT Authentication - validates Azure Easy Auth tokens and extracts tenant claims
-# Set require_auth=False for development without Easy Auth
+# SECURITY: REQUIRE_AUTH defaults to False for local dev. Set REQUIRE_AUTH=true in production.
+_require_auth = settings.REQUIRE_AUTH if hasattr(settings, "REQUIRE_AUTH") else False
+if not _require_auth:
+    import warnings
+    warnings.warn(
+        "REQUIRE_AUTH is False — all API endpoints accept unauthenticated requests. "
+        "Set REQUIRE_AUTH=true before deploying to production.",
+        stacklevel=1,
+    )
 app.add_middleware(
     JWTAuthMiddleware,
     auth_type=settings.AUTH_TYPE if hasattr(settings, "AUTH_TYPE") else "B2B",
-    require_auth=settings.REQUIRE_AUTH if hasattr(settings, "REQUIRE_AUTH") else False
+    require_auth=_require_auth,
 )
 
 # ============================================================================

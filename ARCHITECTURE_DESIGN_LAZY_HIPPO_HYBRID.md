@@ -10297,4 +10297,110 @@ Two questions regressed with entity expansion enabled:
 | LLM Calls per Query | N+1 (MAP+REDUCE) | **1** | **significant** |
 | Negative Tests | 9/9 | 9/9 | same |
 
+## 35. Azure Key Vault Integration — Secret Management (February 24, 2026)
+
+### 35.1. Motivation
+
+Security audit identified **14 plaintext secrets** loaded purely from environment variables / `.env` files, plus **3 git-tracked files** containing hardcoded production credentials (Neo4j passwords, Azure OpenAI API key). This violates least-privilege principles and creates credential sprawl across deployment environments.
+
+### 35.2. Architecture
+
+The integration uses Azure Key Vault as the centralized secret store, accessed via `DefaultAzureCredential` from the existing `azure-identity` SDK. Secrets are loaded **once at process startup** and injected into environment variables before Pydantic `BaseSettings` reads them.
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     Process Startup                          │
+│                                                              │
+│  1. AZURE_KEY_VAULT_URL env var set?                         │
+│     ├─ YES → DefaultAzureCredential authenticates            │
+│     │        → SecretClient.list_properties_of_secrets()     │
+│     │        → Load enabled secrets into os.environ          │
+│     │        → Pydantic BaseSettings reads from env          │
+│     └─ NO  → Pydantic reads from .env / env vars (fallback) │
+│                                                              │
+│  2. Settings() singleton created with resolved values        │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Key design decisions:**
+
+| Decision | Rationale |
+|:---------|:----------|
+| Pre-populate `os.environ` (not override Settings) | Pydantic `BaseSettings` auto-reads env vars; no coupling to Key Vault SDK in the Settings class |
+| `os.environ.setdefault()` (not overwrite) | Local env vars / `.env` take precedence — developers can override Key Vault values for testing |
+| Key Vault name convention: hyphens → underscores | Key Vault names use hyphens (e.g., `NEO4J-PASSWORD`); mapped to `NEO4J_PASSWORD` for env-var compatibility |
+| Fail-open on Key Vault errors | Warning logged, falls back to env vars — prevents hard dependency on Key Vault availability at startup |
+
+### 35.3. Credential Flow by Environment
+
+| Environment | Credential Source | `az login` needed? | Key Vault? |
+|:------------|:-----------------|:-------------------|:-----------|
+| **Azure Container Apps** (production) | Managed Identity | No (automatic) | ✅ Set `AZURE_KEY_VAULT_URL` |
+| **Local development** (with Key Vault) | Azure CLI session | Once per session | ✅ Set `AZURE_KEY_VAULT_URL` |
+| **Local development** (without Key Vault) | `.env` file | No | ❌ Leave `AZURE_KEY_VAULT_URL` unset |
+| **GitHub Codespaces** | Azure CLI session | Once per session | ✅ Optional |
+| **CI/CD** | Service principal env vars | No | ❌ Use env vars directly |
+
+### 35.4. Secrets Managed (~14 credentials)
+
+| Category | Secret Name (Key Vault) | Settings Field |
+|:---------|:----------------------|:---------------|
+| Azure OpenAI | `AZURE-OPENAI-API-KEY` | `AZURE_OPENAI_API_KEY` |
+| Azure OpenAI Embedding | `AZURE-OPENAI-EMBEDDING-API-KEY` | `AZURE_OPENAI_EMBEDDING_API_KEY` |
+| Voyage AI | `VOYAGE-API-KEY` | `VOYAGE_API_KEY` |
+| Neo4j | `NEO4J-PASSWORD` | `NEO4J_PASSWORD` |
+| Aura GDS | `AURA-DS-CLIENT-ID` | `AURA_DS_CLIENT_ID` |
+| Aura GDS | `AURA-DS-CLIENT-SECRET` | `AURA_DS_CLIENT_SECRET` |
+| Cosmos DB | `COSMOS-KEY` | `COSMOS_KEY` |
+| Azure Search | `AZURE-SEARCH-API-KEY` | `AZURE_SEARCH_API_KEY` |
+| Document Intelligence | `AZURE-DOCUMENT-INTELLIGENCE-KEY` | `AZURE_DOCUMENT_INTELLIGENCE_KEY` |
+| Content Understanding | `AZURE-CONTENT-UNDERSTANDING-API-KEY` | `AZURE_CONTENT_UNDERSTANDING_API_KEY` |
+| LlamaParse | `LLAMA-CLOUD-API-KEY` | `LLAMA_CLOUD_API_KEY` |
+| Admin | `ADMIN-API-KEY` | `ADMIN_API_KEY` |
+
+### 35.5. Implementation Files
+
+| File | Change |
+|:-----|:-------|
+| `src/core/config.py` | Added `_load_keyvault_secrets()` loader + `AZURE_KEY_VAULT_URL` setting |
+| `graphrag-orchestration/requirements.txt` | Added `azure-keyvault-secrets>=4.8.0` |
+| `reproduce_pipeline_logic.py` | Replaced hardcoded API key with `os.environ.get()` |
+| `fix_raptor_index.py` | Replaced hardcoded Neo4j password with `os.environ.get()` |
+| `scripts/benchmark_doc_scope.py` | Replaced hardcoded Neo4j password with `os.environ.get()` |
+| `scripts/invite_b2c_users.py` | Replaced hardcoded `TempPass123!` with `secrets.token_urlsafe(16)` |
+
+### 35.6. Infrastructure Setup (Bicep)
+
+To provision Key Vault for this service, add a Key Vault Bicep module to `infra/`:
+
+```bicep
+// infra/core/security/key-vault.bicep
+resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
+  name: 'kv-${environmentName}'
+  location: location
+  properties: {
+    sku: { family: 'A', name: 'standard' }
+    tenantId: subscription().tenantId
+    enableRbacAuthorization: true       // Use RBAC, not access policies
+    enableSoftDelete: true
+    softDeleteRetentionInDays: 90
+    publicNetworkAccess: 'Disabled'     // Private endpoint only
+  }
+}
+```
+
+Then grant the Container App managed identity the `Key Vault Secrets User` role (read-only) via the existing `infra/core/security/role-assignments.bicep`.
+
+### 35.7. Remaining Security Actions
+
+| Priority | Action | Status |
+|:---------|:-------|:-------|
+| **P0** | Rotate all exposed credentials (Neo4j, OpenAI, Voyage, Aura DS) | ⬜ Manual |
+| **P0** | Scrub git history with BFG Repo-Cleaner | ⬜ Manual |
+| **P1** | Provision Key Vault in Azure + populate secrets | ⬜ Infra |
+| **P1** | Set `AZURE_KEY_VAULT_URL` in Container App env | ⬜ Infra |
+| **P1** | Set `REQUIRE_AUTH=true` in production | ⬜ Config |
+| **P2** | Remove `/debug/config` endpoint or gate behind admin auth | ⬜ Code |
+| **P2** | Fix admin bypass (fail closed when `ADMIN_API_KEY` unset) | ⬜ Code |
+
 Route 6 outperforms Route 3 on containment and theme coverage with a single LLM call instead of N+1, confirming the design rationale of skipping the MAP phase.

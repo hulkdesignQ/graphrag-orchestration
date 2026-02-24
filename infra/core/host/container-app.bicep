@@ -46,7 +46,7 @@ resource containerApp 'Microsoft.App/containerApps@2024-10-02-preview' = {
     configuration: {
       activeRevisionsMode: 'Single'
       ingress: {
-        external: true
+        external: true  // API must be externally reachable; protected by Easy Auth + JWT middleware
         targetPort: targetPort
         transport: 'http'
       }

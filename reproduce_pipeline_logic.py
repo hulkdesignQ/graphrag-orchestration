@@ -1,4 +1,5 @@
 import asyncio
+import os
 import uuid
 from typing import List, Dict, Any
 from llama_index.core.schema import TextNode
@@ -25,8 +26,8 @@ class Relationship(BaseModel):
 llm = AzureOpenAI(
     engine="gpt-4o",
     model="gpt-4o",
-    api_key="76830926-fd40-4223-9036-e6233f233a8f",
-    azure_endpoint="https://ai-proxy.lab.epam.com",
+    api_key=os.environ.get("AZURE_OPENAI_API_KEY", ""),
+    azure_endpoint=os.environ.get("AZURE_OPENAI_ENDPOINT", "https://ai-proxy.lab.epam.com"),
     api_version="2024-02-01",
     timeout=60.0
 )

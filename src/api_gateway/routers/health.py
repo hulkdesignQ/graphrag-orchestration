@@ -1,5 +1,6 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException, Header, Request
 from typing import Dict, Any
+import os
 import structlog
 
 from src.worker.services import GraphService, LLMService, VectorStoreService
@@ -48,7 +49,7 @@ async def detailed_health_check() -> Dict[str, Any]:
         logger.error("neo4j_health_check_failed", error=str(e))
         health_status["components"]["neo4j"] = {
             "status": "unhealthy",
-            "error": str(e)
+            "error": "connection_failed"
         }
         health_status["status"] = "degraded"
     
@@ -63,7 +64,7 @@ async def detailed_health_check() -> Dict[str, Any]:
         logger.error("llm_health_check_failed", error=str(e))
         health_status["components"]["llm"] = {
             "status": "unhealthy",
-            "error": str(e)
+            "error": "service_unavailable"
         }
         health_status["status"] = "degraded"
     
@@ -78,7 +79,7 @@ async def detailed_health_check() -> Dict[str, Any]:
         logger.error("vector_store_health_check_failed", error=str(e))
         health_status["components"]["vector_store"] = {
             "status": "unhealthy",
-            "error": str(e)
+            "error": "service_unavailable"
         }
         health_status["status"] = "degraded"
     
@@ -94,45 +95,35 @@ async def metrics():
 
 
 @router.get("/debug/config")
-async def debug_config() -> Dict[str, Any]:
+async def debug_config(
+    request: Request,
+    x_admin_key: str | None = Header(None, alias="X-Admin-Key"),
+) -> Dict[str, Any]:
     """
-    Debug endpoint to check configuration values.
+    Debug endpoint to check configuration status (admin-only).
+    Only exposes boolean flags — never raw values.
     """
+    # Inline admin check (health router doesn't use admin dependency)
+    admin_key = os.environ.get("ADMIN_API_KEY", "")
+    if not admin_key or x_admin_key != admin_key:
+        raise HTTPException(status_code=403, detail="Admin access required")
+
     from src.core.config import settings
     return {
         "neo4j": {
-            "uri": settings.NEO4J_URI,
-            "username": settings.NEO4J_USERNAME,
+            "uri_set": bool(settings.NEO4J_URI),
+            "username_set": bool(settings.NEO4J_USERNAME),
             "password_set": bool(settings.NEO4J_PASSWORD),
-            "password_length": len(settings.NEO4J_PASSWORD) if settings.NEO4J_PASSWORD else 0
         },
         "azure_openai": {
-            "endpoint": settings.AZURE_OPENAI_ENDPOINT,
+            "endpoint_set": bool(settings.AZURE_OPENAI_ENDPOINT),
             "deployment": settings.AZURE_OPENAI_DEPLOYMENT_NAME,
             "api_key_set": bool(settings.AZURE_OPENAI_API_KEY),
-            "bearer_token_set": bool(settings.AZURE_OPENAI_BEARER_TOKEN)
         },
         "cosmos": {
-            "endpoint": settings.COSMOS_ENDPOINT,
+            "endpoint_set": bool(settings.COSMOS_ENDPOINT),
             "key_set": bool(settings.COSMOS_KEY),
-            "database": settings.COSMOS_DATABASE_NAME
+            "database": settings.COSMOS_DATABASE_NAME,
         },
-        "group_isolation": settings.ENABLE_GROUP_ISOLATION
-    }
-
-
-@router.get("/debug/config")
-async def debug_config() -> Dict[str, Any]:
-    """
-    Debug endpoint to check configuration values.
-    """
-    from src.core.config import settings
-    return {
-        "neo4j_uri": settings.NEO4J_URI,
-        "neo4j_username": settings.NEO4J_USERNAME,
-        "neo4j_password_set": bool(settings.NEO4J_PASSWORD),
-        "azure_openai_endpoint": settings.AZURE_OPENAI_ENDPOINT,
-        "cosmos_endpoint": settings.COSMOS_ENDPOINT,
-        "vector_store_type": settings.VECTOR_STORE_TYPE,
-        "enable_group_isolation": settings.ENABLE_GROUP_ISOLATION,
+        "group_isolation": settings.ENABLE_GROUP_ISOLATION,
     }

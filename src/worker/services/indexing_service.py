@@ -17,6 +17,7 @@ Supports multiple extraction modes:
 
 from typing import List, Optional, Dict, Any
 import logging
+import re
 
 from llama_index.core import PropertyGraphIndex, Document
 from llama_index.core.indices.property_graph import (
@@ -42,6 +43,16 @@ from src.core.config import settings
 import json
 
 logger = logging.getLogger(__name__)
+
+_CYPHER_LABEL_RE = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
+
+
+def _sanitize_cypher_label(label: str) -> str:
+    """Validate a Neo4j label/relationship type to prevent Cypher injection."""
+    if _CYPHER_LABEL_RE.match(label):
+        return label
+    cleaned = re.sub(r'[^A-Za-z0-9_]', '', label)
+    return cleaned if cleaned else "Entity"
 
 
 def _ensure_openai_schema_compliance(schema: Dict[str, Any]) -> Dict[str, Any]:
@@ -371,7 +382,8 @@ class IndexingService:
             with driver.session(database=settings.NEO4J_DATABASE or "neo4j") as session:
                 # Write nodes
                 for node in graph.nodes:
-                    labels = ":".join(node.labels) if node.labels else "Entity"
+                    raw_labels = node.labels if node.labels else ["Entity"]
+                    labels = ":".join(_sanitize_cypher_label(l) for l in raw_labels)
                     props = node.properties or {}
                     props["id"] = node.id
                     
@@ -384,11 +396,12 @@ class IndexingService:
                 
                 # Write relationships
                 for rel in graph.relationships:
+                    rel_type = _sanitize_cypher_label(rel.type)
                     session.run(
                         f"""
                         MATCH (a {{id: $start_id, group_id: $group_id}})
                         MATCH (b {{id: $end_id, group_id: $group_id}})
-                        MERGE (a)-[r:{rel.type}]->(b)
+                        MERGE (a)-[r:{rel_type}]->(b)
                         SET r += $props
                         SET r.group_id = $group_id
                         """,

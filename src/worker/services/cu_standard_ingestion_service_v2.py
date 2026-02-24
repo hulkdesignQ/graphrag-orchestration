@@ -60,9 +60,7 @@ class CUStandardIngestionServiceV2:
         self.api_version = getattr(settings, "AZURE_CU_API_VERSION", "2025-05-01-preview")
         
         logger.info(f"CU Service Init - Endpoint: {self.endpoint}")
-        logger.info(f"CU Service Init - API Key set: {bool(self.api_key)}, length: {len(self.api_key) if self.api_key else 0}")
-        logger.info(f"CU Service Init - settings.API_KEY: {bool(settings.AZURE_CONTENT_UNDERSTANDING_API_KEY)}")
-        logger.info(f"CU Service Init - os.environ API_KEY: {bool(os.environ.get('AZURE_CONTENT_UNDERSTANDING_API_KEY'))}")
+        logger.info(f"CU Service Init - API Key set: {bool(self.api_key)}")
         
         if not self.endpoint:
             raise RuntimeError("AZURE_CONTENT_UNDERSTANDING_ENDPOINT not configured")
@@ -451,7 +449,7 @@ class CUStandardIngestionServiceV2:
                 logger.info(f"CU Standard analyzing: {url[:80]}...")
                 logger.debug(f"Request URL: {analyze_url}")
                 logger.debug(f"Payload: {payload}")
-                logger.debug(f"Headers: {dict((k, v[:20] + '...' if k in ('Authorization', 'Ocp-Apim-Subscription-Key') and len(v) > 20 else v) for k, v in headers.items())}")
+                logger.debug(f"Headers: {list(headers.keys())}")
                 
                 async with httpx.AsyncClient(timeout=120.0) as client:
                     resp = await client.post(analyze_url, json=payload, headers=headers)

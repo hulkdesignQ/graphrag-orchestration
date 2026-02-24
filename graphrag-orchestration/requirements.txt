@@ -4,7 +4,7 @@ python-multipart>=0.0.9
 uvicorn[standard]>=0.30.0
 pydantic>=2.10.3
 pydantic-settings>=2.1.0
-python-jose[cryptography]>=3.4.0  # JWT token validation for Azure Easy Auth — CVE-2024-33663/33664 patched in 3.4.0
+PyJWT[crypto]>=2.8.0  # JWT token validation for Azure Easy Auth (replaces abandoned python-jose)
 
 # Minimal local stub for graspologic to avoid pulling heavy community deps in base builds.
 # The real graspologic package is optional and can be installed with `requirements.community.txt`.
@@ -53,6 +53,7 @@ graphdatascience>=1.19  # Aura Serverless Graph Analytics (KNN, Louvain, PageRan
 azure-cosmos==4.9.0
 azure-storage-blob==12.24.0
 azure-identity==1.20.0
+azure-keyvault-secrets>=4.8.0
 azure-ai-documentintelligence==1.0.2
 openai>=1.14.0,<2.0.0  # Compatible with llama-index-llms-openai 0.4.x
 

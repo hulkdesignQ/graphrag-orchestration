@@ -5,6 +5,7 @@ Pre-create users with temporary passwords and force password change on first log
 """
 
 import os
+import secrets
 import sys
 from msal import PublicClientApplication
 import requests
@@ -51,8 +52,10 @@ def authenticate():
     else:
         raise Exception(f"Authentication failed: {result.get('error_description', 'Unknown error')}")
 
-def create_user(token, email, display_name, temp_password="TempPass123!"):
+def create_user(token, email, display_name, temp_password=None):
     """Create a new user in B2C tenant"""
+    if temp_password is None:
+        temp_password = secrets.token_urlsafe(16)
     
     # For B2C, user principal name uses the tenant domain
     user_principal_name = f"{email.split('@')[0]}@{TENANT_NAME}.onmicrosoft.com"
@@ -114,7 +117,7 @@ def main():
         temp_password = input("Temporary password (or press Enter for default): ").strip()
         
         if not temp_password:
-            temp_password = "TempPass123!"
+            temp_password = secrets.token_urlsafe(16)
         
         try:
             print(f"\nCreating user {email}...")

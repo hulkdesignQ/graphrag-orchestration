@@ -20,7 +20,8 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import Header, HTTPException, Request, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from jose import JWTError, jwt
+import jwt as pyjwt
+from jwt.exceptions import DecodeError as JWTError
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 from src.core.config import settings
@@ -275,7 +276,7 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
         try:
             # Decode without verification (Easy Auth already validated)
             # In production without Easy Auth, use jwt.decode() with verify=True
-            claims = jwt.get_unverified_claims(token)
+            claims = pyjwt.decode(token, options={"verify_signature": False}, algorithms=["RS256", "HS256"])
             return claims
         except JWTError as e:
             raise HTTPException(

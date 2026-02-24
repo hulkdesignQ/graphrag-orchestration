@@ -3038,11 +3038,13 @@ class EnhancedGraphRetriever:
         if not self.driver or not section_keywords:
             return []
         
-        # Build case-insensitive section matching
+        # Build case-insensitive section matching with sanitized keywords
+        sanitized_kws = [kw.replace("\\", "").replace("'", "").replace('"', '') for kw in section_keywords[:5]]
         conditions = " OR ".join([
-            f"any(section IN sections WHERE toLower(section) CONTAINS toLower('{kw}'))"
-            for kw in section_keywords[:5]
+            f"any(section IN sections WHERE toLower(section) CONTAINS toLower($kw_{i}))"
+            for i, kw in enumerate(sanitized_kws)
         ])
+        kw_params = {f"kw_{i}": kw for i, kw in enumerate(sanitized_kws)}
         
         query = f"""
         MATCH (t:TextChunk)
@@ -3069,6 +3071,7 @@ class EnhancedGraphRetriever:
                         query,
                         group_id=self.group_id,
                         top_k=top_k,
+                        **kw_params,
                     )
                     return list(result)
             

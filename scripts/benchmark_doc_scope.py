@@ -44,9 +44,9 @@ DEFAULT_URL = "https://graphrag-api.salmonhill-df6033f3.swedencentral.azureconta
 DEFAULT_GROUP_ID = "test-5pdfs-v2-fix2"
 
 # Neo4j connection
-NEO4J_URI = "neo4j+s://a86dcf63.databases.neo4j.io"
+NEO4J_URI = os.environ.get("NEO4J_URI", "neo4j+s://a86dcf63.databases.neo4j.io")
 NEO4J_USER = "neo4j"
-NEO4J_PASSWORD = "uvRJoWeYwAu7ouvN25427WjGnU37oMWaKN_XMN4ySKI"
+NEO4J_PASSWORD = os.environ.get("NEO4J_PASSWORD", "")
 
 # IDF voting thresholds (must match synthesis.py)
 DOC_SCOPE_MIN_SCORE = 1.5

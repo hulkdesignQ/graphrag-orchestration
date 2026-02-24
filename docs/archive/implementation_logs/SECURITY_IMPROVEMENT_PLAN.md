@@ -893,6 +893,8 @@ app.add_middleware(SecurityHeadersMiddleware)
    - Alert on unusual patterns
 
 3. **Azure Key Vault** - Secret management
+   - ✅ Integrated via `DefaultAzureCredential` in `src/core/config.py`
+   - Set `AZURE_KEY_VAULT_URL` to enable; secrets auto-loaded at startup
    - Store CSRF secret, encryption keys
    - Rotate regularly
 
@@ -967,7 +969,7 @@ async def test_upload_rejects_malicious_filename():
 - [ ] All critical fixes merged
 - [ ] Security tests passing
 - [ ] Dependency vulnerabilities resolved
-- [ ] Secrets moved to Key Vault
+- [x] Secrets moved to Key Vault
 - [ ] Rate limits configured
 - [ ] CSP policies tested
 

@@ -1,6 +1,48 @@
 from typing import Optional, List
 from pydantic_settings import BaseSettings
 from pydantic import Field
+import logging
+import os
+
+logger = logging.getLogger(__name__)
+
+
+def _load_keyvault_secrets(vault_url: str) -> dict[str, str]:
+    """Load secrets from Azure Key Vault using DefaultAzureCredential.
+
+    Key Vault secret names use hyphens (e.g. NEO4J-PASSWORD) which are
+    mapped to the env-var style underscores (NEO4J_PASSWORD) that
+    Pydantic BaseSettings expects.
+    """
+    try:
+        from azure.identity import DefaultAzureCredential
+        from azure.keyvault.secrets import SecretClient
+
+        credential = DefaultAzureCredential()
+        client = SecretClient(vault_url=vault_url, credential=credential)
+
+        secrets: dict[str, str] = {}
+        for prop in client.list_properties_of_secrets():
+            if not prop.enabled:
+                continue
+            secret = client.get_secret(prop.name)
+            if secret.value is not None:
+                env_key = prop.name.replace("-", "_").upper()
+                secrets[env_key] = secret.value
+        logger.info("keyvault_secrets_loaded count=%d vault=%s", len(secrets), vault_url)
+        return secrets
+    except Exception as exc:
+        logger.warning("keyvault_load_failed vault=%s error=%s", vault_url, exc)
+        return {}
+
+
+# If AZURE_KEY_VAULT_URL is set, pre-populate env vars from Key Vault
+# so that Pydantic BaseSettings picks them up automatically.
+_vault_url = os.environ.get("AZURE_KEY_VAULT_URL")
+if _vault_url:
+    for key, value in _load_keyvault_secrets(_vault_url).items():
+        os.environ.setdefault(key, value)
+
 
 class Settings(BaseSettings):
     # API Configuration
@@ -166,6 +208,9 @@ class Settings(BaseSettings):
     # Multi-tenancy
     ENABLE_GROUP_ISOLATION: bool = True
     
+    # Azure Key Vault (optional — secrets auto-loaded at module import when set)
+    AZURE_KEY_VAULT_URL: Optional[str] = None
+
     # Authentication & Security
     AUTH_TYPE: str = "B2B"  # B2B (Azure AD with groups) or B2C (Azure AD B2C with oid)
     REQUIRE_AUTH: bool = False  # Set to True in production with Easy Auth enabled

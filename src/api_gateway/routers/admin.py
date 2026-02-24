@@ -65,10 +65,13 @@ async def verify_admin(
             )
             return True
     
-    # For development: allow if no ADMIN_API_KEY is set
+    # For development: warn if no ADMIN_API_KEY is set (fail closed)
     if not ADMIN_API_KEY:
-        logger.warning("admin_access_no_key", note="ADMIN_API_KEY not set, allowing access")
-        return True
+        logger.warning("admin_access_denied_no_key", note="ADMIN_API_KEY not configured — admin access denied")
+        raise HTTPException(
+            status_code=403,
+            detail="Admin access not configured. Set ADMIN_API_KEY environment variable."
+        )
     
     raise HTTPException(
         status_code=403,

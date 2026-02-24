@@ -5,12 +5,13 @@ No neo4j package required - uses REST API directly.
 import requests
 import json
 import base64
+import os
 
 def main():
     # Neo4j Aura connection details
     host = "3a8f50d9.databases.neo4j.io"
     username = "neo4j"
-    password = "Cbu7xPlVn9qNSSK_yiZkFcW2tWF_IblWAJbPmSrMOJg"
+    password = os.environ.get("NEO4J_PASSWORD", "")
     database = "neo4j"
     
     # Neo4j HTTP API endpoint

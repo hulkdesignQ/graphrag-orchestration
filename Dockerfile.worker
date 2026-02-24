@@ -24,19 +24,25 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+# Create non-root user
+RUN groupadd -r appuser && useradd -r -g appuser -d /app appuser
+
 # Copy only the installed packages from builder (not build tools)
-COPY --from=builder /root/.local /root/.local
+COPY --from=builder /root/.local /home/appuser/.local
 
 # Create data directories
-RUN mkdir -p /app/data/graphrag /app/data/lancedb /app/data/cache
+RUN mkdir -p /app/data/graphrag /app/data/lancedb /app/data/cache \
+    && chown -R appuser:appuser /app
 
 # Copy application code from new src/ structure
 ARG CACHE_BUST=""
 RUN echo "CACHE_BUST=${CACHE_BUST}" > /dev/null
-COPY src/ /app/src/
+COPY --chown=appuser:appuser src/ /app/src/
+
+USER appuser
 
 # Set PATH and environment
-ENV PATH=/root/.local/bin:$PATH \
+ENV PATH=/home/appuser/.local/bin:$PATH \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app \
     SERVICE_ROLE=worker
