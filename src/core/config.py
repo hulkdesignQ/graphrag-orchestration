@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     # Route 2: Entity extraction (NER) - needs high precision
     HYBRID_NER_MODEL: str = "gpt-5.1"  # High precision for seed entity identification
     # Route 2/3: Final answer synthesis - best available model
-    HYBRID_SYNTHESIS_MODEL: str = "gpt-5.1"  # High quality synthesis
+    HYBRID_SYNTHESIS_MODEL: str = "gpt-4.1"  # Less verbose, higher benchmark score than gpt-5.1
     # Route 3: Query decomposition - needs strong reasoning
     HYBRID_DECOMPOSITION_MODEL: str = "gpt-4.1"  # Strong reasoning for breaking down ambiguity
     # Route 3: Sub-question intermediate synthesis
