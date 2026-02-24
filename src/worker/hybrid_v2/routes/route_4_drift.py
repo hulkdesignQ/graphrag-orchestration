@@ -25,9 +25,10 @@ Performance Mode:
 """
 
 import asyncio
+import math
 import os
 import re
-from typing import Dict, Any, List, Tuple, Optional, List
+from typing import Dict, Any, List, Tuple, Optional
 
 import structlog
 
@@ -600,7 +601,6 @@ Sub-questions:"""
             # First, join continuation lines back onto their numbered item.
             # A "continuation line" is any line that does NOT start with a digit
             # (i.e., it's not a new numbered item).
-            import re
             lines = text.split('\n')
             merged_lines: List[str] = []
             for line in lines:
@@ -906,8 +906,6 @@ Sub-questions:"""
                 if coverage_source_chunks:
                     try:
                         from src.worker.services.llm_service import LLMService
-                        import re
-                        import math
                         llm_service = LLMService()
                         
                         # Extract key terms from query for keyword matching

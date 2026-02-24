@@ -174,34 +174,6 @@ class BaseRouteHandler:
         self._executor = pipeline._executor
         self._async_neo4j = pipeline._async_neo4j
 
-    def _build_folder_filter(self, node_alias: str = "node", doc_alias: str = "d") -> str:
-        """Build Cypher WHERE clause for optional folder filtering.
-        
-        If folder_id is None, returns empty string (no filter).
-        If folder_id is set, returns a WHERE clause that filters documents in that folder.
-        
-        Args:
-            node_alias: Alias for the chunk/node being filtered
-            doc_alias: Alias for the document node
-            
-        Returns:
-            Cypher WHERE clause string (empty if no folder filter)
-        """
-        if self.folder_id is None:
-            return ""
-        # Filter documents that are in the specified folder
-        return f"AND ({doc_alias})-[:IN_FOLDER]->(:Folder {{id: $folder_id, group_id: $group_id}})"
-    
-    def _get_folder_params(self) -> dict:
-        """Get folder_id parameter dict for Cypher queries.
-        
-        Returns:
-            Dict with folder_id if set, empty dict otherwise
-        """
-        if self.folder_id is not None:
-            return {"folder_id": self.folder_id}
-        return {}
-
     async def _fetch_language_spans(
         self, doc_ids: List[str]
     ) -> Dict[str, List[Dict]]:
