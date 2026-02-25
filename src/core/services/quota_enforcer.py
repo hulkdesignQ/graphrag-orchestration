@@ -16,6 +16,7 @@ with a warning log — availability beats strict enforcement.
 from datetime import datetime, timedelta
 from typing import Any, Dict, Optional, Tuple
 
+import asyncio
 import structlog
 from fastapi import Depends, HTTPException, Request
 from starlette import status
@@ -268,14 +269,18 @@ class QuotaEnforcer:
 # =============================================================================
 
 _enforcer: Optional[QuotaEnforcer] = None
+_enforcer_lock = asyncio.Lock()
 
 
 async def get_quota_enforcer() -> QuotaEnforcer:
     """Get or create singleton QuotaEnforcer."""
     global _enforcer
-    if _enforcer is None:
-        redis_svc = await get_redis_service()
-        _enforcer = QuotaEnforcer(redis_svc)
+    if _enforcer is not None:
+        return _enforcer
+    async with _enforcer_lock:
+        if _enforcer is None:
+            redis_svc = await get_redis_service()
+            _enforcer = QuotaEnforcer(redis_svc)
     return _enforcer
 
 

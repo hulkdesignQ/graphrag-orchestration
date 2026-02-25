@@ -666,14 +666,19 @@ class RedisService:
 # =============================================================================
 
 _redis_service: Optional[RedisService] = None
+_redis_service_lock = asyncio.Lock()
 
 
 async def get_redis_service() -> RedisService:
     """Get or create singleton RedisService instance."""
     global _redis_service
     
-    if _redis_service is None:
-        _redis_service = await RedisService.create()
+    if _redis_service is not None:
+        return _redis_service
+    
+    async with _redis_service_lock:
+        if _redis_service is None:
+            _redis_service = await RedisService.create()
     
     return _redis_service
 

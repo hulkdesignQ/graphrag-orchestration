@@ -70,11 +70,15 @@ class IndexingJobTracker:
     
     def __init__(self):
         self._redis_service: Optional[RedisService] = None
+        self._store_lock = asyncio.Lock()
     
     async def _get_store(self):
-        """Lazy-init Redis connection."""
-        if self._redis_service is None:
-            self._redis_service = await get_redis_service()
+        """Lazy-init Redis connection (double-check lock)."""
+        if self._redis_service is not None:
+            return self._redis_service.operations
+        async with self._store_lock:
+            if self._redis_service is None:
+                self._redis_service = await get_redis_service()
         return self._redis_service.operations
     
     async def create(self, job_id: str, group_id: str, num_documents: int) -> None:
@@ -1082,8 +1086,8 @@ async def _run_indexing_job(
     knn_similarity_cutoff: float = 0.60,
     knn_config: Optional[str] = None,
 ):
-    """Background task to run indexing."""
-    await _indexing_jobs.update(job_id, status="running", progress="Starting indexing pipeline...")
+    """Background task to run indexing with distributed lock."""
+    await _indexing_jobs.update(job_id, status="running", progress="Acquiring indexing lock...")
     
     try:
         from src.core.config import settings
@@ -1091,23 +1095,27 @@ async def _run_indexing_job(
             get_lazygraphrag_indexing_pipeline_v2,
         )
 
-        # Use V2 pipeline (with embedding_v2 property) when Voyage V2 is enabled
-        pipeline = get_lazygraphrag_indexing_pipeline_v2()
-        
-        await _indexing_jobs.update(job_id, status="running", progress="Indexing documents...")
-        stats = await pipeline.index_documents(
-            group_id=group_id,
-            documents=docs_for_pipeline,
-            reindex=reindex,
-            reextract_entities=reextract_entities,
-            ingestion=ingestion,
-            run_community_detection=run_community_detection,
-            run_raptor=run_raptor,
-            knn_enabled=knn_enabled,
-            knn_top_k=knn_top_k,
-            knn_similarity_cutoff=knn_similarity_cutoff,
-            knn_config=knn_config,
-        )
+        # Acquire distributed lock to prevent concurrent indexing for same group
+        redis_svc = await get_redis_service()
+        lock_key = f"lock:{group_id}:indexing"
+        async with redis_svc.lock(lock_key, ttl_seconds=600):
+            # Use V2 pipeline (with embedding_v2 property) when Voyage V2 is enabled
+            pipeline = get_lazygraphrag_indexing_pipeline_v2()
+            
+            await _indexing_jobs.update(job_id, status="running", progress="Indexing documents...")
+            stats = await pipeline.index_documents(
+                group_id=group_id,
+                documents=docs_for_pipeline,
+                reindex=reindex,
+                reextract_entities=reextract_entities,
+                ingestion=ingestion,
+                run_community_detection=run_community_detection,
+                run_raptor=run_raptor,
+                knn_enabled=knn_enabled,
+                knn_top_k=knn_top_k,
+                knn_similarity_cutoff=knn_similarity_cutoff,
+                knn_config=knn_config,
+            )
         
         await _indexing_jobs.update(
             job_id,

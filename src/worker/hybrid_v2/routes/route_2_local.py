@@ -21,6 +21,7 @@ Note: No HippoRAG in this route - entities are explicit in the query.
 import asyncio
 import os
 import time
+import threading
 from typing import Dict, Any, List, Optional, TYPE_CHECKING
 
 import structlog
@@ -36,18 +37,22 @@ logger = structlog.get_logger(__name__)
 
 # V2 Voyage embedding service (lazy import to avoid circular deps)
 _voyage_service: Optional["VoyageEmbedService"] = None
+_voyage_service_lock = threading.Lock()
 
 
 def _get_voyage_service():
     """Get Voyage embedding service for V2 mode."""
     global _voyage_service
-    if _voyage_service is None:
-        try:
-            from src.worker.hybrid_v2.embeddings import get_voyage_embed_service, is_voyage_v2_enabled
-            if is_voyage_v2_enabled():
-                _voyage_service = get_voyage_embed_service()
-        except Exception as e:
-            logger.warning("voyage_service_init_failed", error=str(e))
+    if _voyage_service is not None:
+        return _voyage_service
+    with _voyage_service_lock:
+        if _voyage_service is None:
+            try:
+                from src.worker.hybrid_v2.embeddings import get_voyage_embed_service, is_voyage_v2_enabled
+                if is_voyage_v2_enabled():
+                    _voyage_service = get_voyage_embed_service()
+            except Exception as e:
+                logger.warning("voyage_service_init_failed", error=str(e))
     return _voyage_service
 
 

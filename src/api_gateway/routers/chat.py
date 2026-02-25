@@ -56,11 +56,15 @@ class ChatJobTracker:
     
     def __init__(self):
         self._redis_service: Optional[RedisService] = None
+        self._store_lock = asyncio.Lock()
     
     async def _get_store(self):
-        """Lazy-init Redis connection."""
-        if self._redis_service is None:
-            self._redis_service = await get_redis_service()
+        """Lazy-init Redis connection (double-check lock)."""
+        if self._redis_service is not None:
+            return self._redis_service.operations
+        async with self._store_lock:
+            if self._redis_service is None:
+                self._redis_service = await get_redis_service()
         return self._redis_service.operations
     
     async def create(

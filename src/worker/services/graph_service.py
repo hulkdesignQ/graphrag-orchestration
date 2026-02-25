@@ -12,6 +12,7 @@ This enables neo4j driver v6.0+ compatibility for native Vector type support.
 
 from typing import List, Optional, Dict, Any, Tuple
 import logging
+import threading
 import neo4j
 from neo4j import GraphDatabase
 
@@ -418,11 +419,15 @@ class GraphService:
     
     _instance: Optional["GraphService"] = None
     _driver: Optional[Any] = None  # neo4j.Driver when connected
+    _instance_lock = threading.Lock()
 
     def __new__(cls) -> "GraphService":
-        if cls._instance is None:
-            cls._instance = super(GraphService, cls).__new__(cls)
-            cls._instance._initialize()
+        if cls._instance is not None:
+            return cls._instance
+        with cls._instance_lock:
+            if cls._instance is None:
+                cls._instance = super(GraphService, cls).__new__(cls)
+                cls._instance._initialize()
         return cls._instance
 
     @property

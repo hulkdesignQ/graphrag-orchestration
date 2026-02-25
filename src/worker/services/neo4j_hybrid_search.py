@@ -17,6 +17,7 @@ from __future__ import annotations
 from typing import List, Dict, Any, Optional, Tuple, TYPE_CHECKING
 import logging
 import asyncio
+import threading
 
 from src.worker.services.graph_service import GraphService, MultiTenantNeo4jStore
 from src.worker.services.llm_service import LLMService
@@ -628,11 +629,15 @@ class Neo4jHybridSearchService:
 
 # Singleton instance
 _hybrid_search_service: Optional[Neo4jHybridSearchService] = None
+_hybrid_search_service_lock = threading.Lock()
 
 
 def get_hybrid_search_service() -> Neo4jHybridSearchService:
     """Get singleton instance of Neo4jHybridSearchService."""
     global _hybrid_search_service
-    if _hybrid_search_service is None:
-        _hybrid_search_service = Neo4jHybridSearchService()
+    if _hybrid_search_service is not None:
+        return _hybrid_search_service
+    with _hybrid_search_service_lock:
+        if _hybrid_search_service is None:
+            _hybrid_search_service = Neo4jHybridSearchService()
     return _hybrid_search_service

@@ -28,6 +28,7 @@ See: VOYAGE_V2_CONTEXTUAL_CHUNKING_PLAN_2026-01-25.md
 
 import asyncio
 import logging
+import threading
 from typing import List, Optional
 
 from src.core.config import settings
@@ -480,6 +481,7 @@ class VoyageEmbedService:
 
 # Singleton instance for reuse across the application
 _voyage_service: Optional[VoyageEmbedService] = None
+_voyage_service_lock = threading.Lock()
 
 
 def get_voyage_embed_service() -> VoyageEmbedService:
@@ -496,8 +498,11 @@ def get_voyage_embed_service() -> VoyageEmbedService:
         ValueError: If VOYAGE_API_KEY is not configured
     """
     global _voyage_service
-    if _voyage_service is None:
-        _voyage_service = VoyageEmbedService()
+    if _voyage_service is not None:
+        return _voyage_service
+    with _voyage_service_lock:
+        if _voyage_service is None:
+            _voyage_service = VoyageEmbedService()
     return _voyage_service
 
 

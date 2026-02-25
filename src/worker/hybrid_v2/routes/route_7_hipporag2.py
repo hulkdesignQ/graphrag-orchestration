@@ -26,6 +26,7 @@ import asyncio
 import os
 import re
 import time
+import threading
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -114,25 +115,29 @@ _STRUCTURED_ROLE_TYPES: list = [
 # ---------------------------------------------------------------------------
 _voyage_service = None
 _voyage_init_attempted = False
+_voyage_init_lock = threading.Lock()
 
 
 def _get_voyage_service():
     """Get Voyage embedding service for query + triple embedding."""
     global _voyage_service, _voyage_init_attempted
-    if not _voyage_init_attempted:
-        _voyage_init_attempted = True
-        try:
-            from src.core.config import settings
+    if _voyage_init_attempted:
+        return _voyage_service
+    with _voyage_init_lock:
+        if not _voyage_init_attempted:
+            _voyage_init_attempted = True
+            try:
+                from src.core.config import settings
 
-            if settings.VOYAGE_API_KEY:
-                from src.worker.hybrid_v2.embeddings.voyage_embed import VoyageEmbedService
+                if settings.VOYAGE_API_KEY:
+                    from src.worker.hybrid_v2.embeddings.voyage_embed import VoyageEmbedService
 
-                _voyage_service = VoyageEmbedService()
-                logger.info("route7_voyage_service_initialized")
-            else:
-                logger.warning("route7_voyage_service_no_api_key")
-        except Exception as e:
-            logger.warning("route7_voyage_service_init_failed", error=str(e))
+                    _voyage_service = VoyageEmbedService()
+                    logger.info("route7_voyage_service_initialized")
+                else:
+                    logger.warning("route7_voyage_service_no_api_key")
+            except Exception as e:
+                logger.warning("route7_voyage_service_init_failed", error=str(e))
     return _voyage_service
 
 
@@ -160,36 +165,10 @@ class HippoRAG2Handler(BaseRouteHandler):
         self._ppr_engine = None
         self._init_lock = asyncio.Lock()
 
-    async def _is_graph_stale(self) -> bool:
-        """Check if GroupMeta.gds_stale is set, indicating graph data changed."""
-        try:
-            def _check():
-                with self.neo4j_driver.session() as session:
-                    result = session.run(
-                        """
-                        OPTIONAL MATCH (g:GroupMeta {group_id: $group_id})
-                        RETURN coalesce(g.gds_stale, false) AS stale
-                        """,
-                        group_id=self.group_id,
-                    )
-                    record = result.single()
-                    return record["stale"] if record else False
-
-            return await asyncio.to_thread(_check)
-        except Exception as e:
-            logger.warning("route7_stale_check_failed", error=str(e))
-            return False
-
     async def _ensure_initialized(self) -> None:
         """Lazy-load triple embeddings and PPR graph on first query."""
         if self._triple_store is not None and self._ppr_engine is not None:
-            # Check if graph data has been modified since last load
-            if await self._is_graph_stale():
-                logger.info("route7_graph_stale", group_id=self.group_id)
-                self._triple_store = None
-                self._ppr_engine = None
-            else:
-                return
+            return
 
         async with self._init_lock:
             # Double-check after acquiring lock

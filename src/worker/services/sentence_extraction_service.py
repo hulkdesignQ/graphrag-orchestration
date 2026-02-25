@@ -20,6 +20,7 @@ Benchmark results (Strategy A):
 """
 
 import re
+import threading
 from typing import Any, Dict, List, Optional
 
 import structlog
@@ -32,27 +33,31 @@ logger = structlog.get_logger(__name__)
 # spaCy initialization (lazy singleton)
 # ---------------------------------------------------------------------------
 _nlp = None
+_nlp_lock = threading.Lock()
 
 
 def _get_nlp():
-    """Lazy-load spaCy model. Already a transitive dep via graphrag==2.7.0."""
+    """Lazy-load spaCy model (thread-safe). Already a transitive dep via graphrag==2.7.0."""
     global _nlp
-    if _nlp is None:
-        import spacy
-        try:
-            _nlp = spacy.load("en_core_web_sm")
-            _nlp.max_length = 50_000
-            logger.info("spacy_loaded", model="en_core_web_sm")
-        except OSError:
-            logger.warning("spacy_model_not_found, downloading en_core_web_sm")
-            import subprocess
-            import sys
-            subprocess.run(
-                [sys.executable, "-m", "spacy", "download", "en_core_web_sm"],
-                check=True,
-            )
-            _nlp = spacy.load("en_core_web_sm")
-            _nlp.max_length = 50_000
+    if _nlp is not None:
+        return _nlp
+    with _nlp_lock:
+        if _nlp is None:
+            import spacy
+            try:
+                _nlp = spacy.load("en_core_web_sm")
+                _nlp.max_length = 50_000
+                logger.info("spacy_loaded", model="en_core_web_sm")
+            except OSError:
+                logger.warning("spacy_model_not_found, downloading en_core_web_sm")
+                import subprocess
+                import sys
+                subprocess.run(
+                    [sys.executable, "-m", "spacy", "download", "en_core_web_sm"],
+                    check=True,
+                )
+                _nlp = spacy.load("en_core_web_sm")
+                _nlp.max_length = 50_000
     return _nlp
 
 

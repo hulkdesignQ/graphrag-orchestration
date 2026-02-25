@@ -28,6 +28,7 @@ import asyncio
 import math
 import os
 import re
+import threading
 from typing import Dict, Any, List, Tuple, Optional
 
 import structlog
@@ -59,23 +60,27 @@ if ROUTE4_SENTENCE_SEARCH:
 # Voyage embedding service (lazy singleton — mirrors route_3_global.py pattern)
 _voyage_service = None
 _voyage_init_attempted = False
+_voyage_init_lock = threading.Lock()
 
 
 def _get_voyage_service():
     """Get Voyage embedding service for sentence search."""
     global _voyage_service, _voyage_init_attempted
-    if not _voyage_init_attempted:
-        _voyage_init_attempted = True
-        try:
-            from src.core.config import settings
-            if settings.VOYAGE_API_KEY:
-                from src.worker.hybrid_v2.embeddings.voyage_embed import VoyageEmbedService
-                _voyage_service = VoyageEmbedService()
-                logger.info("route4_voyage_service_initialized")
-            else:
-                logger.warning("route4_voyage_service_no_api_key")
-        except Exception as e:
-            logger.warning("route4_voyage_service_init_failed", error=str(e))
+    if _voyage_init_attempted:
+        return _voyage_service
+    with _voyage_init_lock:
+        if not _voyage_init_attempted:
+            _voyage_init_attempted = True
+            try:
+                from src.core.config import settings
+                if settings.VOYAGE_API_KEY:
+                    from src.worker.hybrid_v2.embeddings.voyage_embed import VoyageEmbedService
+                    _voyage_service = VoyageEmbedService()
+                    logger.info("route4_voyage_service_initialized")
+                else:
+                    logger.warning("route4_voyage_service_no_api_key")
+            except Exception as e:
+                logger.warning("route4_voyage_service_init_failed", error=str(e))
     return _voyage_service
 
 

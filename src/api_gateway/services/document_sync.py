@@ -11,6 +11,7 @@ so file operations in files.py are never blocked by Neo4j failures.
 
 import asyncio
 import logging
+import threading
 from typing import Any, Dict, List, Optional
 
 from src.core.config import settings
@@ -25,38 +26,48 @@ class DocumentSyncService:
         self._neo4j_store = None
         self._lifecycle = None
         self._pipeline = None
+        self._prop_lock = threading.Lock()
 
     @property
     def neo4j_store(self):
-        if self._neo4j_store is None:
-            from src.worker.hybrid_v2.services.neo4j_store import Neo4jStoreV3
+        if self._neo4j_store is not None:
+            return self._neo4j_store
+        with self._prop_lock:
+            if self._neo4j_store is None:
+                from src.worker.hybrid_v2.services.neo4j_store import Neo4jStoreV3
 
-            self._neo4j_store = Neo4jStoreV3(
-                uri=settings.NEO4J_URI,
-                username=settings.NEO4J_USERNAME,
-                password=settings.NEO4J_PASSWORD,
-                database=settings.NEO4J_DATABASE,
-            )
+                self._neo4j_store = Neo4jStoreV3(
+                    uri=settings.NEO4J_URI,
+                    username=settings.NEO4J_USERNAME,
+                    password=settings.NEO4J_PASSWORD,
+                    database=settings.NEO4J_DATABASE,
+                )
         return self._neo4j_store
 
     @property
     def lifecycle(self):
-        if self._lifecycle is None:
-            from src.worker.hybrid_v2.services.document_lifecycle import (
-                DocumentLifecycleService,
-            )
+        if self._lifecycle is not None:
+            return self._lifecycle
+        with self._prop_lock:
+            if self._lifecycle is None:
+                from src.worker.hybrid_v2.services.document_lifecycle import (
+                    DocumentLifecycleService,
+                )
 
-            self._lifecycle = DocumentLifecycleService(self.neo4j_store)
+                self._lifecycle = DocumentLifecycleService(self.neo4j_store)
         return self._lifecycle
 
     @property
     def pipeline(self):
-        if self._pipeline is None:
-            from src.worker.hybrid_v2.indexing.pipeline_factory import (
-                get_lazygraphrag_indexing_pipeline_v2,
-            )
+        if self._pipeline is not None:
+            return self._pipeline
+        with self._prop_lock:
+            if self._pipeline is None:
+                from src.worker.hybrid_v2.indexing.pipeline_factory import (
+                    get_lazygraphrag_indexing_pipeline_v2,
+                )
 
-            self._pipeline = get_lazygraphrag_indexing_pipeline_v2()
+                self._pipeline = get_lazygraphrag_indexing_pipeline_v2()
         return self._pipeline
 
     async def on_file_uploaded(

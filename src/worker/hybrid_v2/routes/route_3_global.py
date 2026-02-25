@@ -22,6 +22,7 @@ import asyncio
 import os
 import re
 import time
+import threading
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -40,6 +41,7 @@ logger = structlog.get_logger(__name__)
 # creates VoyageEmbedService — we mirror that pattern here.
 _voyage_service = None
 _voyage_init_attempted = False
+_voyage_init_lock = threading.Lock()
 
 
 def _get_voyage_service():
@@ -49,18 +51,21 @@ def _get_voyage_service():
     skip the is_voyage_v2_enabled() gate that requires VOYAGE_V2_ENABLED.
     """
     global _voyage_service, _voyage_init_attempted
-    if not _voyage_init_attempted:
-        _voyage_init_attempted = True
-        try:
-            from src.core.config import settings
-            if settings.VOYAGE_API_KEY:
-                from src.worker.hybrid_v2.embeddings.voyage_embed import VoyageEmbedService
-                _voyage_service = VoyageEmbedService()
-                logger.info("route3_voyage_service_initialized")
-            else:
-                logger.warning("route3_voyage_service_no_api_key")
-        except Exception as e:
-            logger.warning("route3_voyage_service_init_failed", error=str(e))
+    if _voyage_init_attempted:
+        return _voyage_service
+    with _voyage_init_lock:
+        if not _voyage_init_attempted:
+            _voyage_init_attempted = True
+            try:
+                from src.core.config import settings
+                if settings.VOYAGE_API_KEY:
+                    from src.worker.hybrid_v2.embeddings.voyage_embed import VoyageEmbedService
+                    _voyage_service = VoyageEmbedService()
+                    logger.info("route3_voyage_service_initialized")
+                else:
+                    logger.warning("route3_voyage_service_no_api_key")
+            except Exception as e:
+                logger.warning("route3_voyage_service_init_failed", error=str(e))
     return _voyage_service
 
 

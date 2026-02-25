@@ -15,6 +15,7 @@ import logging
 import uuid
 import json
 import asyncio
+import threading
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple, cast
 from dataclasses import dataclass, field
@@ -146,29 +147,37 @@ class Neo4jStoreV3:
         # Determinism: chunk-level extraction cache schema init (best-effort).
         self._extraction_cache_schema_ready: bool = False
         self._extraction_cache_schema_lock: asyncio.Lock = asyncio.Lock()
+        self._driver_lock = threading.Lock()
+        self._async_driver_lock = asyncio.Lock()
         
     @property
     def driver(self) -> neo4j.Driver:
-        """Lazy initialization of Neo4j driver."""
-        if self._driver is None:
-            self._driver = GraphDatabase.driver(
-                self.uri,
-                auth=(self.username, self.password),
-            )
-            # Verify connectivity
-            self._driver.verify_connectivity()
-            logger.info(f"Connected to Neo4j at {self.uri}")
+        """Lazy initialization of Neo4j driver (thread-safe)."""
+        if self._driver is not None:
+            return self._driver
+        with self._driver_lock:
+            if self._driver is None:
+                self._driver = GraphDatabase.driver(
+                    self.uri,
+                    auth=(self.username, self.password),
+                )
+                # Verify connectivity
+                self._driver.verify_connectivity()
+                logger.info(f"Connected to Neo4j at {self.uri}")
         return self._driver
     
     @property
     def async_driver(self) -> neo4j.AsyncDriver:
-        """Lazy initialization of async Neo4j driver."""
-        if self._async_driver is None:
-            self._async_driver = AsyncGraphDatabase.driver(
-                self.uri,
-                auth=(self.username, self.password),
-            )
-            logger.info(f"Connected to Neo4j (async) at {self.uri}")
+        """Lazy initialization of async Neo4j driver (thread-safe)."""
+        if self._async_driver is not None:
+            return self._async_driver
+        with self._driver_lock:
+            if self._async_driver is None:
+                self._async_driver = AsyncGraphDatabase.driver(
+                    self.uri,
+                    auth=(self.username, self.password),
+                )
+                logger.info(f"Connected to Neo4j (async) at {self.uri}")
         return self._async_driver
     
     def close(self):

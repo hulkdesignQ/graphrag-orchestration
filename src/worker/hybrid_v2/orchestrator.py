@@ -42,6 +42,7 @@ Router (all routes):
 from typing import Dict, Any, Optional, List, Tuple
 import structlog
 import asyncio
+import threading
 from concurrent.futures import ThreadPoolExecutor
 
 from .pipeline.intent import IntentDisambiguator
@@ -76,17 +77,23 @@ def _is_v2_enabled() -> bool:
     return bool(settings.VOYAGE_API_KEY)
 
 _v2_embedder = None  # Lazy-initialized VoyageEmbedService
+_v2_embedder_lock = threading.Lock()
 
 def _get_v2_embedder():
-    """Get or create the Voyage embedder (singleton)."""
+    """Get or create the Voyage embedder (singleton, thread-safe)."""
     global _v2_embedder
-    if _v2_embedder is None and _is_v2_enabled():
-        try:
-            from src.worker.hybrid_v2.embeddings.voyage_embed import VoyageEmbedService
-            _v2_embedder = VoyageEmbedService()
-            logger.info("voyage_embedder_initialized")
-        except Exception as e:
-            logger.warning("voyage_embedder_init_failed", error=str(e))
+    if _v2_embedder is not None:
+        return _v2_embedder
+    if not _is_v2_enabled():
+        return None
+    with _v2_embedder_lock:
+        if _v2_embedder is None:
+            try:
+                from src.worker.hybrid_v2.embeddings.voyage_embed import VoyageEmbedService
+                _v2_embedder = VoyageEmbedService()
+                logger.info("voyage_embedder_initialized")
+            except Exception as e:
+                logger.warning("voyage_embedder_init_failed", error=str(e))
     return _v2_embedder
 
 def get_query_embedding(query: str) -> List[float]:

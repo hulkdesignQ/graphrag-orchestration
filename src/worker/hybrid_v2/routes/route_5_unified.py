@@ -39,6 +39,7 @@ import asyncio
 import os
 import re
 import time
+import threading
 from typing import Any, Dict, List, Optional, Tuple
 
 import structlog
@@ -52,25 +53,29 @@ logger = structlog.get_logger(__name__)
 # Voyage embedding service — shared singleton (same pattern as Routes 3/4)
 _voyage_service = None
 _voyage_init_attempted = False
+_voyage_init_lock = threading.Lock()
 
 
 def _get_voyage_service():
     """Get Voyage embedding service for sentence search."""
     global _voyage_service, _voyage_init_attempted
-    if not _voyage_init_attempted:
-        _voyage_init_attempted = True
-        try:
-            from src.core.config import settings
+    if _voyage_init_attempted:
+        return _voyage_service
+    with _voyage_init_lock:
+        if not _voyage_init_attempted:
+            _voyage_init_attempted = True
+            try:
+                from src.core.config import settings
 
-            if settings.VOYAGE_API_KEY:
-                from src.worker.hybrid_v2.embeddings.voyage_embed import VoyageEmbedService
+                if settings.VOYAGE_API_KEY:
+                    from src.worker.hybrid_v2.embeddings.voyage_embed import VoyageEmbedService
 
-                _voyage_service = VoyageEmbedService()
-                logger.info("route5_voyage_service_initialized")
-            else:
-                logger.warning("route5_voyage_service_no_api_key")
-        except Exception as e:
-            logger.warning("route5_voyage_service_init_failed", error=str(e))
+                    _voyage_service = VoyageEmbedService()
+                    logger.info("route5_voyage_service_initialized")
+                else:
+                    logger.warning("route5_voyage_service_no_api_key")
+            except Exception as e:
+                logger.warning("route5_voyage_service_init_failed", error=str(e))
     return _voyage_service
 
 

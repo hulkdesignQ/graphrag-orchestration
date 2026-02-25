@@ -2,6 +2,7 @@
 
 from typing import Optional, List
 import asyncio
+import threading
 import structlog
 from datetime import datetime
 
@@ -169,11 +170,15 @@ class UsageTracker:
 
 # Singleton instance
 _usage_tracker: Optional[UsageTracker] = None
+_usage_tracker_lock = threading.Lock()
 
 
 def get_usage_tracker() -> UsageTracker:
     """Get or create the singleton usage tracker."""
     global _usage_tracker
-    if _usage_tracker is None:
-        _usage_tracker = UsageTracker()
+    if _usage_tracker is not None:
+        return _usage_tracker
+    with _usage_tracker_lock:
+        if _usage_tracker is None:
+            _usage_tracker = UsageTracker()
     return _usage_tracker

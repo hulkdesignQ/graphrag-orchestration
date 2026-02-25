@@ -15,6 +15,7 @@ Multi-tenancy: All operations filter by group_id for tenant isolation.
 
 import os
 import logging
+import threading
 from typing import Any, Dict, List, Optional
 
 import neo4j
@@ -1027,11 +1028,15 @@ Output ONLY the JSON object, no explanations or markdown:"""
 
 # Singleton instance
 _neo4j_graphrag_service: Optional[Neo4jGraphRAGService] = None
+_neo4j_graphrag_service_lock = threading.Lock()
 
 
 def get_neo4j_graphrag_service() -> Neo4jGraphRAGService:
     """Get or create the singleton Neo4jGraphRAGService instance."""
     global _neo4j_graphrag_service
-    if _neo4j_graphrag_service is None:
-        _neo4j_graphrag_service = Neo4jGraphRAGService()
+    if _neo4j_graphrag_service is not None:
+        return _neo4j_graphrag_service
+    with _neo4j_graphrag_service_lock:
+        if _neo4j_graphrag_service is None:
+            _neo4j_graphrag_service = Neo4jGraphRAGService()
     return _neo4j_graphrag_service

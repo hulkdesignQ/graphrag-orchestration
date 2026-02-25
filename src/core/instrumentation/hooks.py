@@ -27,6 +27,7 @@ Usage:
 
 import asyncio
 import time
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional, Dict, Any, List
@@ -406,13 +407,17 @@ class InstrumentationHooks:
 
 # Singleton instance
 _instrumentation: Optional[InstrumentationHooks] = None
+_instrumentation_lock = threading.Lock()
 
 
 def get_instrumentation() -> InstrumentationHooks:
     """Get or create the singleton instrumentation hooks instance."""
     global _instrumentation
-    if _instrumentation is None:
-        _instrumentation = InstrumentationHooks()
+    if _instrumentation is not None:
+        return _instrumentation
+    with _instrumentation_lock:
+        if _instrumentation is None:
+            _instrumentation = InstrumentationHooks()
     return _instrumentation
 
 

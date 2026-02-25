@@ -2,6 +2,7 @@
 
 from typing import List, Optional, Dict, Any
 import os
+import threading
 import structlog
 from azure.cosmos.aio import CosmosClient
 from azure.cosmos import PartitionKey
@@ -221,11 +222,15 @@ class CosmosDBClient:
 
 # Singleton instance
 _cosmos_client: Optional[CosmosDBClient] = None
+_cosmos_client_lock = threading.Lock()
 
 
 def get_cosmos_client() -> CosmosDBClient:
     """Get or create the singleton Cosmos DB client."""
     global _cosmos_client
-    if _cosmos_client is None:
-        _cosmos_client = CosmosDBClient()
+    if _cosmos_client is not None:
+        return _cosmos_client
+    with _cosmos_client_lock:
+        if _cosmos_client is None:
+            _cosmos_client = CosmosDBClient()
     return _cosmos_client

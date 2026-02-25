@@ -10,24 +10,30 @@ See VOYAGE_V2_IMPLEMENTATION_PLAN_2026-01-25.md for context.
 
 from __future__ import annotations
 
+import threading
+
 from src.core.config import settings
 
 
 _neo4j_store = None
 _indexing_pipeline = None
 _indexing_pipeline_v2 = None  # V2 pipeline with Voyage embeddings
+_factory_lock = threading.Lock()
 
 
 def get_neo4j_store():
     global _neo4j_store
-    if _neo4j_store is None:
-        from src.worker.hybrid_v2.services.neo4j_store import Neo4jStoreV3
+    if _neo4j_store is not None:
+        return _neo4j_store
+    with _factory_lock:
+        if _neo4j_store is None:
+            from src.worker.hybrid_v2.services.neo4j_store import Neo4jStoreV3
 
-        _neo4j_store = Neo4jStoreV3(
-            uri=settings.NEO4J_URI or "",
-            username=settings.NEO4J_USERNAME or "",
-            password=settings.NEO4J_PASSWORD or "",
-        )
+            _neo4j_store = Neo4jStoreV3(
+                uri=settings.NEO4J_URI or "",
+                username=settings.NEO4J_USERNAME or "",
+                password=settings.NEO4J_PASSWORD or "",
+            )
     return _neo4j_store
 
 
@@ -35,30 +41,33 @@ def get_lazygraphrag_indexing_pipeline():
     """Create (or reuse) the indexing pipeline used by the hybrid LazyGraphRAG system."""
     global _indexing_pipeline
 
-    if _indexing_pipeline is None:
-        from src.worker.services.llm_service import LLMService
-        from src.worker.hybrid_v2.indexing.lazygraphrag_pipeline import (
-            LazyGraphRAGIndexingConfig,
-            LazyGraphRAGIndexingPipeline,
-        )
+    if _indexing_pipeline is not None:
+        return _indexing_pipeline
+    with _factory_lock:
+        if _indexing_pipeline is None:
+            from src.worker.services.llm_service import LLMService
+            from src.worker.hybrid_v2.indexing.lazygraphrag_pipeline import (
+                LazyGraphRAGIndexingConfig,
+                LazyGraphRAGIndexingPipeline,
+            )
 
-        store = get_neo4j_store()
-        llm_service = LLMService()
+            store = get_neo4j_store()
+            llm_service = LLMService()
 
-        config = LazyGraphRAGIndexingConfig(
-            chunk_size=512,
-            chunk_overlap=64,
-            embedding_dimensions=settings.AZURE_OPENAI_EMBEDDING_DIMENSIONS,
-        )
+            config = LazyGraphRAGIndexingConfig(
+                chunk_size=512,
+                chunk_overlap=64,
+                embedding_dimensions=settings.AZURE_OPENAI_EMBEDDING_DIMENSIONS,
+            )
 
-        # Best-effort: allow hybrid indexing to run even when LLM/embeddings are not configured.
-        # This keeps the endpoint usable for chunk-only indexing in constrained environments.
-        _indexing_pipeline = LazyGraphRAGIndexingPipeline(
-            neo4j_store=store,
-            llm=llm_service.get_indexing_llm() if llm_service.llm is not None else None,
-            embedder=llm_service.embed_model,
-            config=config,
-        )
+            # Best-effort: allow hybrid indexing to run even when LLM/embeddings are not configured.
+            # This keeps the endpoint usable for chunk-only indexing in constrained environments.
+            _indexing_pipeline = LazyGraphRAGIndexingPipeline(
+                neo4j_store=store,
+                llm=llm_service.get_indexing_llm() if llm_service.llm is not None else None,
+                embedder=llm_service.embed_model,
+                config=config,
+            )
 
     return _indexing_pipeline
 
@@ -78,42 +87,45 @@ def get_lazygraphrag_indexing_pipeline_v2():
     """
     global _indexing_pipeline_v2
 
-    if _indexing_pipeline_v2 is None:
-        from src.worker.services.llm_service import LLMService
-        from src.worker.hybrid_v2.indexing.lazygraphrag_pipeline import (
-            LazyGraphRAGIndexingConfig,
-            LazyGraphRAGIndexingPipeline,
-        )
-        from src.worker.hybrid_v2.embeddings import get_voyage_embed_service, is_voyage_v2_enabled
+    if _indexing_pipeline_v2 is not None:
+        return _indexing_pipeline_v2
+    with _factory_lock:
+        if _indexing_pipeline_v2 is None:
+            from src.worker.services.llm_service import LLMService
+            from src.worker.hybrid_v2.indexing.lazygraphrag_pipeline import (
+                LazyGraphRAGIndexingConfig,
+                LazyGraphRAGIndexingPipeline,
+            )
+            from src.worker.hybrid_v2.embeddings import get_voyage_embed_service, is_voyage_v2_enabled
 
-        store = get_neo4j_store()
-        llm_service = LLMService()
+            store = get_neo4j_store()
+            llm_service = LLMService()
 
-        # V2 config: Voyage dimensions (2048 for better accuracy)
-        config = LazyGraphRAGIndexingConfig(
-            chunk_size=1500,  # Section-aware: larger chunks (section boundaries)
-            chunk_overlap=50,  # Overlap for split sections
-            embedding_dimensions=settings.VOYAGE_EMBEDDING_DIM,  # 2048
-        )
-
-        # Get Voyage embedder — required, no fallback to OpenAI
-        embedder = None
-        if is_voyage_v2_enabled():
-            voyage_service = get_voyage_embed_service()
-            embedder = voyage_service.get_llama_index_embed_model()
-        else:
-            raise ValueError(
-                "Voyage V2 embeddings must be enabled for V2 pipeline. "
-                "Set VOYAGE_V2_ENABLED=True and VOYAGE_API_KEY in environment."
+            # V2 config: Voyage dimensions (2048 for better accuracy)
+            config = LazyGraphRAGIndexingConfig(
+                chunk_size=1500,  # Section-aware: larger chunks (section boundaries)
+                chunk_overlap=50,  # Overlap for split sections
+                embedding_dimensions=settings.VOYAGE_EMBEDDING_DIM,  # 2048
             )
 
-        _indexing_pipeline_v2 = LazyGraphRAGIndexingPipeline(
-            neo4j_store=store,
-            llm=llm_service.get_indexing_llm() if llm_service.llm is not None else None,
-            embedder=embedder,
-            config=config,
-            # V2 flag: store in embedding_v2 property
-            use_v2_embedding_property=True,
-        )
+            # Get Voyage embedder — required, no fallback to OpenAI
+            embedder = None
+            if is_voyage_v2_enabled():
+                voyage_service = get_voyage_embed_service()
+                embedder = voyage_service.get_llama_index_embed_model()
+            else:
+                raise ValueError(
+                    "Voyage V2 embeddings must be enabled for V2 pipeline. "
+                    "Set VOYAGE_V2_ENABLED=True and VOYAGE_API_KEY in environment."
+                )
+
+            _indexing_pipeline_v2 = LazyGraphRAGIndexingPipeline(
+                neo4j_store=store,
+                llm=llm_service.get_indexing_llm() if llm_service.llm is not None else None,
+                embedder=embedder,
+                config=config,
+                # V2 flag: store in embedding_v2 property
+                use_v2_embedding_property=True,
+            )
 
     return _indexing_pipeline_v2

@@ -13,6 +13,7 @@ across many small personal datasets.
 
 import time
 import logging
+import threading
 from typing import Dict, Optional, List, Any
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -45,11 +46,15 @@ class QuotaManager:
     """
     
     _instance: Optional["QuotaManager"] = None
+    _instance_lock = threading.Lock()
     
     def __new__(cls) -> "QuotaManager":
-        if cls._instance is None:
-            cls._instance = super(QuotaManager, cls).__new__(cls)
-            cls._instance._initialize()
+        if cls._instance is not None:
+            return cls._instance
+        with cls._instance_lock:
+            if cls._instance is None:
+                cls._instance = super(QuotaManager, cls).__new__(cls)
+                cls._instance._initialize()
         return cls._instance
     
     def _initialize(self) -> None:
@@ -60,8 +65,9 @@ class QuotaManager:
         # Per-tenant custom quotas (overrides)
         self.custom_quotas: Dict[str, TenantQuota] = {}
         
-        # Rate limiting tracking
+        # Rate limiting tracking (protected by _rate_lock)
         self.query_counts: Dict[str, List[float]] = defaultdict(list)  # group_id -> [timestamps]
+        self._rate_lock = threading.Lock()
         
         logger.info("QuotaManager initialized with defaults")
     
@@ -130,22 +136,23 @@ class QuotaManager:
         now = time.time()
         hour_ago = now - 3600
         
-        # Get query timestamps for this tenant
-        timestamps = self.query_counts[group_id]
-        
-        # Remove old timestamps (outside sliding window)
-        timestamps[:] = [ts for ts in timestamps if ts > hour_ago]
-        
-        # Check if within limit
-        if len(timestamps) >= quota.max_queries_per_hour:
-            logger.warning(
-                f"Rate limit exceeded for {group_id}: "
-                f"{len(timestamps)}/{quota.max_queries_per_hour} queries/hour"
-            )
-            return False
-        
-        # Record this query
-        timestamps.append(now)
+        with self._rate_lock:
+            # Get query timestamps for this tenant
+            timestamps = self.query_counts[group_id]
+            
+            # Remove old timestamps (outside sliding window)
+            timestamps[:] = [ts for ts in timestamps if ts > hour_ago]
+            
+            # Check if within limit
+            if len(timestamps) >= quota.max_queries_per_hour:
+                logger.warning(
+                    f"Rate limit exceeded for {group_id}: "
+                    f"{len(timestamps)}/{quota.max_queries_per_hour} queries/hour"
+                )
+                return False
+            
+            # Record this query
+            timestamps.append(now)
         return True
     
     async def check_query_rate_limit(self, group_id: str) -> bool:
