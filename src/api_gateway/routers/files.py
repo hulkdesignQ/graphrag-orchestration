@@ -10,7 +10,7 @@ import logging
 import mimetypes
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File as FastAPIFile
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, UploadFile, File as FastAPIFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
@@ -63,9 +63,9 @@ def _get_ingester(request: Request):
     return getattr(request.app.state, "ingester", None)
 
 
-def _get_graphrag_client(request: Request):
-    """Get the GraphRAG client from app state (optional)."""
-    return getattr(request.app.state, "graphrag_client", None)
+def _get_doc_sync(request: Request):
+    """Get the DocumentSyncService from app state (optional, for Neo4j sync)."""
+    return getattr(request.app.state, "document_sync_service", None)
 
 
 # ==================== Endpoints ====================
@@ -73,6 +73,7 @@ def _get_graphrag_client(request: Request):
 @router.post("/upload")
 async def upload_files(
     request: Request,
+    background_tasks: BackgroundTasks,
     file: List[UploadFile] = FastAPIFile(...),
     group_id: str = Depends(get_group_id),
     user_id: str = Depends(get_user_id),
@@ -80,6 +81,7 @@ async def upload_files(
     """Upload one or more files. Supports multi-file upload."""
     blob_manager = _get_blob_manager(request)
     ingester = _get_ingester(request)
+    doc_sync = _get_doc_sync(request)
 
     results = []
     for f in file:
@@ -92,10 +94,18 @@ async def upload_files(
                     IngesterFile(content=f, url=file_url, acls={"oids": [user_id]}),
                     user_oid=user_id,
                 )
-            results.append({"filename": f.filename, "status": "success"})
+            results.append({"filename": f.filename, "status": "success", "url": file_url})
         except Exception as e:
             logger.error("Error uploading file %s: %s", f.filename, e)
             results.append({"filename": f.filename, "status": "failed", "error": str(e)})
+
+    # Trigger background indexing for successful uploads
+    if doc_sync:
+        for r in results:
+            if r["status"] == "success":
+                background_tasks.add_task(
+                    doc_sync.on_file_uploaded, group_id, r["filename"], r["url"]
+                )
 
     success_count = sum(1 for r in results if r["status"] == "success")
     if success_count == len(results):
@@ -116,6 +126,7 @@ async def upload_files(
 async def delete_uploaded(
     request: Request,
     body: DeleteFileRequest,
+    background_tasks: BackgroundTasks,
     group_id: str = Depends(get_group_id),
     user_id: str = Depends(get_user_id),
 ):
@@ -127,6 +138,11 @@ async def delete_uploaded(
     if ingester:
         await ingester.remove_file(body.filename, user_id)
 
+    # Delete graph data in background
+    doc_sync = _get_doc_sync(request)
+    if doc_sync:
+        background_tasks.add_task(doc_sync.on_file_deleted, group_id, body.filename)
+
     return {"message": f"File {body.filename} deleted successfully"}
 
 
@@ -134,6 +150,7 @@ async def delete_uploaded(
 async def delete_uploaded_bulk(
     request: Request,
     body: BulkDeleteRequest,
+    background_tasks: BackgroundTasks,
     group_id: str = Depends(get_group_id),
     user_id: str = Depends(get_user_id),
 ):
@@ -145,17 +162,26 @@ async def delete_uploaded_bulk(
     ingester = _get_ingester(request)
 
     results = []
+    successful_filenames = []
     for filename in body.filenames:
         try:
             await blob_manager.remove_blob(filename, user_id)
             if ingester:
                 await ingester.remove_file(filename, user_id)
             results.append({"filename": filename, "status": "success"})
+            successful_filenames.append(filename)
         except Exception as e:
             logger.error("Error deleting file %s: %s", filename, e)
             results.append({"filename": filename, "status": "failed", "error": str(e)})
 
-    success_count = sum(1 for r in results if r["status"] == "success")
+    # Delete graph data in background for successfully deleted files
+    doc_sync = _get_doc_sync(request)
+    if doc_sync and successful_filenames:
+        background_tasks.add_task(
+            doc_sync.on_file_deleted_bulk, group_id, successful_filenames
+        )
+
+    success_count = len(successful_filenames)
     if success_count == len(results):
         return JSONResponse({"message": f"{len(results)} file(s) deleted successfully", "results": results})
     elif success_count > 0:
@@ -195,7 +221,7 @@ async def rename_uploaded(
 
     blob_manager = _get_blob_manager(request)
     ingester = _get_ingester(request)
-    graphrag_client = _get_graphrag_client(request)
+    doc_sync = _get_doc_sync(request)
 
     try:
         # Step 1: Rename in ADLS
@@ -205,26 +231,18 @@ async def rename_uploaded(
         if ingester:
             await ingester.remove_file(body.old_filename, user_id)
 
-        # Step 3: Update Neo4j via GraphRAG (if available)
-        graphrag_result = None
-        if graphrag_client:
-            try:
-                graphrag_result = await graphrag_client.rename_document(
-                    group_id=group_id,
-                    old_document_id=body.old_filename,
-                    new_document_id=body.new_filename,
-                    new_title=body.new_filename,
-                    new_source=new_url,
-                    keep_alias=True,
-                )
-            except Exception as e:
-                logger.warning("Failed to update Neo4j on rename: %s", e)
+        # Step 3: Update Neo4j directly via DocumentSyncService
+        rename_result = None
+        if doc_sync:
+            rename_result = await doc_sync.on_file_renamed(
+                group_id, body.old_filename, body.new_filename, new_url
+            )
 
         return {
             "message": f"File renamed from {body.old_filename} to {body.new_filename}",
             "new_url": new_url,
-            "neo4j_updated": graphrag_result is not None and graphrag_result.get("success", False),
-            "aliases": graphrag_result.get("aliases", []) if graphrag_result else [],
+            "neo4j_updated": rename_result is not None and rename_result.get("success", False),
+            "aliases": rename_result.get("aliases", []) if rename_result else [],
         }
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail=f"File not found: {body.old_filename}")
@@ -236,6 +254,7 @@ async def rename_uploaded(
 async def move_uploaded(
     request: Request,
     body: MoveFileRequest,
+    background_tasks: BackgroundTasks,
     group_id: str = Depends(get_group_id),
     user_id: str = Depends(get_user_id),
 ):
@@ -244,6 +263,14 @@ async def move_uploaded(
 
     try:
         new_url = await blob_manager.move_blob(body.filename, body.source_folder, body.dest_folder, user_id)
+
+        # Update Document.source in Neo4j in background
+        doc_sync = _get_doc_sync(request)
+        if doc_sync:
+            background_tasks.add_task(
+                doc_sync.on_file_moved, group_id, body.filename, new_url
+            )
+
         return {
             "message": f"File {body.filename} moved to {body.dest_folder or 'root'}",
             "new_url": new_url,
@@ -260,6 +287,7 @@ async def move_uploaded(
 async def copy_uploaded(
     request: Request,
     body: CopyFileRequest,
+    background_tasks: BackgroundTasks,
     group_id: str = Depends(get_group_id),
     user_id: str = Depends(get_user_id),
 ):
@@ -271,6 +299,14 @@ async def copy_uploaded(
 
     try:
         new_url = await blob_manager.copy_blob(body.filename, body.dest_filename, user_id)
+
+        # Trigger indexing for the copied file in background
+        doc_sync = _get_doc_sync(request)
+        if doc_sync:
+            background_tasks.add_task(
+                doc_sync.on_file_copied, group_id, body.dest_filename, new_url
+            )
+
         return {
             "message": f"File copied from {body.filename} to {body.dest_filename}",
             "new_url": new_url,

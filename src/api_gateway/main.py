@@ -88,8 +88,16 @@ async def lifespan(app: FastAPI):
                         password=app_settings.NEO4J_PASSWORD,
                     )
                     hybrid_store_v2.initialize_schema()
-                    logger.info("hybrid_v2_neo4j_schema_initialized", 
+                    logger.info("hybrid_v2_neo4j_schema_initialized",
                                message="V2 vector indexes (entity_embedding_v2) created")
+
+                    # Initialize DocumentSyncService for file→graph sync
+                    try:
+                        from src.api_gateway.services.document_sync import DocumentSyncService
+                        app.state.document_sync_service = DocumentSyncService()
+                        logger.info("document_sync_service_initialized")
+                    except Exception as e:
+                        logger.error("document_sync_service_init_failed", error=str(e))
                 else:
                     logger.warning("hybrid_schema_skip",
                                   message="Neo4j credentials incomplete - skipping schema init")
