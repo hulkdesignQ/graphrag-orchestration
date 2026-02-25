@@ -2117,6 +2117,46 @@ class Neo4jStoreV3:
         with self.get_retry_session() as session:
             session.run(query, pairs=next_pairs, group_id=group_id)
     
+    def link_sentences_to_extra_chunks(
+        self,
+        group_id: str,
+        extra_chunk_map: Dict[str, List[str]],
+    ) -> int:
+        """Create additional PART_OF edges for sentences in duplicate chunks.
+
+        When section-aware chunking produces overlapping chunks, the same
+        sentence text exists in multiple chunks.  Sentence dedup keeps one
+        node per unique text, but we need PART_OF edges to *every* parent
+        chunk so that ``_focused_text()`` denoising works on all chunks.
+
+        Args:
+            group_id: Group identifier.
+            extra_chunk_map: sentence_id → list of additional chunk_ids.
+
+        Returns:
+            Number of PART_OF edges created.
+        """
+        if not extra_chunk_map:
+            return 0
+
+        pairs = []
+        for sent_id, chunk_ids in extra_chunk_map.items():
+            for cid in chunk_ids:
+                pairs.append({"sent_id": sent_id, "chunk_id": cid})
+
+        query = """
+        UNWIND $pairs AS p
+        MATCH (sent:Sentence {id: p.sent_id, group_id: $group_id})
+        MATCH (chunk:TextChunk {id: p.chunk_id, group_id: $group_id})
+        MERGE (sent)-[:PART_OF]->(chunk)
+        RETURN count(*) AS cnt
+        """
+
+        with self.get_retry_session() as session:
+            result = session.run(query, pairs=pairs, group_id=group_id)
+            record = result.single()
+            return cast(int, record["cnt"]) if record else 0
+
     def create_sentence_related_to_edges(
         self,
         group_id: str,
@@ -2301,7 +2341,81 @@ class Neo4jStoreV3:
             session.run(query, group_id=group_id)
     
     # ==================== Cleanup Operations ====================
-    
+
+    def delete_document_chunks(self, group_id: str, document_id: str) -> Dict[str, int]:
+        """Delete all child nodes for a specific document before re-chunking.
+
+        Removes TextChunk, Sentence, Section, Table, Figure, KeyValue,
+        KeyValuePair, and SignatureBlock nodes linked to the document.
+        The Document node itself is kept (it will be upserted separately).
+        Orphan Entity cleanup is NOT done here — entities may be shared
+        across documents and are handled by maintenance GC.
+        """
+        query = """
+        MATCH (d:Document {id: $doc_id, group_id: $group_id})
+
+        // Collect chunks
+        OPTIONAL MATCH (c:TextChunk)-[:PART_OF|IN_DOCUMENT]->(d)
+        WITH d, collect(DISTINCT c) AS chunks
+
+        // Collect sentences linked to those chunks
+        OPTIONAL MATCH (sent:Sentence)-[:PART_OF]->(ch)
+        WHERE ch IN chunks
+        WITH d, chunks, collect(DISTINCT sent) AS sentences
+
+        // Collect sections
+        OPTIONAL MATCH (s:Section {doc_id: $doc_id, group_id: $group_id})
+        WITH d, chunks, sentences, collect(DISTINCT s) AS sections
+
+        // Collect tables, figures, KVPs, KVPairs, signature blocks
+        OPTIONAL MATCH (t:Table)-[:IN_DOCUMENT]->(d)
+        OPTIONAL MATCH (f:Figure)-[:IN_DOCUMENT]->(d)
+        OPTIONAL MATCH (kv:KeyValue)-[:IN_DOCUMENT]->(d)
+        OPTIONAL MATCH (kvp:KeyValuePair)-[:IN_DOCUMENT]->(d)
+        OPTIONAL MATCH (sb:SignatureBlock)-[:IN_DOCUMENT]->(d)
+        WITH d, chunks, sentences, sections,
+             collect(DISTINCT t) AS tables,
+             collect(DISTINCT f) AS figures,
+             collect(DISTINCT kv) AS kvs,
+             collect(DISTINCT kvp) AS kvps,
+             collect(DISTINCT sb) AS sbs
+
+        // Delete all children (DETACH removes their edges too)
+        FOREACH (x IN chunks    | DETACH DELETE x)
+        FOREACH (x IN sentences | DETACH DELETE x)
+        FOREACH (x IN sections  | DETACH DELETE x)
+        FOREACH (x IN tables    | DETACH DELETE x)
+        FOREACH (x IN figures   | DETACH DELETE x)
+        FOREACH (x IN kvs       | DETACH DELETE x)
+        FOREACH (x IN kvps      | DETACH DELETE x)
+        FOREACH (x IN sbs       | DETACH DELETE x)
+
+        RETURN size(chunks) AS chunks_deleted,
+               size(sentences) AS sentences_deleted,
+               size(sections) AS sections_deleted,
+               size(tables) + size(figures) + size(kvs) + size(kvps) + size(sbs) AS extras_deleted
+        """
+        deleted: Dict[str, int] = {}
+        with self.get_retry_session() as session:
+            result = session.run(query, doc_id=document_id, group_id=group_id)
+            record = result.single()
+            if record:
+                deleted = {
+                    "chunks": record["chunks_deleted"],
+                    "sentences": record["sentences_deleted"],
+                    "sections": record["sections_deleted"],
+                    "extras": record["extras_deleted"],
+                }
+            else:
+                deleted = {"chunks": 0, "sentences": 0, "sections": 0, "extras": 0}
+
+        total = sum(deleted.values())
+        if total > 0:
+            logger.info(
+                f"Cleaned stale children for doc {document_id} in group {group_id}: {deleted}"
+            )
+        return deleted
+
     def delete_group_data(self, group_id: str) -> Dict[str, int]:
         """Delete all data for a group (for cleanup/reindexing)."""
         queries = [

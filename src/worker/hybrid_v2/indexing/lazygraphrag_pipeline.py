@@ -323,6 +323,13 @@ class LazyGraphRAGIndexingPipeline:
                 ),
             )
 
+            # Clean stale children (chunks, sentences, sections, etc.) before
+            # creating new ones.  Prevents orphan chunks from prior indexing
+            # runs with different chunking strategies/counts.
+            # Skipped when reindex=True since delete_group_data already wiped.
+            if not reindex:
+                self.neo4j_store.delete_document_chunks(group_id, doc_id)
+
             chunks = await self._chunk_document(doc, doc_id)
             for c in chunks:
                 chunk_to_doc_id[c.id] = doc_id
@@ -843,7 +850,7 @@ class LazyGraphRAGIndexingPipeline:
                 chunk_section_map[chunk.id] = " > ".join(section_path)
         
         # Extract sentences from all chunks (with cross-chunk dedup)
-        raw_sentences = extract_sentences_from_chunks(chunks, chunk_section_map)
+        raw_sentences, extra_chunk_map = extract_sentences_from_chunks(chunks, chunk_section_map)
         if not raw_sentences:
             logger.info("skeleton_no_sentences_extracted")
             return stats
@@ -1021,6 +1028,21 @@ class LazyGraphRAGIndexingPipeline:
         # Persist in Neo4j
         count = self.neo4j_store.upsert_sentences_batch(group_id, sentence_objects)
         stats["sentences_created"] = count
+        
+        # Create extra PART_OF edges for duplicate chunks.
+        # When section-aware chunking produces overlapping chunks, the same
+        # sentence text appears in multiple chunks. The dedup keeps one
+        # Sentence node but we must link it to ALL parent chunks so that
+        # _focused_text() denoising works on every chunk.
+        if extra_chunk_map:
+            extra_count = self.neo4j_store.link_sentences_to_extra_chunks(
+                group_id, extra_chunk_map,
+            )
+            stats["extra_part_of_edges"] = extra_count
+            logger.info(
+                "skeleton_extra_part_of_edges",
+                extra={"edges_created": extra_count, "sentences_affected": len(extra_chunk_map)},
+            )
         
         return stats
 

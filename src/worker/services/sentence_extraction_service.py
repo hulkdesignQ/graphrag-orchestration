@@ -21,7 +21,7 @@ Benchmark results (Strategy A):
 
 import re
 import threading
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import structlog
 
@@ -306,7 +306,7 @@ def extract_sentences_from_chunk(
 def extract_sentences_from_chunks(
     chunks: List[Any],
     chunk_section_map: Optional[Dict[str, str]] = None,
-) -> List[Dict[str, Any]]:
+) -> Tuple[List[Dict[str, Any]], Dict[str, List[str]]]:
     """Extract sentences from all chunks, with cross-chunk deduplication.
     
     Args:
@@ -314,10 +314,15 @@ def extract_sentences_from_chunks(
         chunk_section_map: Optional map of chunk_id → section_path
         
     Returns:
-        Deduplicated list of sentence dicts ready for Sentence dataclass creation
+        Tuple of:
+        - Deduplicated list of sentence dicts ready for Sentence dataclass creation
+        - extra_chunk_map: sentence_id → [extra_chunk_ids] for duplicate chunks
+          that contain the same sentence text. Used to create additional PART_OF
+          edges so every chunk has Sentence nodes for denoising.
     """
     all_sentences: List[Dict[str, Any]] = []
-    seen_texts: set = set()
+    seen_texts: Dict[str, str] = {}  # text_key → sentence_id of first occurrence
+    extra_chunk_map: Dict[str, List[str]] = {}  # sentence_id → [extra chunk_ids]
     
     for chunk in chunks:
         metadata = chunk.metadata if isinstance(chunk.metadata, dict) else {}
@@ -341,25 +346,30 @@ def extract_sentences_from_chunks(
             section_path=section_path,
         )
         
-        # Cross-chunk dedup (WARRANTY document had 3 duplicate chunk pairs)
+        # Cross-chunk dedup: keep first occurrence, track extra chunk_ids
         for sent in chunk_sentences:
             text_key = sent["text"].strip().lower()
             if text_key in seen_texts:
+                # Record extra chunk_id so PART_OF edge can be created later
+                first_sent_id = seen_texts[text_key]
+                extra_chunk_map.setdefault(first_sent_id, []).append(chunk.id)
                 continue
-            seen_texts.add(text_key)
+            seen_texts[text_key] = sent["id"]
             all_sentences.append(sent)
     
+    extra_links = sum(len(v) for v in extra_chunk_map.values())
     logger.info(
         "sentence_extraction_complete",
         total_chunks=len(chunks),
         total_sentences=len(all_sentences),
+        extra_chunk_links=extra_links,
         dedup_removed=sum(
             len(extract_sentences_from_chunk(c.id, c.text, c.metadata if isinstance(c.metadata, dict) else {}, c.document_id))
             for c in chunks
         ) - len(all_sentences) if len(chunks) <= 50 else "skipped",
     )
     
-    return all_sentences
+    return all_sentences, extra_chunk_map
 
 
 def format_skeleton_context_for_prompt(
