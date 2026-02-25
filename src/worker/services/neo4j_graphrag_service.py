@@ -116,6 +116,7 @@ class Neo4jGraphRAGService:
         self._driver = None
         self._llm = None
         self._embedder = None
+        self._prop_lock = threading.Lock()
         
         # Cache for retrievers per group
         self._retriever_cache: Dict[str, Dict[str, Any]] = {}
@@ -123,40 +124,49 @@ class Neo4jGraphRAGService:
     @property
     def driver(self) -> neo4j.Driver:
         """Lazy initialization of Neo4j driver."""
-        if self._driver is None:
-            uri = settings.NEO4J_URI or "neo4j+s://localhost:7687"
-            username = settings.NEO4J_USERNAME or "neo4j"
-            password = settings.NEO4J_PASSWORD or "password"
-            self._driver = neo4j.GraphDatabase.driver(
-                uri,
-                auth=(username, password),
-            )
+        if self._driver is not None:
+            return self._driver
+        with self._prop_lock:
+            if self._driver is None:
+                uri = settings.NEO4J_URI or "neo4j+s://localhost:7687"
+                username = settings.NEO4J_USERNAME or "neo4j"
+                password = settings.NEO4J_PASSWORD or "password"
+                self._driver = neo4j.GraphDatabase.driver(
+                    uri,
+                    auth=(username, password),
+                )
         return self._driver
     
     @property
     def llm(self) -> AzureOpenAILLM:
         """Lazy initialization of Azure OpenAI LLM."""
-        if self._llm is None:
-            self._llm = AzureOpenAILLM(
-                model_name=settings.AZURE_OPENAI_DEPLOYMENT_NAME,
-                azure_endpoint=settings.AZURE_OPENAI_ENDPOINT,
-                api_key=settings.AZURE_OPENAI_API_KEY,
-                api_version=settings.AZURE_OPENAI_API_VERSION or "2024-02-01",
-            )
+        if self._llm is not None:
+            return self._llm
+        with self._prop_lock:
+            if self._llm is None:
+                self._llm = AzureOpenAILLM(
+                    model_name=settings.AZURE_OPENAI_DEPLOYMENT_NAME,
+                    azure_endpoint=settings.AZURE_OPENAI_ENDPOINT,
+                    api_key=settings.AZURE_OPENAI_API_KEY,
+                    api_version=settings.AZURE_OPENAI_API_VERSION or "2024-02-01",
+                )
         return self._llm
     
     @property
     def embedder(self) -> "DimensionAwareAzureEmbeddings":
         """Lazy initialization of V1 legacy Azure OpenAI embeddings (fallback for groups not yet on Voyage V2)."""
-        if self._embedder is None:
-            # Wrap AzureOpenAIEmbeddings to always pass dimensions parameter
-            self._embedder = DimensionAwareAzureEmbeddings(
-                model=settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT,  # V1 legacy: text-embedding-3-large
-                azure_endpoint=settings.AZURE_OPENAI_ENDPOINT,
-                api_key=settings.AZURE_OPENAI_API_KEY,
-                api_version=settings.AZURE_OPENAI_API_VERSION or "2024-10-21",
-                dimensions=settings.AZURE_OPENAI_EMBEDDING_DIMENSIONS,  # 3072 for V1 text-embedding-3-large
-            )
+        if self._embedder is not None:
+            return self._embedder
+        with self._prop_lock:
+            if self._embedder is None:
+                # Wrap AzureOpenAIEmbeddings to always pass dimensions parameter
+                self._embedder = DimensionAwareAzureEmbeddings(
+                    model=settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT,  # V1 legacy: text-embedding-3-large
+                    azure_endpoint=settings.AZURE_OPENAI_ENDPOINT,
+                    api_key=settings.AZURE_OPENAI_API_KEY,
+                    api_version=settings.AZURE_OPENAI_API_VERSION or "2024-10-21",
+                    dimensions=settings.AZURE_OPENAI_EMBEDDING_DIMENSIONS,  # 3072 for V1 text-embedding-3-large
+                )
         return self._embedder
     
     def _get_retrievers(self, group_id: str) -> Dict[str, Any]:
@@ -173,69 +183,72 @@ class Neo4jGraphRAGService:
         Key insight from Neo4j GraphRAG: Search CHUNKS (which have the text), 
         then use retrieval_query to traverse to related entities for context.
         """
-        if group_id not in self._retriever_cache:
-            # Vector retriever for local search - search CHUNKS not entities
-            # The chunk has the full text context (e.g., "Bob is the CEO of TechCorp")
-            # Then retrieval_query can traverse to related entities
-            vector_retriever = VectorCypherRetriever(
-                driver=self.driver,
-                index_name="chunk_vector",  # Search chunks which have text content
-                embedder=self.embedder,
-                retrieval_query="""
-                    WITH node, score
-                    WHERE node.group_id = $group_id
-                    // Return chunk text and related entities
-                    OPTIONAL MATCH (entity)-[:MENTIONED_IN|PART_OF_CHUNK|FROM_CHUNK]->(node)
-                    WHERE entity.group_id = $group_id
-                    WITH node, score, collect(DISTINCT entity.name) AS related_entities
-                    RETURN node.text AS text,
-                           node.id AS chunk_id,
-                           related_entities,
-                           labels(node)[0] AS type,
-                           score
-                """,
-                neo4j_database=settings.NEO4J_DATABASE or "neo4j",
-            )
+        if group_id in self._retriever_cache:
+            return self._retriever_cache[group_id]
+        with self._prop_lock:
+            if group_id not in self._retriever_cache:
+                # Vector retriever for local search - search CHUNKS not entities
+                # The chunk has the full text context (e.g., "Bob is the CEO of TechCorp")
+                # Then retrieval_query can traverse to related entities
+                vector_retriever = VectorCypherRetriever(
+                    driver=self.driver,
+                    index_name="chunk_vector",  # Search chunks which have text content
+                    embedder=self.embedder,
+                    retrieval_query="""
+                        WITH node, score
+                        WHERE node.group_id = $group_id
+                        // Return chunk text and related entities
+                        OPTIONAL MATCH (entity)-[:MENTIONED_IN|PART_OF_CHUNK|FROM_CHUNK]->(node)
+                        WHERE entity.group_id = $group_id
+                        WITH node, score, collect(DISTINCT entity.name) AS related_entities
+                        RETURN node.text AS text,
+                               node.id AS chunk_id,
+                               related_entities,
+                               labels(node)[0] AS type,
+                               score
+                    """,
+                    neo4j_database=settings.NEO4J_DATABASE or "neo4j",
+                )
             
-            # Hybrid retriever for combined search - also search chunks
-            hybrid_retriever = HybridCypherRetriever(
-                driver=self.driver,
-                vector_index_name="chunk_vector",  # Search chunks for text content
-                fulltext_index_name="chunk_fulltext",  # Need fulltext on chunks
-                embedder=self.embedder,
-                retrieval_query="""
-                    WITH node, score
-                    WHERE node.group_id = $group_id
-                    OPTIONAL MATCH (entity)-[:MENTIONED_IN|PART_OF_CHUNK|FROM_CHUNK]->(node)
-                    WHERE entity.group_id = $group_id
-                    WITH node, score, collect(DISTINCT entity.name) AS related_entities
-                    RETURN node.text AS text,
-                           node.id AS chunk_id,
-                           related_entities,
-                           labels(node)[0] AS type,
-                           score
-                """,
-                neo4j_database=settings.NEO4J_DATABASE or "neo4j",
-            )
+                # Hybrid retriever for combined search - also search chunks
+                hybrid_retriever = HybridCypherRetriever(
+                    driver=self.driver,
+                    vector_index_name="chunk_vector",  # Search chunks for text content
+                    fulltext_index_name="chunk_fulltext",  # Need fulltext on chunks
+                    embedder=self.embedder,
+                    retrieval_query="""
+                        WITH node, score
+                        WHERE node.group_id = $group_id
+                        OPTIONAL MATCH (entity)-[:MENTIONED_IN|PART_OF_CHUNK|FROM_CHUNK]->(node)
+                        WHERE entity.group_id = $group_id
+                        WITH node, score, collect(DISTINCT entity.name) AS related_entities
+                        RETURN node.text AS text,
+                               node.id AS chunk_id,
+                               related_entities,
+                               labels(node)[0] AS type,
+                               score
+                    """,
+                    neo4j_database=settings.NEO4J_DATABASE or "neo4j",
+                )
             
-            # Text2Cypher for structured queries
-            text2cypher_retriever = Text2CypherRetriever(
-                driver=self.driver,
-                llm=self.llm,
-                neo4j_schema=self._get_neo4j_schema(group_id),
-                # Add group_id filter examples to guide Cypher generation
-                examples=[
-                    f"Who is the CEO? -> MATCH (p:Person)-[:WORKS_FOR]->(o:Organization) WHERE p.group_id = '{group_id}' AND p.title CONTAINS 'CEO' RETURN p.name, o.name",
-                    f"What companies are mentioned? -> MATCH (o:Organization) WHERE o.group_id = '{group_id}' RETURN DISTINCT o.name",
-                ],
-                neo4j_database=settings.NEO4J_DATABASE or "neo4j",
-            )
+                # Text2Cypher for structured queries
+                text2cypher_retriever = Text2CypherRetriever(
+                    driver=self.driver,
+                    llm=self.llm,
+                    neo4j_schema=self._get_neo4j_schema(group_id),
+                    # Add group_id filter examples to guide Cypher generation
+                    examples=[
+                        f"Who is the CEO? -> MATCH (p:Person)-[:WORKS_FOR]->(o:Organization) WHERE p.group_id = '{group_id}' AND p.title CONTAINS 'CEO' RETURN p.name, o.name",
+                        f"What companies are mentioned? -> MATCH (o:Organization) WHERE o.group_id = '{group_id}' RETURN DISTINCT o.name",
+                    ],
+                    neo4j_database=settings.NEO4J_DATABASE or "neo4j",
+                )
             
-            self._retriever_cache[group_id] = {
-                "vector": vector_retriever,
-                "hybrid": hybrid_retriever,
-                "text2cypher": text2cypher_retriever,
-            }
+                self._retriever_cache[group_id] = {
+                    "vector": vector_retriever,
+                    "hybrid": hybrid_retriever,
+                    "text2cypher": text2cypher_retriever,
+                }
         
         return self._retriever_cache[group_id]
     

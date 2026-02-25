@@ -15,6 +15,7 @@ import os
 import signal
 import sys
 import logging
+import threading
 from datetime import datetime
 from typing import Optional
 
@@ -45,7 +46,7 @@ class Worker:
         self.redis_service: Optional[RedisService] = None
         self.orchestrator: Optional[HybridPipeline] = None
         self.usage_tracker: Optional[UsageTracker] = None
-        self.running = True
+        self._stop_event = threading.Event()
         self.worker_id = f"worker-{os.getpid()}-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
         
     async def connect(self):
@@ -183,7 +184,7 @@ class Worker:
         
         queue = self.redis_service.queue
         
-        while self.running:
+        while not self._stop_event.is_set():
             try:
                 # Dequeue with BRPOPLPUSH (DLQ-safe)
                 job = await queue.dequeue(timeout=5)
@@ -228,7 +229,7 @@ class Worker:
     def handle_signal(self, signum, frame):
         """Handle shutdown signals gracefully."""
         logger.info(f"Received signal {signum}, shutting down...")
-        self.running = False
+        self._stop_event.set()
 
 
 async def main():

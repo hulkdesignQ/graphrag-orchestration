@@ -687,6 +687,7 @@ async def close_redis_service():
     """Close singleton RedisService."""
     global _redis_service
     
-    if _redis_service:
-        await _redis_service.close()
-        _redis_service = None
+    async with _redis_service_lock:
+        if _redis_service:
+            await _redis_service.close()
+            _redis_service = None

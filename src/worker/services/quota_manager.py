@@ -73,11 +73,13 @@ class QuotaManager:
     
     def get_quota(self, group_id: str) -> TenantQuota:
         """Get quota settings for a tenant."""
-        return self.custom_quotas.get(group_id, self.default_quota)
+        with self._rate_lock:
+            return self.custom_quotas.get(group_id, self.default_quota)
     
     def set_custom_quota(self, group_id: str, quota: TenantQuota) -> None:
         """Set custom quota for a specific tenant."""
-        self.custom_quotas[group_id] = quota
+        with self._rate_lock:
+            self.custom_quotas[group_id] = quota
         logger.info(f"Custom quota set for {group_id}: {quota.__dict__}")
     
     def check_node_quota(self, group_id: str, current_nodes: int) -> bool:

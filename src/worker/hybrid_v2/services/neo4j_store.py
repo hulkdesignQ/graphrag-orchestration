@@ -1211,7 +1211,7 @@ class Neo4jStoreV3:
     def get_child_communities(self, group_id: str, parent_id: str, child_level: int) -> List[Community]:
         """Fetch child communities linked to a parent community."""
         query = """
-        MATCH (child:Community {group_id: $group_id, level: $child_level})-[:PARENT_COMMUNITY]->(parent:Community {id: $parent_id})
+        MATCH (child:Community {group_id: $group_id, level: $child_level})-[:PARENT_COMMUNITY]->(parent:Community {id: $parent_id, group_id: $group_id})
         OPTIONAL MATCH (e:Entity {group_id: $group_id})-[:BELONGS_TO]->(child)
         RETURN child AS c, collect(DISTINCT e.id) AS entity_ids
         ORDER BY child.rank DESC

@@ -15,6 +15,7 @@ from typing import List, Optional, Dict, Any, Tuple, TYPE_CHECKING
 import logging
 import re
 import asyncio
+import threading
 
 from llama_index.core.llms import ChatMessage
 from llama_index.core.graph_stores.types import LabelledNode, Relation
@@ -45,6 +46,7 @@ class CommunityService:
         
         # Community summaries cache per group
         self._community_summaries: Dict[str, Dict[int, str]] = {}
+        self._cache_lock = threading.Lock()
         
         # Max cluster size for Leiden algorithm
         self.max_cluster_size = settings.GRAPHRAG_MAX_CLUSTER_SIZE or 10
@@ -389,33 +391,37 @@ class CommunityService:
         if group_id in self._community_summaries:
             return self._community_summaries[group_id]
         
-        # Try to load from Neo4j
-        store = self.graph_service.get_store(group_id)
-        
-        try:
-            result = store.structured_query(
-                """
-                MATCH (c:Community)
-                WHERE c.group_id = $group_id
-                RETURN c.id AS community_id, c.summary AS summary
-                """,
-                param_map={"group_id": group_id}
-            )
+        with self._cache_lock:
+            if group_id in self._community_summaries:
+                return self._community_summaries[group_id]
+
+            # Try to load from Neo4j
+            store = self.graph_service.get_store(group_id)
             
-            summaries = {}
-            for record in result or []:
-                # Extract community number from ID
-                cid = record.get('community_id', '')
-                if '_community_' in cid:
-                    num = int(cid.split('_community_')[-1])
-                    summaries[num] = record.get('summary', '')
-            
-            self._community_summaries[group_id] = summaries
-            return summaries
-            
-        except Exception as e:
-            logger.error(f"Failed to load community summaries: {e}")
-            return {}
+            try:
+                result = store.structured_query(
+                    """
+                    MATCH (c:Community)
+                    WHERE c.group_id = $group_id
+                    RETURN c.id AS community_id, c.summary AS summary
+                    """,
+                    param_map={"group_id": group_id}
+                )
+                
+                summaries = {}
+                for record in result or []:
+                    # Extract community number from ID
+                    cid = record.get('community_id', '')
+                    if '_community_' in cid:
+                        num = int(cid.split('_community_')[-1])
+                        summaries[num] = record.get('summary', '')
+                
+                self._community_summaries[group_id] = summaries
+                return summaries
+                
+            except Exception as e:
+                logger.error(f"Failed to load community summaries: {e}")
+                return {}
     
     async def global_search(
         self, 

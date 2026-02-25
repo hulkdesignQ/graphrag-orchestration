@@ -20,6 +20,7 @@ over the upstream `hipporag` package. The native implementation provides:
 
 from typing import Dict, List, Any, Optional, Tuple
 from pathlib import Path
+import asyncio
 import json
 import threading
 import structlog
@@ -96,6 +97,7 @@ class HippoRAGService:
         self._llamaindex_retriever: Optional[Any] = None
         self._initialized = False
         self._use_llamaindex = False
+        self._init_lock = asyncio.Lock()
         
         logger.info("hipporag_service_created",
                    group_id=group_id,
@@ -127,10 +129,15 @@ class HippoRAGService:
             True if initialization succeeded, False otherwise.
         """
         if self._initialized:
-            logger.info("hipporag_already_initialized", 
-                       mode="llamaindex" if self._use_llamaindex else "legacy")
             return True
-        
+
+        async with self._init_lock:
+            if self._initialized:
+                return True
+            return await self._do_initialize()
+
+    async def _do_initialize(self) -> bool:
+        """Internal initialize — caller must hold self._init_lock."""
         # Priority 1: LlamaIndex-native retriever (preferred)
         if LLAMAINDEX_HIPPORAG_AVAILABLE and self.graph_store is not None:
             try:
