@@ -53,6 +53,7 @@ logger = structlog.get_logger(__name__)
 # Note: Pipelines are stateless and can be recreated on any instance.
 # This cache is an optimization, not a correctness requirement.
 _pipeline_cache: Dict[str, HybridPipeline] = {}
+_pipeline_cache_lock = asyncio.Lock()
 
 
 # ============================================================================
@@ -328,114 +329,115 @@ async def _get_or_create_pipeline(
     """
     cache_key = f"{group_id}:{profile.value}"
     
-    if cache_key not in _pipeline_cache:
-        logger.info("creating_hybrid_pipeline",
-                   group_id=group_id,
-                   profile=profile.value)
+    async with _pipeline_cache_lock:
+        if cache_key not in _pipeline_cache:
+            logger.info("creating_hybrid_pipeline",
+                       group_id=group_id,
+                       profile=profile.value)
 
-        # Real wiring (E2E-real): use in-process services.
-        # If a dependency is unavailable, we still construct the pipeline but
-        # downstream behavior may degrade (and E2E tests should catch it).
-        from src.worker.services import GraphService, LLMService
-        from src.worker.services.community_service import CommunityService
-        from src.worker.hybrid.indexing.hipporag_service import get_hipporag_service
-        # V2 text store has proper IN_DOCUMENT relationship support
-        from src.worker.hybrid_v2.indexing.text_store import Neo4jTextUnitStore
-        from src.worker.hybrid.indexing.text_store import HippoRAGTextUnitStore
+            # Real wiring (E2E-real): use in-process services.
+            # If a dependency is unavailable, we still construct the pipeline but
+            # downstream behavior may degrade (and E2E tests should catch it).
+            from src.worker.services import GraphService, LLMService
+            from src.worker.services.community_service import CommunityService
+            from src.worker.hybrid.indexing.hipporag_service import get_hipporag_service
+            # V2 text store has proper IN_DOCUMENT relationship support
+            from src.worker.hybrid_v2.indexing.text_store import Neo4jTextUnitStore
+            from src.worker.hybrid.indexing.text_store import HippoRAGTextUnitStore
 
-        llm_service = LLMService()
-        # Use dedicated synthesis model for final answer generation (Route 2/3)
-        llm_client = llm_service.get_synthesis_llm()
+            llm_service = LLMService()
+            # Use dedicated synthesis model for final answer generation (Route 2/3)
+            llm_client = llm_service.get_synthesis_llm()
 
-        graph_store = None
-        neo4j_driver = None
-        try:
-            graph_service = GraphService()
-            graph_store = graph_service.get_store(group_id)
-            neo4j_driver = graph_service.driver
-        except Exception as e:
-            logger.warning("hybrid_graph_store_unavailable", group_id=group_id, error=str(e))
-
-        # Community summaries (optional but improves intent disambiguation)
-        graph_communities = None
-        try:
-            community_service = CommunityService()
-            summaries = community_service.get_community_summaries(group_id)
-            graph_communities = [
-                {"title": f"Community {cid}", "summary": summary}
-                for cid, summary in sorted((summaries or {}).items(), key=lambda x: x[0])
-            ]
-        except Exception as e:
-            logger.warning("hybrid_community_summaries_unavailable", group_id=group_id, error=str(e))
-
-        # HippoRAG (Route 2/3 tracer + citation text backing)
-        hipporag_service = get_hipporag_service(group_id, "./hipporag_index")
-        try:
-            await hipporag_service.initialize()
-        except Exception as e:
-            logger.warning("hybrid_hipporag_initialize_failed", group_id=group_id, error=str(e))
-
-        hipporag_instance = hipporag_service.get_instance()
-
-        # Prefer Neo4j-backed text chunks for citations (preserves DI section_path/page_number).
-        # Fall back to HippoRAG on-disk index text if Neo4j is unavailable.
-        if neo4j_driver is not None:
-            text_unit_store = Neo4jTextUnitStore(neo4j_driver, group_id=group_id)
-        else:
-            text_unit_store = HippoRAGTextUnitStore(hipporag_service)
-
-        # Auto-detect embedding version from group's data (V1 OpenAI 3072D vs V2 Voyage 2048D)
-        # This ensures the query embeddings match how the group was indexed
-        embedding_client = llm_service.embed_model  # Default: V1 OpenAI
-        embedding_version = "v1"
-        
-        if settings.VOYAGE_API_KEY:
+            graph_store = None
+            neo4j_driver = None
             try:
-                from src.worker.services.async_neo4j_service import AsyncNeo4jService
-                # Create temporary service to detect embedding version
-                async_service = AsyncNeo4jService(
-                    uri=settings.NEO4J_URI,
-                    username=settings.NEO4J_USERNAME,
-                    password=settings.NEO4J_PASSWORD,
-                )
-                await async_service.connect()
-                embedding_version = await async_service.detect_embedding_version(group_id)
-                await async_service.close()
-                
-                if embedding_version == "v2":
-                    from src.worker.hybrid_v2.embeddings.voyage_embed import VoyageEmbedService
-                    voyage_service = VoyageEmbedService()
-                    embedding_client = voyage_service.get_llama_index_embed_model()
-                    logger.info("hybrid_using_v2_voyage_embedder", group_id=group_id, 
-                               reason="group has embedding_v2 data")
-                else:
-                    logger.info("hybrid_using_v1_openai_embedder", group_id=group_id,
-                               reason="group has v1 embedding data only")
+                graph_service = GraphService()
+                graph_store = graph_service.get_store(group_id)
+                neo4j_driver = graph_service.driver
             except Exception as e:
-                logger.warning("hybrid_embedding_detection_failed", error=str(e), group_id=group_id,
-                              fallback="v1_openai")
+                logger.warning("hybrid_graph_store_unavailable", group_id=group_id, error=str(e))
 
-        pipeline = HybridPipeline(
-            profile=profile,
-            llm_client=llm_client,
-            embedding_client=embedding_client,  # V2 Voyage (2048D) or V1 OpenAI (3072D) based on detection
-            hipporag_instance=hipporag_instance,
-            graph_store=graph_store,
-            text_unit_store=text_unit_store,
-            neo4j_driver=neo4j_driver,
-            graph_communities=graph_communities,
-            relevance_budget=relevance_budget,
-            group_id=group_id,
-        )
-        
-        # Initialize async resources (AsyncNeo4jService connection)
-        await pipeline.initialize()
-        logger.info("hybrid_pipeline_initialized_for_group", group_id=group_id, 
-                   embedding_version=embedding_version)
-        
-        _pipeline_cache[cache_key] = pipeline
+            # Community summaries (optional but improves intent disambiguation)
+            graph_communities = None
+            try:
+                community_service = CommunityService()
+                summaries = community_service.get_community_summaries(group_id)
+                graph_communities = [
+                    {"title": f"Community {cid}", "summary": summary}
+                    for cid, summary in sorted((summaries or {}).items(), key=lambda x: x[0])
+                ]
+            except Exception as e:
+                logger.warning("hybrid_community_summaries_unavailable", group_id=group_id, error=str(e))
+
+            # HippoRAG (Route 2/3 tracer + citation text backing)
+            hipporag_service = get_hipporag_service(group_id, "./hipporag_index")
+            try:
+                await hipporag_service.initialize()
+            except Exception as e:
+                logger.warning("hybrid_hipporag_initialize_failed", group_id=group_id, error=str(e))
+
+            hipporag_instance = hipporag_service.get_instance()
+
+            # Prefer Neo4j-backed text chunks for citations (preserves DI section_path/page_number).
+            # Fall back to HippoRAG on-disk index text if Neo4j is unavailable.
+            if neo4j_driver is not None:
+                text_unit_store = Neo4jTextUnitStore(neo4j_driver, group_id=group_id)
+            else:
+                text_unit_store = HippoRAGTextUnitStore(hipporag_service)
+
+            # Auto-detect embedding version from group's data (V1 OpenAI 3072D vs V2 Voyage 2048D)
+            # This ensures the query embeddings match how the group was indexed
+            embedding_client = llm_service.embed_model  # Default: V1 OpenAI
+            embedding_version = "v1"
+            
+            if settings.VOYAGE_API_KEY:
+                try:
+                    from src.worker.services.async_neo4j_service import AsyncNeo4jService
+                    # Create temporary service to detect embedding version
+                    async_service = AsyncNeo4jService(
+                        uri=settings.NEO4J_URI,
+                        username=settings.NEO4J_USERNAME,
+                        password=settings.NEO4J_PASSWORD,
+                    )
+                    await async_service.connect()
+                    embedding_version = await async_service.detect_embedding_version(group_id)
+                    await async_service.close()
+                    
+                    if embedding_version == "v2":
+                        from src.worker.hybrid_v2.embeddings.voyage_embed import VoyageEmbedService
+                        voyage_service = VoyageEmbedService()
+                        embedding_client = voyage_service.get_llama_index_embed_model()
+                        logger.info("hybrid_using_v2_voyage_embedder", group_id=group_id, 
+                                   reason="group has embedding_v2 data")
+                    else:
+                        logger.info("hybrid_using_v1_openai_embedder", group_id=group_id,
+                                   reason="group has v1 embedding data only")
+                except Exception as e:
+                    logger.warning("hybrid_embedding_detection_failed", error=str(e), group_id=group_id,
+                                  fallback="v1_openai")
+
+            pipeline = HybridPipeline(
+                profile=profile,
+                llm_client=llm_client,
+                embedding_client=embedding_client,  # V2 Voyage (2048D) or V1 OpenAI (3072D) based on detection
+                hipporag_instance=hipporag_instance,
+                graph_store=graph_store,
+                text_unit_store=text_unit_store,
+                neo4j_driver=neo4j_driver,
+                graph_communities=graph_communities,
+                relevance_budget=relevance_budget,
+                group_id=group_id,
+            )
+            
+            # Initialize async resources (AsyncNeo4jService connection)
+            await pipeline.initialize()
+            logger.info("hybrid_pipeline_initialized_for_group", group_id=group_id, 
+                       embedding_version=embedding_version)
+            
+            _pipeline_cache[cache_key] = pipeline
     
-    return _pipeline_cache[cache_key]
+        return _pipeline_cache[cache_key]
 
 
 # ============================================================================
@@ -569,7 +571,7 @@ async def hybrid_query(request: Request, body: HybridQueryRequest, group_id: str
         logger.error("hybrid_query_failed",
                     group_id=group_id,
                     error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/query/audit", response_model=HybridQueryResponse)
@@ -621,7 +623,7 @@ async def hybrid_query_audit(request: Request, body: HybridQueryRequest, group_i
         logger.error("audit_query_failed",
                     group_id=group_id,
                     error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/query/fast", response_model=HybridQueryResponse, deprecated=True)
@@ -717,7 +719,7 @@ async def hybrid_query_drift(request: Request, body: HybridQueryRequest, group_i
         logger.error("drift_query_failed",
                     group_id=group_id,
                     error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -787,11 +789,12 @@ async def configure_pipeline(request: Request, config: PipelineConfigRequest):
         profile = _get_deployment_profile(config.profile)
         
         # Clear cache to force recreation with new settings
-        cache_keys_to_remove = [
-            k for k in _pipeline_cache.keys() if k.startswith(f"{group_id}:")
-        ]
-        for key in cache_keys_to_remove:
-            del _pipeline_cache[key]
+        async with _pipeline_cache_lock:
+            cache_keys_to_remove = [
+                k for k in _pipeline_cache.keys() if k.startswith(f"{group_id}:")
+            ]
+            for key in cache_keys_to_remove:
+                del _pipeline_cache[key]
         
         # Create new pipeline with updated config
         pipeline = await _get_or_create_pipeline(
@@ -820,7 +823,7 @@ async def configure_pipeline(request: Request, config: PipelineConfigRequest):
         logger.error("configuration_failed",
                     group_id=group_id,
                     error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/di/extract", response_model=DiExtractResponse)
@@ -859,7 +862,7 @@ async def di_extract_preflight(request: Request, body: DiExtractRequest):
         raise
     except Exception as e:
         logger.exception("di_extract_preflight_failed", extra={"group_id": group_id, "error": str(e)})
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
     # Summarize per URL. Do not return full text to avoid huge payloads.
     by_url: Dict[str, Any] = {}
@@ -1395,7 +1398,7 @@ async def sync_hipporag_index(request: Request, body: SyncIndexRequest):
         logger.error("sync_hipporag_index_failed",
                     group_id=group_id,
                     error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/index/status")
@@ -1458,7 +1461,7 @@ async def get_index_status(request: Request, index_dir: str = "./hipporag_index"
         logger.error("get_index_status_failed",
                     group_id=group_id,
                     error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/index/initialize-hipporag")
@@ -1494,7 +1497,7 @@ async def initialize_hipporag(request: Request, index_dir: str = "./hipporag_ind
         logger.error("initialize_hipporag_failed",
                     group_id=group_id,
                     error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/init_vector_index")
@@ -1677,7 +1680,7 @@ async def embed_chunks(request: Request):
         logger.error("chunk_embedding_failed",
                     group_id=group_id,
                     error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/backfill_document_id")
@@ -1740,7 +1743,7 @@ async def backfill_document_id(request: Request):
         logger.error("document_id_backfill_failed",
                     group_id=group_id,
                     error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/debug/chunks")
@@ -1803,7 +1806,7 @@ async def debug_chunks(request: Request):
         
     except Exception as e:
         logger.error("debug_chunks_failed", group_id=group_id, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/debug/search_chunks")
@@ -1865,7 +1868,7 @@ async def debug_search_chunks(request: Request, contains: str, limit: int = 10):
         }
     except Exception as e:
         logger.error("debug_search_chunks_failed", group_id=group_id, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/debug/test_vector_search")
@@ -2063,7 +2066,7 @@ async def debug_test_vector_search(request: Request, body: HybridQueryRequest):
         
     except Exception as e:
         logger.error("debug_test_vector_search_failed", group_id=group_id, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/debug/section_similarity_distribution")
@@ -2220,12 +2223,10 @@ async def debug_section_similarity_distribution(request: Request):
         
     except Exception as e:
         logger.error("debug_section_similarity_distribution_failed", group_id=group_id, error=str(e))
-        import traceback
         return {
             "status": "error",
             "group_id": group_id,
-            "error": str(e),
-            "trace": traceback.format_exc()
+            "error": "Internal server error"
         }
 
 
@@ -2290,10 +2291,8 @@ async def debug_rebuild_similarity_edges(request: Request):
         
     except Exception as e:
         logger.error("debug_rebuild_similarity_edges_failed", group_id=group_id, error=str(e))
-        import traceback
         return {
             "status": "error",
             "group_id": group_id,
-            "error": str(e),
-            "trace": traceback.format_exc()
+            "error": "Internal server error"
         }

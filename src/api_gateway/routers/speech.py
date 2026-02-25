@@ -5,13 +5,16 @@ Provides Azure Text-to-Speech endpoint.
 Replaces the Quart /speech endpoint.
 """
 
+import asyncio
 import logging
 import os
 import time
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import Response
 from pydantic import BaseModel
+
+from src.api_gateway.middleware.auth import get_group_id
 
 logger = logging.getLogger(__name__)
 
@@ -24,12 +27,14 @@ class SpeechRequest(BaseModel):
 
 # Cache for speech token
 _speech_token_cache: dict = {"token": None, "expires_on": 0}
+_speech_token_lock = asyncio.Lock()
 
 
 @router.post("/speech")
 async def speech(
     request: Request,
     body: SpeechRequest,
+    group_id: str = Depends(get_group_id),
 ):
     """Synthesize text to speech using Azure Speech Service."""
     speech_service_id = os.getenv("AZURE_SPEECH_SERVICE_ID")
@@ -44,11 +49,12 @@ async def speech(
         raise HTTPException(status_code=500, detail="Azure credential not initialized")
 
     try:
-        # Refresh token if expired or expiring soon
-        if _speech_token_cache["token"] is None or _speech_token_cache["expires_on"] < time.time() + 60:
-            token = await credential.get_token("https://cognitiveservices.azure.com/.default")
-            _speech_token_cache["token"] = token.token
-            _speech_token_cache["expires_on"] = token.expires_on
+        # Refresh token if expired or expiring soon (lock prevents duplicate refresh)
+        async with _speech_token_lock:
+            if _speech_token_cache["token"] is None or _speech_token_cache["expires_on"] < time.time() + 60:
+                token = await credential.get_token("https://cognitiveservices.azure.com/.default")
+                _speech_token_cache["token"] = token.token
+                _speech_token_cache["expires_on"] = token.expires_on
 
         from azure.cognitiveservices.speech import (
             ResultReason,
@@ -78,4 +84,4 @@ async def speech(
         raise
     except Exception as e:
         logger.exception("Exception in /speech")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")

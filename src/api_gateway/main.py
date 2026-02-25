@@ -54,7 +54,18 @@ async def lifespan(app: FastAPI):
     Initializes and cleans up service connections.
     """
     # Startup
-    logger.info("service_startup", config=settings.dict())
+    # Log config with secrets redacted
+    _secret_keys = {
+        "AZURE_OPENAI_API_KEY", "NEO4J_PASSWORD", "COSMOS_KEY", "VOYAGE_API_KEY",
+        "AZURE_SEARCH_API_KEY", "AURA_DS_CLIENT_SECRET", "AZURE_DOCUMENT_INTELLIGENCE_KEY",
+        "LLAMA_CLOUD_API_KEY", "ADMIN_API_KEY", "AZURE_OPENAI_BEARER_TOKEN",
+        "AZURE_OPENAI_API_KEY_SMALL", "REDIS_PASSWORD",
+    }
+    _safe_config = {
+        k: "***" if k in _secret_keys else v
+        for k, v in settings.dict().items()
+    }
+    logger.info("service_startup", config=_safe_config)
     
     # Initialize services (singletons - will be reused across requests)
     try:
@@ -287,14 +298,17 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS Middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
+# CORS Middleware — localhost origins only in dev mode
+_cors_origins = []
+if not settings.REQUIRE_AUTH:
+    _cors_origins = [
         "http://localhost:3000",
         "http://localhost:5173",   # Vite dev server
         "http://localhost:50505",  # Legacy Quart port (if still used locally)
-    ],
+    ]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "X-Group-ID", "X-Algorithm-Version",

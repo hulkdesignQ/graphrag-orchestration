@@ -116,7 +116,7 @@ async def analyze_query(request: Request, payload: OrchestrationRequest):
         
     except Exception as e:
         logger.error("orchestration_failed", group_id=group_id, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/extract", response_model=ExtractionResponse)
@@ -198,7 +198,7 @@ Only include entities and relations that are clearly stated or strongly implied 
         
     except Exception as e:
         logger.error("extraction_failed", group_id=group_id, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 async def _classify_query(llm_service: LLMService, query: str) -> tuple[str, str]:

@@ -38,7 +38,6 @@ async def detailed_health_check() -> Dict[str, Any]:
                 result.single()
             health_status["components"]["neo4j"] = {
                 "status": "healthy",
-                "uri": graph_service.config.get("NEO4J_URI", "not configured")
             }
         else:
             health_status["components"]["neo4j"] = {
@@ -117,13 +116,13 @@ async def debug_config(
         },
         "azure_openai": {
             "endpoint_set": bool(settings.AZURE_OPENAI_ENDPOINT),
-            "deployment": settings.AZURE_OPENAI_DEPLOYMENT_NAME,
+            "deployment_set": bool(settings.AZURE_OPENAI_DEPLOYMENT_NAME),
             "api_key_set": bool(settings.AZURE_OPENAI_API_KEY),
         },
         "cosmos": {
             "endpoint_set": bool(settings.COSMOS_ENDPOINT),
             "key_set": bool(settings.COSMOS_KEY),
-            "database": settings.COSMOS_DATABASE_NAME,
+            "database_set": bool(settings.COSMOS_DATABASE_NAME),
         },
         "group_isolation": settings.ENABLE_GROUP_ISOLATION,
     }

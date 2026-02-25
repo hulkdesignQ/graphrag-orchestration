@@ -21,6 +21,7 @@ over the upstream `hipporag` package. The native implementation provides:
 from typing import Dict, List, Any, Optional, Tuple
 from pathlib import Path
 import json
+import threading
 import structlog
 
 logger = structlog.get_logger(__name__)
@@ -543,6 +544,7 @@ class _LocalPPRHippoRAG:
 
 # Singleton cache for HippoRAG services per group
 _hipporag_cache: Dict[str, HippoRAGService] = {}
+_hipporag_cache_lock = threading.Lock()
 
 
 def get_hipporag_service(
@@ -567,21 +569,22 @@ def get_hipporag_service(
     """
     cache_key = f"{group_id}:{index_dir}"
     
-    if cache_key not in _hipporag_cache:
-        _hipporag_cache[cache_key] = HippoRAGService(
-            group_id=group_id,
-            index_dir=index_dir,
-            graph_store=graph_store,
-            llm_service=llm_service,
-        )
-    elif graph_store is not None or llm_service is not None:
-        # Update existing service with new dependencies if provided
-        existing = _hipporag_cache[cache_key]
-        if graph_store is not None and existing.graph_store is None:
-            existing.graph_store = graph_store
-            existing._initialized = False  # Force re-initialization
-        if llm_service is not None and existing.llm_service is None:
-            existing.llm_service = llm_service
-            existing._initialized = False
-    
-    return _hipporag_cache[cache_key]
+    with _hipporag_cache_lock:
+        if cache_key not in _hipporag_cache:
+            _hipporag_cache[cache_key] = HippoRAGService(
+                group_id=group_id,
+                index_dir=index_dir,
+                graph_store=graph_store,
+                llm_service=llm_service,
+            )
+        elif graph_store is not None or llm_service is not None:
+            # Update existing service with new dependencies if provided
+            existing = _hipporag_cache[cache_key]
+            if graph_store is not None and existing.graph_store is None:
+                existing.graph_store = graph_store
+                existing._initialized = False  # Force re-initialization
+            if llm_service is not None and existing.llm_service is None:
+                existing.llm_service = llm_service
+                existing._initialized = False
+        
+        return _hipporag_cache[cache_key]

@@ -2582,9 +2582,12 @@ Output:
         # Use timestamp + random to make projection name unique (avoids job ID collisions in Aura GDS)
         import time
         import random
+        import re
         timestamp = int(time.time() * 1000)  # milliseconds for more uniqueness
         random_suffix = random.randint(1000, 9999)
-        projection_name = f"graphrag_{group_id.replace('-', '_')}_{timestamp}_{random_suffix}"
+        # Sanitize group_id for use in GDS projection names (alphanumeric + underscore only)
+        safe_group_id = re.sub(r'[^a-zA-Z0-9_]', '_', group_id)
+        projection_name = f"graphrag_{safe_group_id}_{timestamp}_{random_suffix}"
         session_name = f"graphrag_session_{timestamp}_{random_suffix}"  # Unique session per call
         
         try:
@@ -2651,15 +2654,22 @@ Output:
                             # If drop fails, try via low-level query (handles FAILED jobs)
                             logger.warning(f"Standard drop failed, trying direct cleanup: {drop_err}")
                             try:
-                                gds.run_cypher(f"CALL gds.graph.drop('{projection_name}', false)")
+                                gds.run_cypher(
+                                    "CALL gds.graph.drop($name, false)",
+                                    params={"name": projection_name}
+                                )
                                 logger.info(f"🧹 Force-dropped projection via query: {projection_name}")
                             except Exception as force_err:
                                 logger.warning(f"Could not force-drop projection: {force_err}")
             except Exception as e:
                 logger.debug(f"Graph list/drop check: {e}")
             
-            # Escape group_id for Cypher (double quotes with backslash escaping)
-            escaped_group_id = group_id.replace('"', '\\"')
+            # Escape group_id for Cypher (handle both backslash and double quotes)
+            escaped_group_id = group_id.replace('\\', '\\\\').replace('"', '\\"').replace("'", "\\'")
+            
+            # Note: GDS remote projection queries do not support $param syntax,
+            # so we use escaped string interpolation. group_id is sourced from
+            # authenticated JWT claims, limiting injection risk.
             
             # Single Cypher query with gds.graph.project.remote() - required for Aura Serverless
             # Add timestamp+random to query to avoid job ID collisions (Aura GDS uses query string as job ID)
@@ -2716,7 +2726,7 @@ Output:
                         # Re-generate unique names to avoid job ID collision on retry
                         timestamp = int(time.time() * 1000)
                         random_suffix = random.randint(1000, 9999)
-                        projection_name = f"graphrag_{group_id.replace('-', '_')}_{timestamp}_{random_suffix}"
+                        projection_name = f"graphrag_{safe_group_id}_{timestamp}_{random_suffix}"
                         # Re-build projection query with new timestamp for unique job ID
                         projection_query = projection_query.replace(
                             projection_query.split('// Timestamp: ')[1].split(' - ')[0],

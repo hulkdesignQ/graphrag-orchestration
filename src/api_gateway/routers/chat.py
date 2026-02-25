@@ -540,7 +540,7 @@ async def chat_completions(
         
     except Exception as e:
         logger.error("chat_completion_failed", error=str(e), exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 async def _submit_async_job(
@@ -1057,7 +1057,7 @@ async def frontend_chat(
         
     except Exception as e:
         logger.error("frontend_chat_failed", error=str(e), exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/stream")

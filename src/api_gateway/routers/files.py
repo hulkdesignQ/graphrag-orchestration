@@ -68,6 +68,47 @@ def _get_doc_sync(request: Request):
     return getattr(request.app.state, "document_sync_service", None)
 
 
+# ==================== Upload Validation ====================
+
+MAX_UPLOAD_SIZE_MB = 50
+MAX_UPLOAD_SIZE_BYTES = MAX_UPLOAD_SIZE_MB * 1024 * 1024
+
+ALLOWED_EXTENSIONS = {
+    ".pdf", ".docx", ".doc", ".xlsx", ".xls", ".pptx", ".ppt",
+    ".txt", ".csv", ".md", ".html", ".htm",
+    ".jpg", ".jpeg", ".png", ".tiff", ".tif", ".bmp",
+    ".json", ".xml",
+}
+
+
+def _sanitize_filename(filename: str) -> str:
+    """Strip path components and disallow dangerous characters."""
+    import os
+    import re
+    name = os.path.basename(filename or "upload")
+    # Remove any non-alphanumeric characters except .-_ and spaces
+    name = re.sub(r'[^\w\s.\-]', '_', name)
+    return name or "upload"
+
+
+def _validate_upload(f: UploadFile) -> None:
+    """Validate file extension and size before upload."""
+    import os
+    name = _sanitize_filename(f.filename or "")
+    ext = os.path.splitext(name)[1].lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File type '{ext}' not allowed. Supported: {', '.join(sorted(ALLOWED_EXTENSIONS))}"
+        )
+    # Check Content-Length header if available (not reliable but fast reject)
+    if f.size is not None and f.size > MAX_UPLOAD_SIZE_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large ({f.size / 1024 / 1024:.1f} MB). Maximum: {MAX_UPLOAD_SIZE_MB} MB"
+        )
+
+
 # ==================== Endpoints ====================
 
 @router.post("/upload")
@@ -86,7 +127,9 @@ async def upload_files(
     results = []
     for f in file:
         try:
-            file_url = await blob_manager.upload_blob(f, f.filename, user_id)
+            _validate_upload(f)
+            safe_filename = _sanitize_filename(f.filename)
+            file_url = await blob_manager.upload_blob(f, safe_filename, user_id)
             if ingester:
                 from prepdocslib.listfilestrategy import File as IngesterFile
 
@@ -94,7 +137,7 @@ async def upload_files(
                     IngesterFile(content=f, url=file_url, acls={"oids": [user_id]}),
                     user_oid=user_id,
                 )
-            results.append({"filename": f.filename, "status": "success", "url": file_url})
+            results.append({"filename": safe_filename, "status": "success", "url": file_url})
         except Exception as e:
             logger.error("Error uploading file %s: %s", f.filename, e)
             results.append({"filename": f.filename, "status": "failed", "error": str(e)})

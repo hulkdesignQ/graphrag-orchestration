@@ -2,7 +2,6 @@ from fastapi import APIRouter, Request, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any, Union, Literal
 import structlog
-import traceback
 from src.core.config import settings
 
 from src.worker.services.indexing_service import IndexingService
@@ -86,7 +85,7 @@ async def debug_lancedb(request: Request):
             "group_id": group_id,
         }
     except Exception as e:
-        return {"status": "error", "error": str(e), "trace": traceback.format_exc(), "group_id": group_id}
+        return {"status": "error", "error": "Internal server error", "group_id": group_id}
 
 
 async def _to_documents(input_items: List[Union[str, Dict[str, Any]]], ingestion_mode: str = "document-intelligence", group_id: str = ""):
@@ -286,7 +285,7 @@ async def trigger_indexing(
         
     except Exception as e:
         logger.error("indexing_failed", group_id=group_id, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/index-from-schema", response_model=IndexingResponse)
@@ -359,7 +358,7 @@ async def trigger_schema_indexing(
             schema_id=payload.schema_id,
             error=str(e)
         )
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/index-from-prompt", response_model=IndexingResponse)
@@ -423,7 +422,7 @@ async def trigger_prompt_schema_indexing(
             group_id=group_id,
             error=str(e)
         )
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/query/global", response_model=QueryResponse, deprecated=True)
@@ -457,7 +456,7 @@ async def query_global(request: Request, payload: QueryRequest):
         
     except Exception as e:
         logger.error("global_query_failed", group_id=group_id, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/query/local", response_model=QueryResponse, deprecated=True)
@@ -497,7 +496,7 @@ async def query_local(request: Request, payload: QueryRequest):
         
     except Exception as e:
         logger.error("local_query_failed", group_id=group_id, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/query/hybrid", response_model=QueryResponse)
@@ -529,7 +528,7 @@ async def query_hybrid(request: Request, payload: QueryRequest):
         
     except Exception as e:
         logger.error("hybrid_query_failed", group_id=group_id, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/query/drift", response_model=QueryResponse, deprecated=True)
@@ -571,7 +570,7 @@ async def query_drift(request: Request, payload: QueryRequest):
         
     except Exception as e:
         logger.error("drift_query_failed", group_id=group_id, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 class BuildCommunitiesRequest(BaseModel):
@@ -642,7 +641,7 @@ async def build_communities(request: Request, payload: BuildCommunitiesRequest =
         
     except Exception as e:
         logger.error("build_communities_failed", group_id=group_id, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/communities/summaries")
@@ -673,7 +672,7 @@ async def get_community_summaries(request: Request):
         
     except Exception as e:
         logger.error("get_summaries_failed", group_id=group_id, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/query/comparison", response_model=QueryResponse)
@@ -721,7 +720,7 @@ async def query_comparison(request: Request, payload: QueryRequest):
         
     except Exception as e:
         logger.error("comparison_query_failed", group_id=group_id, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/query/text-to-cypher", response_model=QueryResponse)
@@ -776,7 +775,7 @@ async def query_text_to_cypher(request: Request, payload: QueryRequest):
         
     except Exception as e:
         logger.error("text_to_cypher_query_failed", group_id=group_id, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/query/structured", response_model=StructuredQueryResponse)
@@ -868,7 +867,7 @@ async def query_structured(request: Request, payload: StructuredQueryRequest):
         
     except Exception as e:
         logger.error("structured_query_failed", group_id=group_id, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/query/structured-from-vault", response_model=StructuredQueryResponse)
@@ -947,7 +946,7 @@ async def query_structured_from_vault(request: Request, payload: SchemaVaultQuer
         raise
     except Exception as e:
         logger.error("structured_query_from_vault_failed", group_id=group_id, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ============================================================================
@@ -1016,7 +1015,7 @@ async def list_documents(request: Request):
         
     except Exception as e:
         logger.error("list_documents_failed", group_id=group_id, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/documents/delete", response_model=DocumentDeleteResponse)
@@ -1056,7 +1055,7 @@ async def delete_document(request: Request, payload: DocumentDeleteRequest):
         
     except Exception as e:
         logger.error("delete_document_failed", group_id=group_id, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/documents/batch-delete", response_model=BatchDeleteResponse)
@@ -1118,7 +1117,7 @@ async def batch_delete_documents(request: Request, payload: BatchDeleteRequest):
         
     except Exception as e:
         logger.error("batch_delete_failed", group_id=group_id, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/documents/stats")
@@ -1149,7 +1148,7 @@ async def get_document_stats(request: Request, url: str):
         
     except Exception as e:
         logger.error("document_stats_failed", group_id=group_id, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # =============================================================================
@@ -1266,14 +1265,10 @@ async def debug_neo4j(request: Request):
         
     except Exception as e:
         logger.error("debug_neo4j_failed", group_id=group_id, error=str(e))
-        import traceback
         return {
             "status": "error",
-            "error": str(e),
-            "trace": traceback.format_exc()
+            "error": "Internal server error"
         }
-
-
 @router.post("/indexes/setup-hybrid")
 async def setup_hybrid_indexes(request: Request):
     """
@@ -1304,7 +1299,7 @@ async def setup_hybrid_indexes(request: Request):
         
     except Exception as e:
         logger.error("setup_hybrid_indexes_failed", group_id=group_id, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/search/seed-nodes", response_model=SeedNodeResponse)
@@ -1366,7 +1361,7 @@ async def find_seed_nodes(request: Request, payload: HybridSearchRequest):
         
     except Exception as e:
         logger.error("find_seed_nodes_failed", group_id=group_id, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.delete("/documents/all")
@@ -1401,7 +1396,7 @@ async def delete_all_documents(request: Request):
         
     except Exception as e:
         logger.error("delete_all_documents_failed", group_id=group_id, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ============================================================
@@ -1535,7 +1530,7 @@ async def index_file_v2(request: Request, payload: V2IndexFileRequest):
         
     except Exception as e:
         logger.error("v2_index_file_failed", group_id=group_id, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/v2/query/local", response_model=QueryResponse)
@@ -1575,7 +1570,7 @@ async def query_local_v2(request: Request, payload: V2QueryRequest):
         
     except Exception as e:
         logger.error("v2_local_query_failed", group_id=group_id, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/v2/query/hybrid", response_model=QueryResponse)
@@ -1614,7 +1609,7 @@ async def query_hybrid_v2(request: Request, payload: V2QueryRequest):
         
     except Exception as e:
         logger.error("v2_hybrid_query_failed", group_id=group_id, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/v2/query/structured", response_model=QueryResponse)
@@ -1653,7 +1648,7 @@ async def query_structured_v2(request: Request, payload: V2QueryRequest):
         
     except Exception as e:
         logger.error("v2_structured_query_failed", group_id=group_id, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 class V2SchemaGuidedRequest(BaseModel):
@@ -1752,7 +1747,7 @@ async def query_schema_guided_v2(request: Request, payload: V2SchemaGuidedReques
         
     except Exception as e:
         logger.error("v2_schema_guided_query_failed", group_id=group_id, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/v2/index/text")
@@ -1797,7 +1792,7 @@ async def index_text_v2(request: Request, payload: V2IndexRequest):
         
     except Exception as e:
         logger.error("v2_index_text_failed", group_id=group_id, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/v2/debug/neo4j")
@@ -1886,15 +1881,11 @@ async def debug_neo4j_v2(request: Request):
         
     except Exception as e:
         logger.error("v2_debug_neo4j_failed", group_id=group_id, error=str(e))
-        import traceback
         return {
             "status": "error",
             "group_id": group_id,
-            "error": str(e),
-            "trace": traceback.format_exc()
+            "error": "Internal server error"
         }
-
-
 @router.post("/v2/indexes/setup")
 async def setup_v2_indexes(request: Request):
     """
@@ -1926,10 +1917,8 @@ async def setup_v2_indexes(request: Request):
         
     except Exception as e:
         logger.error("v2_setup_indexes_failed", group_id=group_id, error=str(e))
-        import traceback
         return {
             "status": "error",
             "group_id": group_id,
-            "error": str(e),
-            "trace": traceback.format_exc()
+            "error": "Internal server error"
         }

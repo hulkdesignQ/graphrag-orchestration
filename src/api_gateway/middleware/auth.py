@@ -279,9 +279,10 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
             claims = pyjwt.decode(token, options={"verify_signature": False}, algorithms=["RS256", "HS256"])
             return claims
         except JWTError as e:
+            logger.warning("jwt_decode_failed", error=str(e))
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=f"Invalid JWT token: {str(e)}",
+                detail="Invalid or expired token",
                 headers={"WWW-Authenticate": "Bearer"}
             )
 

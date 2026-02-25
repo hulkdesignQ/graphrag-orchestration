@@ -90,7 +90,7 @@ async def post_chat_history(
         return JSONResponse({}, status_code=201)
     except Exception as e:
         logger.exception("Error saving chat history")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/sessions")
@@ -137,7 +137,7 @@ async def get_chat_history_sessions(
         return {"sessions": sessions, "continuation_token": next_token}
     except Exception as e:
         logger.exception("Error listing chat sessions")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/sessions/{session_id}")
@@ -171,7 +171,7 @@ async def get_chat_history_session(
         }
     except Exception as e:
         logger.exception("Error getting chat session %s", session_id)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.delete("/sessions/{session_id}")
@@ -203,4 +203,4 @@ async def delete_chat_history_session(
         return Response(status_code=204)
     except Exception as e:
         logger.exception("Error deleting chat session %s", session_id)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
