@@ -4,6 +4,7 @@ Document Lifecycle API Router for V2 GraphRAG.
 Provides REST endpoints for document deprecation, restoration, and deletion.
 """
 
+import asyncio
 from typing import Optional, List
 from fastapi import APIRouter, HTTPException, Query, Header
 from pydantic import BaseModel, Field
@@ -242,24 +243,26 @@ async def bulk_deprecate_documents(
     """Bulk deprecate multiple documents."""
     service = get_lifecycle_service()
     
-    results = []
-    for doc_id in request.document_ids:
+    async def _deprecate_one(doc_id: str) -> DeprecationResponse:
         result = await service.deprecate_document(
             group_id=group_id,
             document_id=doc_id,
             reason=request.reason,
             deprecated_by=request.deprecated_by,
         )
-        results.append(DeprecationResponse(
+        return DeprecationResponse(
             document_id=result.document_id,
             group_id=result.group_id,
             success=result.success,
             children_deprecated=result.children_deprecated,
             gds_marked_stale=result.gds_marked_stale,
             errors=result.errors,
-        ))
-    
-    return results
+        )
+
+    results = await asyncio.gather(
+        *[_deprecate_one(doc_id) for doc_id in request.document_ids]
+    )
+    return list(results)
 
 
 @router.get(

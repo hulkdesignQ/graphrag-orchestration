@@ -1,5 +1,6 @@
 """Cosmos DB client for chat history and usage tracking."""
 
+import asyncio
 from typing import List, Optional, Dict, Any
 import os
 import threading
@@ -90,8 +91,9 @@ class CosmosDBClient:
             return
         
         try:
-            for record in records:
-                await self.write_usage_record(record)
+            await asyncio.gather(
+                *[self.write_usage_record(record) for record in records]
+            )
             logger.info("usage_batch_written", count=len(records))
         except Exception as e:
             logger.warning("usage_batch_write_failed", error=str(e), count=len(records))

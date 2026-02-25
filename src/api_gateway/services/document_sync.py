@@ -133,9 +133,10 @@ class DocumentSyncService:
     async def on_file_deleted_bulk(
         self, group_id: str, filenames: List[str]
     ) -> None:
-        """Hard-delete multiple documents from Neo4j."""
-        for filename in filenames:
-            await self.on_file_deleted(group_id, filename)
+        """Hard-delete multiple documents from Neo4j (parallel)."""
+        await asyncio.gather(
+            *[self.on_file_deleted(group_id, f) for f in filenames]
+        )
 
     async def on_file_renamed(
         self,

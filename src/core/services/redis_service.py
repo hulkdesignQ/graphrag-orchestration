@@ -351,16 +351,17 @@ class RedisOperationStore:
                 count=100
             )
             
-            for key in keys:
-                data = await self.redis.get(key)
-                if data:
-                    obj = json.loads(data)
-                    if obj.get("tenant_id") == tenant_id:
-                        obj["status"] = OperationStatus(obj["status"])
-                        operations.append(Operation(**obj))
-                        
-                        if len(operations) >= limit:
-                            return operations
+            if keys:
+                values = await self.redis.mget(keys)
+                for data in values:
+                    if data:
+                        obj = json.loads(data)
+                        if obj.get("tenant_id") == tenant_id:
+                            obj["status"] = OperationStatus(obj["status"])
+                            operations.append(Operation(**obj))
+
+                            if len(operations) >= limit:
+                                return operations
             
             if cursor == 0:
                 break

@@ -399,10 +399,12 @@ class InstrumentationHooks:
             logger.warning("error_buffer_flush_failed", error=str(e))
     
     async def flush(self) -> None:
-        """Flush all buffers."""
-        await self._flush_query_buffer()
-        await self._flush_error_buffer()
-        await self._usage_tracker.flush()
+        """Flush all buffers (parallel)."""
+        await asyncio.gather(
+            self._flush_query_buffer(),
+            self._flush_error_buffer(),
+            self._usage_tracker.flush(),
+        )
 
 
 # Singleton instance

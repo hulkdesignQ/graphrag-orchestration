@@ -1661,20 +1661,21 @@ async def embed_chunks(request: Request):
             batch = chunks[i:i+batch_size]
             texts = [text for _, text in batch]
             
-            # Get embeddings
-            embeddings = []
-            for text in texts:
-                emb = llm_service.embed_model.get_text_embedding(text)
-                embeddings.append(emb)
+            # Get embeddings in one batch call
+            embeddings = llm_service.embed_model.get_text_embedding_batch(texts)
             
-            # Update in Neo4j
+            # Update in Neo4j with single UNWIND query
+            rows = [
+                {"id": chunk_id, "embedding": emb}
+                for (chunk_id, _), emb in zip(batch, embeddings)
+            ]
             with graph_service.driver.session() as session:
-                for (chunk_id, _), embedding in zip(batch, embeddings):
-                    session.run("""
-                        MATCH (c:TextChunk {id: $id, group_id: $group_id})
-                        SET c.embedding = $embedding
-                    """, id=chunk_id, group_id=group_id, embedding=embedding)
-                    updated += 1
+                session.run("""
+                    UNWIND $rows AS row
+                    MATCH (c:TextChunk {id: row.id, group_id: $group_id})
+                    SET c.embedding = row.embedding
+                """, rows=rows, group_id=group_id)
+                updated += len(rows)
         
         logger.info("chunks_embedded", group_id=group_id, count=updated)
         return {

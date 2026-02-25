@@ -456,19 +456,24 @@ class CommunityService:
         
         logger.info(f"Global search across {len(summaries)} communities")
         
-        # Map: Generate answer for each community
+        # Map: Generate answer for each community (parallel, bounded)
         community_answers = []
-        
-        for community_id, summary in list(summaries.items())[:top_k]:
-            try:
-                answer = await self._generate_answer_from_summary(summary, query)
-                if answer and answer.lower() not in ['i don\'t know', 'not relevant', 'n/a']:
-                    community_answers.append({
-                        'community_id': community_id,
-                        'answer': answer,
-                    })
-            except Exception as e:
-                logger.error(f"Error querying community {community_id}: {e}")
+        sem = asyncio.Semaphore(5)
+
+        async def _map_one(cid: str, summary_text: str) -> Optional[dict]:
+            async with sem:
+                try:
+                    answer = await self._generate_answer_from_summary(summary_text, query)
+                    if answer and answer.lower() not in ['i don\'t know', 'not relevant', 'n/a']:
+                        return {'community_id': cid, 'answer': answer}
+                except Exception as e:
+                    logger.error(f"Error querying community {cid}: {e}")
+                return None
+
+        results = await asyncio.gather(
+            *[_map_one(cid, s) for cid, s in list(summaries.items())[:top_k]]
+        )
+        community_answers = [r for r in results if r is not None]
         
         if not community_answers:
             return "Could not find relevant information in the knowledge graph communities."
