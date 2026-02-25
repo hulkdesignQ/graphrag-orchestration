@@ -163,9 +163,9 @@ class UsageTracker:
                           record_id=record.id)
     
     async def flush(self) -> None:
-        """Flush any pending batched records (if batching is enabled)."""
-        # Currently writes immediately, but kept for future batching implementation
-        pass
+        """Flush any pending fire-and-forget tasks."""
+        if _background_tasks:
+            await asyncio.gather(*_background_tasks, return_exceptions=True)
 
 
 # Singleton instance

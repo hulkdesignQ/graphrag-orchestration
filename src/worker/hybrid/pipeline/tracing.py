@@ -424,8 +424,39 @@ class DeterministicTracer:
         Returns:
             Dictionary with 'nodes' and 'edges' for the evidence path.
         """
-        # TODO: Implement subgraph extraction for visualization
-        return {
-            "nodes": evidence_nodes,
-            "edges": []  # Placeholder
-        }
+        if not self.graph_store or not evidence_nodes:
+            return {"nodes": evidence_nodes, "edges": []}
+
+        cypher_query = """
+        MATCH (a)
+        WHERE (a:Entity OR a:`__Entity__`)
+          AND a.group_id = $group_id
+          AND toLower(a.name) IN $nodeNames
+        WITH collect(a) AS nodes
+        UNWIND nodes AS a
+        UNWIND nodes AS b
+        WITH a, b WHERE id(a) < id(b)
+        MATCH (a)-[r]->(b)
+        WHERE type(r) <> 'MENTIONS'
+        RETURN a.name AS source, b.name AS target,
+               type(r) AS rel_type, r.description AS description
+        """
+        try:
+            node_names = [n.lower() for n in evidence_nodes]
+            result = self.graph_store.structured_query(
+                cypher_query,
+                {"nodeNames": node_names, "group_id": self.graph_store.group_id},
+            )
+            edges = [
+                {
+                    "source": row["source"],
+                    "target": row["target"],
+                    "type": row["rel_type"],
+                    "description": row.get("description"),
+                }
+                for row in (result or [])
+            ]
+            return {"nodes": evidence_nodes, "edges": edges}
+        except Exception as e:
+            logger.warning("evidence_subgraph_failed", error_msg=str(e))
+            return {"nodes": evidence_nodes, "edges": []}

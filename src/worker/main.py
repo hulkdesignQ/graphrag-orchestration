@@ -138,13 +138,28 @@ class Worker:
                 content = payload.get('content')
                 metadata = payload.get('metadata', {})
                 
-                # TODO: Implement indexing via orchestrator
                 logger.info(f"Indexing document {document_id}")
+                
+                from src.worker.hybrid_v2.indexing.pipeline_factory import (
+                    get_lazygraphrag_indexing_pipeline_v2,
+                )
+                
+                pipeline = get_lazygraphrag_indexing_pipeline_v2()
+                doc = {
+                    'document_id': document_id,
+                    'content': content,
+                    **(metadata or {}),
+                }
+                index_result = await pipeline.index_documents(
+                    group_id=group_id,
+                    documents=[doc],
+                    reindex=payload.get('reindex', False),
+                )
                 
                 return {
                     'job_id': job_id,
                     'status': 'completed',
-                    'result': {'document_id': document_id, 'indexed': True},
+                    'result': {'document_id': document_id, 'indexed': True, **index_result},
                     'duration_ms': (datetime.utcnow() - start_time).total_seconds() * 1000
                 }
                 

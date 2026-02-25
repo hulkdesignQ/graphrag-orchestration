@@ -26,6 +26,7 @@ from src.core.roles import (
     resolve_user_profile,
 )
 from src.core.services.quota_enforcer import get_quota_enforcer
+from src.core.services.cosmos_client import get_cosmos_client
 
 logger = structlog.get_logger(__name__)
 
@@ -196,16 +197,56 @@ async def get_my_usage(
 
     limits = PLAN_DEFINITIONS[plan_tier]
 
+    # Fetch document count and recent queries from Cosmos (best-effort)
+    documents_count = 0
+    storage_used_gb = 0.0
+    recent_queries: List[Dict[str, Any]] = []
+
+    try:
+        cosmos = get_cosmos_client()
+        records = await cosmos.query_usage(
+            partition_id=user_id,
+            usage_type="llm_completion",
+        )
+        # Most recent 20 queries
+        sorted_records = sorted(
+            records,
+            key=lambda r: r.get("timestamp", ""),
+            reverse=True,
+        )[:20]
+        recent_queries = [
+            {
+                "query_id": r.get("query_id", ""),
+                "timestamp": r.get("timestamp", ""),
+                "model": r.get("model", ""),
+                "route": r.get("route", ""),
+                "total_tokens": r.get("total_tokens", 0),
+            }
+            for r in sorted_records
+        ]
+        # Approximate document count from distinct document_id values
+        doc_records = await cosmos.query_usage(
+            partition_id=user_id,
+            usage_type="document_intelligence",
+        )
+        doc_ids = {r.get("document_id") for r in doc_records if r.get("document_id")}
+        documents_count = len(doc_ids)
+        # Approximate storage from pages analysed (est. ~0.0001 GB per page)
+        total_pages = sum(r.get("pages_analyzed", 0) for r in doc_records)
+        storage_used_gb = round(total_pages * 0.0001, 4)
+    except Exception:
+        logger.warning("dashboard_usage_fetch_failed", user_id=user_id)
+
     return UsageStatsResponse(
         queries_today=usage["queries_today"],
         queries_this_month=usage["queries_this_month"],
         queries_limit_day=limits.queries_per_day,
         queries_limit_month=limits.queries_per_month,
-        documents_count=0,  # TODO: count from blob/cosmos
+        documents_count=documents_count,
         documents_limit=limits.max_documents,
-        storage_used_gb=0.0,  # TODO: calculate from blob
+        storage_used_gb=storage_used_gb,
         storage_limit_gb=limits.max_storage_gb,
-        recent_queries=[],  # TODO: from Cosmos usage records
+        recent_queries=recent_queries,
         top_topics=[],
     )
 

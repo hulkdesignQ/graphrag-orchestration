@@ -86,11 +86,52 @@ async def detailed_health_check() -> Dict[str, Any]:
 
 
 @router.get("/metrics")
-async def metrics():
+async def metrics() -> Dict[str, Any]:
     """
-    Placeholder for Prometheus metrics.
+    Application metrics endpoint.
+    Returns JSON metrics for service health, component status, and resource usage.
     """
-    return {"status": "ok"}
+    components: Dict[str, Any] = {}
+
+    # Neo4j
+    try:
+        graph_service = GraphService()
+        if graph_service.driver:
+            with graph_service.driver.session() as session:
+                result = session.run("RETURN 1 AS ping")
+                result.single()
+            components["neo4j"] = {"status": 1}
+        else:
+            components["neo4j"] = {"status": 0}
+    except Exception:
+        components["neo4j"] = {"status": 0}
+
+    # LLM service
+    try:
+        llm_service = LLMService()
+        components["llm"] = {
+            "status": 1 if llm_service.llm else 0,
+            "model": llm_service.config.get("AZURE_OPENAI_DEPLOYMENT_NAME", "unknown"),
+        }
+    except Exception:
+        components["llm"] = {"status": 0}
+
+    # Vector store
+    try:
+        vector_service = VectorStoreService()
+        components["vector_store"] = {
+            "status": 1,
+            "type": vector_service.store_type,
+        }
+    except Exception:
+        components["vector_store"] = {"status": 0}
+
+    all_up = all(c.get("status") == 1 for c in components.values())
+
+    return {
+        "status": "healthy" if all_up else "degraded",
+        "components": components,
+    }
 
 
 @router.get("/debug/config")
