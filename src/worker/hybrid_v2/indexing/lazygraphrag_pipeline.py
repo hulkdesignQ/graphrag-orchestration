@@ -2466,7 +2466,12 @@ Output:
 
         logger.info("📋 Found %d Louvain communities (>= %d members)", len(community_groups), min_community_size)
 
-        # 9b) Create Community nodes + BELONGS_TO edges (batched via UNWIND)
+        # 9b) Delete stale communities from prior runs, then create fresh ones
+        logger.info("🧹 Step 9b: Cleaning stale Community nodes...")
+        await self.neo4j_store.arun_query(
+            "MATCH (c:Community {group_id: $group_id}) DETACH DELETE c",
+            group_id=group_id,
+        )
         logger.info("🏗️ Step 9b: Creating Community nodes...")
         community_params = []
         link_params = []
