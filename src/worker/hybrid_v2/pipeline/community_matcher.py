@@ -294,7 +294,7 @@ class CommunityMatcher:
         """Remove communities that have no member entities in the target folder.
 
         Each community is a Louvain cluster of entities.  We verify at least one
-        member entity has a MENTIONS edge to a TextChunk in a Document that
+        member entity has a MENTIONS edge to a Sentence in a Document that
         belongs to the target folder.  Communities that fail this check are
         pruned from the candidate list.
 

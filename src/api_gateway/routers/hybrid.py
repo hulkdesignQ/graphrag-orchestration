@@ -175,7 +175,6 @@ class DeploymentProfileEnum(str, Enum):
 
 class RouteEnum(str, Enum):
     """Available query routes."""
-    VECTOR_RAG = "vector_rag"           # Route 1: DEPRECATED - removed 2026-02-04
     LOCAL_SEARCH = "local_search"       # Route 2: Entity-focused (LazyGraphRAG)
     GLOBAL_SEARCH = "global_search"     # Route 3: Thematic (LazyGraphRAG + HippoRAG)
     DRIFT_MULTI_HOP = "drift_multi_hop" # Route 4: Multi-hop iterative
@@ -256,15 +255,6 @@ class PipelineConfigRequest(BaseModel):
         ge=0.0,
         le=1.0,
         description="Thoroughness vs speed tradeoff"
-    )
-    enable_vector_rag: bool = Field(
-        default=False,  # Changed: Route 1 deprecated
-        description="DEPRECATED: Route 1 (Vector RAG) is no longer supported",
-        deprecated=True,
-    )
-    enable_drift: bool = Field(
-        default=True,
-        description="Enable Route 4 (DRIFT multi-hop)"
     )
 
 
@@ -472,27 +462,6 @@ async def hybrid_query(request: Request, body: HybridQueryRequest, group_id: str
                force_route=body.force_route.value if body.force_route else None)
     
     try:
-        # Reject deprecated Route 1 (Vector RAG)
-        if body.force_route == RouteEnum.VECTOR_RAG:
-            logger.warning(
-                "deprecated_route1_force_route_rejected",
-                group_id=group_id,
-                query_preview=body.query[:50],
-            )
-            return JSONResponse(
-                status_code=410,  # 410 Gone
-                content={
-                    "error": {
-                        "code": "ROUTE1_DEPRECATED",
-                        "message": "Route 1 (Vector RAG) has been deprecated. Use auto-routing or force_route=local_search instead.",
-                        "details": {
-                            "sunset_date": "2026-06-01",
-                            "alternative": "local_search",
-                            "migration_guide": "Route 2 (Local Search) now handles fast fact lookups with improved accuracy.",
-                        },
-                    }
-                },
-            )
         
         pipeline = await _get_or_create_pipeline(group_id)
         
@@ -785,9 +754,7 @@ async def configure_pipeline(request: Request, config: PipelineConfigRequest):
     logger.info("configuring_pipeline",
                group_id=group_id,
                profile=config.profile.value,
-               relevance_budget=config.relevance_budget,
-               enable_vector_rag=config.enable_vector_rag,
-               enable_drift=config.enable_drift)
+               relevance_budget=config.relevance_budget)
     
     try:
         profile = _get_deployment_profile(config.profile)
@@ -809,10 +776,9 @@ async def configure_pipeline(request: Request, config: PipelineConfigRequest):
         
         # Determine which routes are enabled based on profile + overrides
         routes_enabled = {
-            "vector_rag": config.enable_vector_rag and profile != DeploymentProfile.HIGH_ASSURANCE,
             "local_search": True,  # Always enabled
             "global_search": True,  # Always enabled
-            "drift_multi_hop": config.enable_drift
+            "drift_multi_hop": True
         }
         
         return {

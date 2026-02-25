@@ -135,7 +135,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         )
         # R6-XI: entity-document coverage map — launched in parallel.
         # Resolves queries like "which entity appears in the most documents?"
-        # using a 3-hop Entity←MENTIONS←TextChunk→IN_DOCUMENT→Document traversal
+        # using a 2-hop Entity←MENTIONS←Sentence→IN_DOCUMENT→Document traversal
         # (same path as Route 7 PPR) to avoid the edge-coverage gap in the
         # pre-materialised APPEARS_IN_DOCUMENT shortcut.
         entity_doc_task = asyncio.create_task(
@@ -978,7 +978,7 @@ class ConceptSearchHandler(BaseRouteHandler):
     ) -> Dict[str, List[str]]:
         """Return {entity_name: [doc_title, ...]} for the top entities by document count.
 
-        Uses a 3-hop traversal Entity←MENTIONS←TextChunk→IN_DOCUMENT→Document
+        Uses a 2-hop traversal Entity←MENTIONS←Sentence→IN_DOCUMENT→Document
         (same path the Route 7 PPR engine walks). This is more complete than the
         pre-materialised APPEARS_IN_DOCUMENT edge, which can miss documents when
         ingestion did not populate that shortcut edge for every entity.

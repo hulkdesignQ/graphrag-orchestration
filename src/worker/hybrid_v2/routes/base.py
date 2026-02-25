@@ -421,99 +421,7 @@ class BaseRouteHandler:
             )
 
     # =========================================================================
-    # Shared Search Methods
-    # =========================================================================
 
-    async def _search_text_chunks_fulltext(
-        self,
-        query_text: str,
-        top_k: int = 10,
-        use_phrase_boost: bool = True
-    ) -> List[Tuple[Dict[str, Any], float]]:
-        """Fulltext search only (Neo4j Lucene index) within the group.
-        
-        Returns chunks with section metadata for integration with Route 3's
-        section-aware evidence collection.
-        
-        Supports optional folder filtering via self.folder_id.
-        
-        Args:
-            query_text: The user query to search for.
-            top_k: Maximum number of results to return.
-            use_phrase_boost: If True, use phrase-aware query building.
-            
-        Returns:
-            List of (chunk_dict, score) tuples
-        """
-        if not self.neo4j_driver:
-            return []
-
-        await self._ensure_textchunk_fulltext_index()
-        group_id = self.group_id
-        folder_id = self.folder_id
-        driver = self.neo4j_driver  # Local ref for closure
-        
-        if use_phrase_boost:
-            search_query = self._build_phrase_aware_fulltext_query(query_text)
-        else:
-            search_query = self._sanitize_query_for_fulltext(query_text)
-        
-        if not search_query:
-            return []
-
-        def _run_sync():
-            # Build folder filter clause - applied after document join
-            folder_filter = ""
-            if folder_id:
-                folder_filter = "AND (d)-[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})"
-            
-            q = f"""
-            CALL db.index.fulltext.queryNodes('sentence_fulltext', $query_text, {{limit: $candidate_k}})
-            YIELD node, score
-            WHERE node.group_id = $group_id
-            OPTIONAL MATCH (node)-[:IN_DOCUMENT]->(d:Document {{group_id: $group_id}})
-            WITH node, d, score
-            WHERE d IS NULL OR d IS NOT NULL {folder_filter}
-            OPTIONAL MATCH (node)-[:IN_SECTION]->(s:Section)
-            RETURN node.id AS id,
-                   node.text AS text,
-                   node.chunk_index AS chunk_index,
-                   d.id AS document_id,
-                   d.title AS document_title,
-                   d.source AS document_source,
-                   s.id AS section_id,
-                   s.path_key AS section_path_key,
-                   score
-            ORDER BY score DESC
-            LIMIT $top_k
-            """
-            rows = []
-            params = {
-                "query_text": search_query,
-                "group_id": group_id,
-                "top_k": top_k,
-                "candidate_k": top_k * 5,  # Oversample for folder filtering
-            }
-            if folder_id:
-                params["folder_id"] = folder_id
-                
-            with retry_session(driver, read_only=True) as session:
-                for r in session.run(q, **params):
-                    chunk = {
-                        "id": r["id"],
-                        "text": r["text"],
-                        "chunk_index": r.get("chunk_index", 0),
-                        "document_id": r.get("document_id", ""),
-                        "document_title": r.get("document_title", ""),
-                        "document_source": r.get("document_source", ""),
-                        "section_id": r.get("section_id", ""),
-                        "section_path_key": r.get("section_path_key", ""),
-                    }
-                    rows.append((chunk, float(r.get("score") or 0.0)))
-            return rows
-
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(self._executor, _run_sync)
 
     # =========================================================================
     # Hybrid RRF Search (BM25 + Vector)
@@ -940,14 +848,14 @@ class BaseRouteHandler:
         """Enrich citations with polygon geometry from Neo4j chunk metadata.
 
         After citations are built (typically 5-15 items), fetches the metadata
-        JSON blob for each cited TextChunk in a single batch query. Attaches
+        JSON blob for each cited Sentence in a single batch query. Attaches
         ``page_number``, ``sentences`` (polygon coords), and
         ``page_dimensions`` so the frontend can render click-to-highlight
         overlays on source PDFs.
 
         Community-report citations (``community_*``) are skipped since they
         have no document geometry.  Sentence-level citations
-        (``*_sent_N``) are mapped to their parent TextChunk.
+        (``*_sent_N``) are mapped to their parent Sentence.
         """
         if not citations or not self.neo4j_driver:
             return

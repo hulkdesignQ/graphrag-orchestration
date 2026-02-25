@@ -1,11 +1,11 @@
 """True Personalized PageRank with Passage Nodes for HippoRAG 2.
 
 Implements the core HippoRAG 2 graph architecture where PPR operates on
-a unified graph containing BOTH entity nodes AND passage (TextChunk) nodes.
+a unified graph containing BOTH entity nodes AND passage (Sentence) nodes.
 
 Key differences from the existing hipporag_retriever.py PPR:
 
-1. **Passage nodes in graph**: TextChunk nodes are first-class graph nodes,
+1. **Passage nodes in graph**: Sentence nodes are first-class graph nodes,
    connected to entities via MENTIONS edges. PPR probability mass flows
    Entity <-> Passage, so passage scores come directly from the random walk.
 
@@ -42,7 +42,7 @@ class HippoRAG2PPR:
     """True in-memory PPR with passage nodes.
 
     Graph structure:
-        Nodes: Entity nodes + TextChunk (passage) nodes
+        Nodes: Entity nodes + Sentence (passage) nodes
         Edges (undirected, weighted):
             - Entity <-> Entity via RELATED_TO (weight = r.weight, default 1.0)
             - Entity <-> Passage via MENTIONS (weight = passage_node_weight)
@@ -53,7 +53,7 @@ class HippoRAG2PPR:
         - Passage seeds: from DPR retrieval (score * passage_node_weight)
 
     Output:
-        - passage_scores: ranked TextChunk IDs (= document/chunk rankings)
+        - passage_scores: ranked Sentence IDs (= document/chunk rankings)
         - entity_scores: ranked entity names (for synthesis evidence_nodes)
     """
 
@@ -111,7 +111,7 @@ class HippoRAG2PPR:
         section_edge_weight: float = 0.1,
         section_sim_threshold: float = 0.5,
     ) -> None:
-        """Load Entity + TextChunk nodes and edges from Neo4j.
+        """Load Entity + Sentence nodes and edges from Neo4j.
 
         Args:
             neo4j_driver: Sync Neo4j driver instance.

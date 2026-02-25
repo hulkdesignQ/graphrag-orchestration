@@ -114,7 +114,6 @@ async def index_with_config(config: dict):
         llm=llm_service.get_indexing_llm() if llm_service.llm is not None else None,
         embedder=voyage_embedder,
         config=pipeline_config,
-        use_v2_embedding_property=True,
     )
     
     # Prepare documents

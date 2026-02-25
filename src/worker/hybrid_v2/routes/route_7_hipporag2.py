@@ -3,7 +3,7 @@
 Implements the real HippoRAG 2 architecture (ICML '25) as a new route
 alongside the existing Route 5.  Two key upstream innovations:
 
-1. **Passage nodes in PPR graph** — PPR walks Entity<->Passage (TextChunk),
+1. **Passage nodes in PPR graph** — PPR walks Entity<->Passage (Sentence),
    so passage scores come directly from the random walk rather than a
    post-PPR lookup.
 

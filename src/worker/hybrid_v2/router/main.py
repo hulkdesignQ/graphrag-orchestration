@@ -99,14 +99,12 @@ class QueryRoute(Enum):
     UNIFIED_SEARCH = "unified_search"       # Route 5: Unified hierarchical seed PPR
     CONCEPT_SEARCH = "concept_search"       # Route 6: Concept search (direct community synthesis)
     HIPPORAG2_SEARCH = "hipporag2_search"  # Route 7: True HippoRAG 2 architecture
-    # Legacy alias for backward compatibility
-    VECTOR_RAG = "local_search"             # Deprecated: maps to LOCAL_SEARCH
 
 
 class DeploymentProfile(Enum):
     """Deployment configuration profiles."""
-    GENERAL_ENTERPRISE = "general_enterprise"  # All 3 routes enabled
-    HIGH_ASSURANCE = "high_assurance"          # Same as GENERAL_ENTERPRISE (no Vector RAG to exclude)
+    GENERAL_ENTERPRISE = "general_enterprise"  # All routes enabled
+    HIGH_ASSURANCE = "high_assurance"          # Same as GENERAL_ENTERPRISE
 
 
 class HybridRouter:
@@ -256,7 +254,7 @@ class HybridRouter:
                 # Legacy / force_route aliases kept for backward compatibility
                 "global_search": QueryRoute.GLOBAL_SEARCH,
                 "drift_multi_hop": QueryRoute.DRIFT_MULTI_HOP,
-                "vector_rag": QueryRoute.LOCAL_SEARCH,
+                "vector_rag": QueryRoute.LOCAL_SEARCH,  # Legacy alias
             }
             
             route = route_map.get(route_str, QueryRoute.LOCAL_SEARCH)
@@ -341,12 +339,8 @@ class HybridRouter:
         - GLOBAL_SEARCH for thematic/summary queries
         - DRIFT_MULTI_HOP for multi-hop/comparative queries
         
-        Legacy VECTOR_RAG enum values are automatically mapped to LOCAL_SEARCH.
+        Legacy "vector_rag" string values are automatically mapped to LOCAL_SEARCH.
         """
-        
-        # Legacy support: VECTOR_RAG maps to LOCAL_SEARCH
-        if base_route == QueryRoute.VECTOR_RAG:
-            return QueryRoute.LOCAL_SEARCH
         
         return base_route
     
@@ -524,12 +518,12 @@ class QueryClassifier:
         ]):
             return QueryRoute.LOCAL_SEARCH
         
-        # Simple fact patterns -> Route 1
+        # Simple fact patterns -> Local Search
         if any(kw in query_lower for kw in [
             "what is the", "who is", "when", "where", "how much",
             "address", "phone", "email"
         ]):
-            return QueryRoute.VECTOR_RAG
+            return QueryRoute.LOCAL_SEARCH
         
         # Default to Local Search (entity-focused is most common)
         return QueryRoute.LOCAL_SEARCH

@@ -305,7 +305,7 @@ async def resolve_section_entities(
 ) -> List[Dict[str, Any]]:
     """Find entities mentioned in text chunks belonging to matched sections.
 
-    Traversal: Section ← IN_SECTION ← TextChunk → MENTIONS → Entity
+    Traversal: Section ← IN_SECTION ← Sentence → MENTIONS → Entity
 
     Returns:
         List of dicts with ``id``, ``name``, ``section_path`` keys.
@@ -383,7 +383,7 @@ async def resolve_signatureblock_entities(
     """Resolve entities reachable from signature-block sentence nodes.
 
     Signature blocks are *not* Section nodes, so they are invisible to the
-    standard Tier 2 Section → TextChunk → Entity traversal.  This function
+    standard Tier 2 Section → Sentence → Entity traversal.  This function
     queries sentence nodes with ``source = "signature_party"`` directly and
     follows their MENTIONS edges to Entity nodes.
 

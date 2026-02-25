@@ -207,12 +207,10 @@ async def run_v2_indexing(
         llm=llm_service.get_indexing_llm() if llm_service.llm is not None else None,
         embedder=voyage_embedder,
         config=config,
-        use_v2_embedding_property=True,
     )
     
     log(f"   Pipeline: {type(pipeline).__module__}")
     log(f"   Embedder: {type(pipeline.embedder).__name__}")
-    log(f"   use_v2_embedding_property: {pipeline.use_v2_embedding_property}")
     log(f"   Dimensions: {pipeline.config.embedding_dimensions}")
     log("")
     

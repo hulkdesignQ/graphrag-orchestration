@@ -61,7 +61,7 @@ class LocalSearchHandler(BaseRouteHandler):
     
     V2 Mode (when VOYAGE_V2_ENABLED=True):
     - Uses Voyage embeddings (2048 dim) for query embedding
-    - Searches embedding_v2 property on TextChunk nodes
+    - Searches embedding_v2 property on Sentence nodes
     - Section-aware chunks for better semantic coherence
     """
 

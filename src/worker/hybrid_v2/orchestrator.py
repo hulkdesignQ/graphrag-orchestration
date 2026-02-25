@@ -211,9 +211,6 @@ class HybridPipeline:
         self.folder_id = folder_id  # None means search all folders
         self.neo4j_driver = neo4j_driver
 
-        # Route 1 (Vector RAG) was deprecated - capability flag kept for backward compatibility
-        self.vector_rag: bool = False
-
         # Cached one-time checks for Neo4j indexes (used by Route 2 Local Search)
         self._textchunk_fulltext_index_checked = False
         
@@ -816,38 +813,6 @@ class HybridPipeline:
 
             except Exception as e:
                 logger.warning("stage_3.3.5_bm25_phrase_failed", error=str(e))
-                # Fall back to simple fulltext if BM25 phrase search fails
-                if enable_fulltext_boost:
-                    logger.info("stage_3.3.5_fallback_to_simple_fulltext")
-                    try:
-                        from .pipeline.enhanced_graph_retriever import SourceChunk
-                        fulltext_chunks = await self._search_text_chunks_fulltext(
-                            query_text=query,
-                            top_k=15,
-                        )
-                        existing_ids = {c.chunk_id for c in graph_context.source_chunks}
-                        for chunk_dict, score in fulltext_chunks:
-                            cid = (chunk_dict.get("id") or "").strip()
-                            if not cid or cid in existing_ids:
-                                continue
-                            spk = (chunk_dict.get("section_path_key") or "").strip()
-                            section_path = spk.split(" > ") if spk else []
-                            graph_context.source_chunks.append(
-                                SourceChunk(
-                                    chunk_id=cid,
-                                    text=chunk_dict.get("text") or "",
-                                    entity_name="fulltext_fallback",
-                                    section_path=section_path,
-                                    section_id=(chunk_dict.get("section_id") or "").strip(),
-                                    document_id=(chunk_dict.get("document_id") or "").strip(),
-                                    document_title=(chunk_dict.get("document_title") or "").strip(),
-                                    document_source=(chunk_dict.get("document_source") or "").strip(),
-                                    relevance_score=float(score or 0.0),
-                                )
-                            )
-                            existing_ids.add(cid)
-                    except Exception as fallback_e:
-                        logger.warning("stage_3.3.5_fulltext_fallback_failed", error=str(fallback_e))
 
         timings_ms["stage_3.3.5_ms"] = int((time.perf_counter() - t0) * 1000)
 
@@ -907,7 +872,7 @@ class HybridPipeline:
 
         # Graph-signal summary (used by generic negative detection downstream).
         # Define this early so it is always available even if later stages short-circuit.
-        # IMPORTANT: TextChunk evidence (from BM25/vector/coverage retrieval) counts as signal.
+        # IMPORTANT: Sentence evidence (from BM25/vector/coverage retrieval) counts as signal.
         has_graph_signal = (
             bool(hub_entities)
             or bool(graph_context.related_entities)
@@ -2264,11 +2229,6 @@ Sub-questions:"""
             return result.to_dict()
         
         # Legacy fallback
-        # Route 1 (Vector RAG) was deprecated - fallback to Route 2 (Local Search)
-        if route == QueryRoute.VECTOR_RAG:
-            logger.warning("route_1_deprecated_using_route_2", query=query[:50])
-            route = QueryRoute.LOCAL_SEARCH
-        
         if route == QueryRoute.LOCAL_SEARCH:
             return await self._execute_route_2_local_search(query, response_type)
         elif route == QueryRoute.GLOBAL_SEARCH:

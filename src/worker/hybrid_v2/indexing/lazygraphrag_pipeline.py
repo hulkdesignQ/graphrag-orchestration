@@ -5,7 +5,7 @@ indexing pipeline implementation. The hybrid system needs a stable, dedicated
 indexing entrypoint that populates the Neo4j schema used by:
 - Route 2/3/4/5/6/7 (LazyGraphRAG + HippoRAG over :Entity / :Sentence / :MENTIONS)
 
-Sentence-direct indexing: DI units → spaCy → Sentence nodes (no TextChunk layer).
+Sentence-direct indexing: DI units → spaCy → Sentence nodes.
 
 Phase 2 Migration: Added optional neo4j-graphrag LLMEntityRelationExtractor support.
 Set use_native_extractor=True in config to use the native extractor.
@@ -155,13 +155,11 @@ class LazyGraphRAGIndexingPipeline:
         llm: Optional[Any],
         embedder: Optional[Any],
         config: Optional[LazyGraphRAGIndexingConfig] = None,
-        use_v2_embedding_property: bool = False,  # V2: store in embedding_v2
     ):
         self.neo4j_store = neo4j_store
         self.llm = llm
         self.embedder = embedder
         self.config = config or LazyGraphRAGIndexingConfig()
-        self.use_v2_embedding_property = use_v2_embedding_property  # V2 flag
 
         self._splitter = SentenceSplitter(
             chunk_size=self.config.chunk_size,
@@ -322,7 +320,7 @@ class LazyGraphRAGIndexingPipeline:
                 self.neo4j_store.delete_document_chunks(group_id, doc_id)
 
         # 3) Direct sentence indexing: DI units → spaCy → Sentence nodes.
-        #    Bypasses the old TextChunk pipeline entirely.
+        #    Bypasses the old TextChunk pipeline.
         sentence_stats = await self._index_sentences_direct(
             group_id=group_id,
             expanded_docs=expanded_docs,
@@ -393,7 +391,7 @@ class LazyGraphRAGIndexingPipeline:
 
         # 5) Entity/relationship extraction — sentence-based (Phase B denoising).
         #    Entities are extracted from Sentence nodes (no overlap, pre-filtered)
-        #    instead of TextChunk nodes (64-token overlap, noisy).
+        #    instead of legacy TextChunk nodes (64-token overlap, noisy).
         entities: List[Entity] = []
         relationships: List[Relationship] = []
         if self.llm is None:
@@ -615,7 +613,7 @@ class LazyGraphRAGIndexingPipeline:
 
 
     # ------------------------------------------------------------------
-    # Phase 1: Direct sentence indexing (bypass TextChunk creation)
+    # Direct sentence indexing
     # ------------------------------------------------------------------
 
     async def _index_sentences_direct(

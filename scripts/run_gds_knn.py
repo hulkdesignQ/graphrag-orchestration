@@ -59,7 +59,6 @@ async def run_gds_for_group(group_id: str, knn_top_k: int, knn_cutoff: float):
         llm=None,
         embedder=None,
         config=None,
-        use_v2_embedding_property=True,
     )
     
     try:

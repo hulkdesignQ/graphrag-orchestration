@@ -61,7 +61,6 @@ async def main(group_id: str, min_community_size: int = 2) -> None:
         llm=llm_service.get_indexing_llm() if llm_service.llm is not None else None,
         embedder=voyage_embedder,
         config=config,
-        use_v2_embedding_property=True,
     )
 
     print(f"   LLM available: {bool(pipeline.llm)}")

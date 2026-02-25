@@ -1,7 +1,7 @@
 """Enhanced Neo4j Graph Retrieval for Route 3.
 
 This module provides graph-aware retrieval that fully utilizes:
-1. MENTIONS edges: Entity → Source TextChunks (for citations)
+1. MENTIONS edges: Entity → Source Sentences (for citations)
 2. RELATED_TO edges: Entity → Entity relationships (for context)
 3. Section metadata: Document structure (for organized citations)
 4. Entity embeddings: Semantic entity discovery
@@ -130,7 +130,7 @@ class EnhancedGraphRetriever:
     Enhanced graph retrieval that fully utilizes Neo4j's power.
     
     Capabilities:
-    1. MENTIONS traversal: Get source TextChunks for entities
+    1. MENTIONS traversal: Get source Sentences for entities
     2. RELATED_TO traversal: Expand entity context via relationships
     3. Section-aware retrieval: Use document structure metadata
     4. Semantic entity search: Find entities by embedding similarity
@@ -313,7 +313,7 @@ class EnhancedGraphRetriever:
         Get sections where entities appear (1-hop via APPEARS_IN_SECTION).
         
         This is a 2x speedup over the old 2-hop traversal:
-        Old: Entity ← MENTIONS ← TextChunk → IN_SECTION → Section
+        Old: Entity ← MENTIONS ← TextChunk → IN_SECTION → Section (now Sentence-based)
         New: Entity → APPEARS_IN_SECTION → Section
         
         Args:
@@ -397,7 +397,7 @@ class EnhancedGraphRetriever:
         Get documents where entities appear (1-hop via APPEARS_IN_DOCUMENT).
         
         This is a 5x speedup over the old 3-hop traversal:
-        Old: Entity ← MENTIONS ← TextChunk → IN_DOCUMENT → Document
+        Old: Entity ← MENTIONS ← TextChunk → IN_DOCUMENT → Document (now Sentence-based)
         New: Entity → APPEARS_IN_DOCUMENT → Document
         
         Args:
@@ -730,7 +730,7 @@ class EnhancedGraphRetriever:
         Args:
             hub_entities: Initial hub entities from community matching
             expand_relationships: Whether to traverse RELATED_TO edges
-            get_source_chunks: Whether to retrieve source TextChunks via MENTIONS
+            get_source_chunks: Whether to retrieve source Sentences via MENTIONS
             max_chunks_per_entity: Max chunks to retrieve per entity
             max_relationships: Max relationships to retrieve
             section_diversify: Whether to diversify chunks across sections
@@ -972,7 +972,7 @@ class EnhancedGraphRetriever:
         Get source chunks that MENTION these entities.
 
         Current hybrid pipeline schema (as of Jan 2026):
-        - Chunk label: `TextChunk`
+        - Chunk label: `Sentence`
         - Entity label: `__Entity__`
         - Edge direction: (TextChunk)-[:MENTIONS]->(__Entity__)
         - Alias support: matches entity.name OR any alias in entity.aliases[]
@@ -1977,7 +1977,7 @@ class EnhancedGraphRetriever:
         entity_names: List[str],
         max_relationships: int = 30,
     ) -> List[EntityRelationship]:
-        """Get co-mentioned entity relationships via shared TextChunks.
+        """Get co-mentioned entity relationships via shared Sentences.
 
         Finds entities that appear together in the same chunks (via MENTIONS edges).
         """
@@ -2531,10 +2531,10 @@ class EnhancedGraphRetriever:
         MATCH (d:Document)<-[:IN_DOCUMENT]-(t:Sentence)
         WHERE d.group_id = $group_id
           AND t.group_id = $group_id
-          AND t.embedding IS NOT NULL
+          AND t.embedding_v2 IS NOT NULL
         {folder_filter}
         OPTIONAL MATCH (t)-[:IN_SECTION]->(s:Section)
-        WITH d, t, s, vector.similarity.cosine(t.embedding, $query_embedding) AS score
+        WITH d, t, s, vector.similarity.cosine(t.embedding_v2, $query_embedding) AS score
         ORDER BY d.id, score DESC
         WITH d, collect({{
             chunk_id: t.id,
@@ -2910,7 +2910,7 @@ class EnhancedGraphRetriever:
         It prefers chunks marked as summary sections by the section-aware chunker,
         falling back to chunk_index=0 if summary markers are absent.
 
-        Requires APOC (uses apoc.convert.fromJsonMap on TextChunk.metadata).
+        Requires APOC (uses apoc.convert.fromJsonMap on Sentence.metadata).
         """
 
         if not self.driver:
@@ -3039,7 +3039,7 @@ class EnhancedGraphRetriever:
         top_k: int = 10,
     ) -> List[SourceChunk]:
         """
-        Get TextChunks from sections matching keywords.
+        Get Sentences from sections matching keywords.
         
         Uses section_path metadata for structured retrieval.
         """

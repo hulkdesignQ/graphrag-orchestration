@@ -124,8 +124,6 @@ def get_lazygraphrag_indexing_pipeline_v2():
                 llm=llm_service.get_indexing_llm() if llm_service.llm is not None else None,
                 embedder=embedder,
                 config=config,
-                # V2 flag: store in embedding_v2 property
-                use_v2_embedding_property=True,
             )
 
     return _indexing_pipeline_v2
