@@ -138,7 +138,49 @@ class CosmosDBClient:
         except Exception as e:
             logger.error("usage_query_failed", error=str(e), partition_id=partition_id)
             return []
-    
+
+    async def query_usage_cross_partition(
+        self,
+        start_time: Optional[str] = None,
+        end_time: Optional[str] = None,
+        usage_type: Optional[str] = None,
+        max_items: int = 5000,
+    ) -> List[Dict[str, Any]]:
+        """Query usage records across all partitions (admin only)."""
+        if not self._usage_container:
+            logger.warning("usage_cross_query_skipped", reason="Cosmos not initialized")
+            return []
+
+        try:
+            query = "SELECT * FROM c WHERE 1=1"
+            parameters: list = []
+
+            if start_time:
+                query += " AND c.timestamp >= @start_time"
+                parameters.append({"name": "@start_time", "value": start_time})
+            if end_time:
+                query += " AND c.timestamp <= @end_time"
+                parameters.append({"name": "@end_time", "value": end_time})
+            if usage_type:
+                query += " AND c.usage_type = @usage_type"
+                parameters.append({"name": "@usage_type", "value": usage_type})
+
+            items: List[Dict[str, Any]] = []
+            async for item in self._usage_container.query_items(
+                query=query,
+                parameters=parameters,
+                enable_cross_partition_query=True,
+                max_item_count=100,
+            ):
+                items.append(item)
+                if len(items) >= max_items:
+                    break
+
+            return items
+        except Exception as e:
+            logger.error("usage_cross_query_failed", error=str(e))
+            return []
+
     # ========================================================================
     # Chat History Methods
     # ========================================================================

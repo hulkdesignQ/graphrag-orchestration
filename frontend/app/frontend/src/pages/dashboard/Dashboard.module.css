@@ -228,6 +228,32 @@
     color: #868e96;
 }
 
+/* --- Recent activity table --- */
+.recentTable {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+}
+
+.recentTable th,
+.recentTable td {
+    text-align: left;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid #e9ecef;
+}
+
+.recentTable th {
+    font-weight: 600;
+    color: #495057;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.recentTable tbody tr:hover {
+    background: #f8f9fa;
+}
+
 /* --- Empty / loading states --- */
 .loadingContainer {
     display: flex;

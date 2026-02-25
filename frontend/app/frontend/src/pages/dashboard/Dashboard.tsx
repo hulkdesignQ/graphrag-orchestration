@@ -166,6 +166,33 @@ const Dashboard = () => {
                 </div>
             </div>
 
+            {/* Recent Activity */}
+            {usage.recent_queries.length > 0 && (
+                <div className={styles.section}>
+                    <h2 className={styles.sectionTitle}>Recent Activity</h2>
+                    <table className={styles.recentTable}>
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>Route</th>
+                                <th>Model</th>
+                                <th>Tokens</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {usage.recent_queries.slice(0, 10).map((q, i) => (
+                                <tr key={i}>
+                                    <td>{q.timestamp ? new Date(q.timestamp).toLocaleString() : "—"}</td>
+                                    <td>{q.route || "—"}</td>
+                                    <td>{q.model || "—"}</td>
+                                    <td>{q.total_tokens ?? "—"}</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            )}
+
             {/* Features */}
             <div className={styles.section}>
                 <h2 className={styles.sectionTitle}>Your Features</h2>
@@ -204,8 +231,12 @@ const Dashboard = () => {
                                     <p className={styles.planCardDetail}>
                                         {info.graphrag_enabled ? "✅ GraphRAG" : "❌ GraphRAG"}
                                     </p>
-                                    <button className={styles.upgradeButton} disabled={isCurrent}>
-                                        {isCurrent ? "Current Plan" : "Upgrade"}
+                                    <button
+                                        className={styles.upgradeButton}
+                                        disabled={isCurrent}
+                                        onClick={() => { if (!isCurrent) window.location.hash = "#/dashboard#plans"; }}
+                                    >
+                                        {isCurrent ? "Current Plan" : "Contact Sales"}
                                     </button>
                                 </div>
                             );

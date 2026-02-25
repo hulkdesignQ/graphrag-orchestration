@@ -195,7 +195,28 @@ const AdminDashboard = () => {
                 })}
             </div>
 
-            {/* Top users placeholder */}
+            {/* Queries per hour */}
+            {metrics.queries_per_hour.length > 0 && (
+                <div className={styles.section}>
+                    <h2 className={styles.sectionTitle}>Queries Per Hour (Last 24h)</h2>
+                    <div className={styles.hourChart}>
+                        {(() => {
+                            const maxCount = Math.max(...metrics.queries_per_hour.map(h => h.count || 0), 1);
+                            return metrics.queries_per_hour.map((h, i) => (
+                                <div key={i} className={styles.hourBar} title={`${h.hour}: ${h.count} queries`}>
+                                    <div
+                                        className={styles.hourBarFill}
+                                        style={{ height: `${Math.round(((h.count || 0) / maxCount) * 100)}%` }}
+                                    />
+                                    <span className={styles.hourLabel}>{(h.hour || "").slice(-2)}h</span>
+                                </div>
+                            ));
+                        })()}
+                    </div>
+                </div>
+            )}
+
+            {/* Top users */}
             <div className={styles.section}>
                 <h2 className={styles.sectionTitle}>Top Users</h2>
                 <table className={styles.userList}>

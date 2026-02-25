@@ -270,3 +270,35 @@
         grid-template-columns: 1fr;
     }
 }
+
+/* --- Queries per hour chart --- */
+.hourChart {
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 120px;
+    padding: 0.5rem 0;
+}
+
+.hourBar {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-end;
+    height: 100%;
+}
+
+.hourBarFill {
+    width: 100%;
+    min-height: 2px;
+    background: #4263eb;
+    border-radius: 2px 2px 0 0;
+    transition: height 0.2s ease;
+}
+
+.hourLabel {
+    font-size: 0.6rem;
+    color: #868e96;
+    margin-top: 2px;
+}

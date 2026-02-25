@@ -2549,14 +2549,34 @@ Instructions:
         logger.info("stage_2.1_complete", num_seeds=len(seed_entities))
         
         # Stage 2.2: LazyGraphRAG Iterative Deepening
-        # For now, we use the tracer as a simplified exploration
-        # TODO: Replace with true LazyGraphRAG iterative deepening
+        # Multi-round: expand search if initial evidence is insufficient
         logger.info("stage_2.2_iterative_deepening")
-        evidence_nodes = await self.tracer.trace(
-            query=query,
-            seed_entities=seed_entities,
-            top_k=15
-        )
+        
+        max_rounds = 3
+        min_evidence = 5
+        current_top_k = 15
+        evidence_nodes: List[Tuple] = []
+        seen_entities: set = set()
+
+        for round_num in range(1, max_rounds + 1):
+            evidence_nodes = await self.tracer.trace(
+                query=query,
+                seed_entities=seed_entities,
+                top_k=current_top_k
+            )
+            if len(evidence_nodes) >= min_evidence or round_num == max_rounds:
+                break
+            # Expand: use discovered entities as additional seeds
+            new_seeds = [name for name, _ in evidence_nodes if name not in seen_entities]
+            seen_entities.update(new_seeds)
+            seed_entities = list(set(seed_entities + new_seeds))
+            current_top_k = min(current_top_k + 10, 40)
+            logger.info("iterative_deepening_expand",
+                       round=round_num,
+                       evidence_so_far=len(evidence_nodes),
+                       expanded_seeds=len(seed_entities),
+                       new_top_k=current_top_k)
+
         logger.info("stage_2.2_complete", num_evidence=len(evidence_nodes))
         
         # Stage 2.3: Synthesis with Citations
