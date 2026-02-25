@@ -35,7 +35,7 @@ drop-in replacement for a raw ``Session``.
 from __future__ import annotations
 
 import logging
-from contextlib import contextmanager
+from contextlib import asynccontextmanager, contextmanager
 from typing import Any, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -99,6 +99,86 @@ class _EagerResult:
 
     def __bool__(self):
         return bool(self._records)
+
+
+# ── Async EagerResult + Retry Session ────────────────────────────────────────
+
+class _AsyncRecordIter:
+    """Minimal async iterator over pre-fetched records."""
+
+    def __init__(self, records: list):
+        self._records = records
+        self._index = 0
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if self._index >= len(self._records):
+            raise StopAsyncIteration
+        rec = self._records[self._index]
+        self._index += 1
+        return rec
+
+
+class _AsyncEagerResult(_EagerResult):
+    """Async-compatible variant of ``_EagerResult``."""
+
+    async def single(self, strict: bool = False):  # type: ignore[override]
+        return super().single(strict)
+
+    async def data(self, *keys: str) -> List[dict]:  # type: ignore[override]
+        return super().data(*keys)
+
+    async def values(self, *keys: str) -> list:  # type: ignore[override]
+        return super().values(*keys)
+
+    async def consume(self):  # type: ignore[override]
+        return None
+
+    def __aiter__(self):
+        return _AsyncRecordIter(self._records)
+
+
+class AsyncRetrySession:
+    """Wraps a Neo4j ``AsyncSession``, routing ``.run()`` through managed transactions."""
+
+    def __init__(self, session, read_only: bool = False):
+        self._session = session
+        self._read_only = read_only
+
+    async def run(self, query, parameters=None, **kwargs):
+        merged = dict(parameters or {})
+        merged.update(kwargs)
+
+        async def _tx_func(tx):
+            result = await tx.run(query, merged)
+            records = [record async for record in result]
+            keys = list(result.keys())
+            try:
+                await result.consume()
+            except Exception:
+                pass
+            return records, keys
+
+        executor = self._session.execute_read if self._read_only else self._session.execute_write
+        label = "execute_read" if self._read_only else "execute_write"
+        try:
+            records, keys = await executor(_tx_func)
+            return _AsyncEagerResult(records, keys)
+        except Exception as e:
+            q_preview = str(query)[:80].replace("\n", " ")
+            logger.debug("Neo4j async %s failed: %s | query: %s", label, e, q_preview)
+            raise
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._session, name)
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return await self._session.__aexit__(*args)
 
 
 # ── Sync Retry Session ──────────────────────────────────────────────────────

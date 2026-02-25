@@ -135,6 +135,42 @@ def extract_document_date(content: str) -> Optional[str]:
     return latest.strftime("%Y-%m-%d")
 
 
+def _entity_mentioned_in_text(name: str, aliases: List[str], text: str) -> bool:
+    """Check if an entity is mentioned in text using fuzzy matching.
+
+    Checks (in order):
+    1. Exact substring match on entity name
+    2. Exact substring match on each alias
+    3. Contiguous word-subsequence match (length >= 2 words, >= 4 chars)
+       to catch partial names like "Contoso Lifts" inside "Contoso Lifts LLC"
+    """
+    text_lower = text.lower()
+
+    # 1. Exact substring on canonical name
+    name_lower = name.lower().strip()
+    if name_lower and name_lower in text_lower:
+        return True
+
+    # 2. Alias matching
+    for alias in aliases:
+        alias_lower = alias.strip().lower()
+        if alias_lower and alias_lower in text_lower:
+            return True
+
+    # 3. Contiguous word-subsequence matching for multi-word entity names
+    words = name_lower.split()
+    if len(words) >= 2:
+        for start in range(len(words)):
+            for end in range(start + 2, len(words) + 1):
+                if end - start == len(words):
+                    continue  # skip full name (already checked)
+                subseq = " ".join(words[start:end])
+                if len(subseq) >= 4 and subseq in text_lower:
+                    return True
+
+    return False
+
+
 @dataclass
 class LazyGraphRAGIndexingConfig:
     chunk_size: int = 512
@@ -1358,7 +1394,12 @@ class LazyGraphRAGIndexingPipeline:
                 )
 
         # Recover mentions → map to Sentence IDs (not chunk IDs)
+        # Uses fuzzy matching (name + aliases + word subsequences) instead
+        # of naive substring to avoid sparse MENTIONS edges that break PPR.
         mentions_total = 0
+        # Track which batches each entity was extracted from, so we can
+        # fall back to batch-level attribution if fuzzy matching still misses.
+        entity_source_batches: Dict[str, List[str]] = {}  # ent_id → [batch_uid, ...]
         for rel in graph.relationships:
             start_id = str(getattr(rel, "start_node_id", "") or "")
             end_id = str(getattr(rel, "end_node_id", "") or "")
@@ -1366,36 +1407,63 @@ class LazyGraphRAGIndexingPipeline:
                 continue
 
             # batch_uid → entity (lexical graph creates chunk→entity links)
+            batch_uid: Optional[str] = None
+            ent: Optional[Entity] = None
             if start_id in batch_uids and end_id in entity_id_map:
-                ent_id = entity_id_map[end_id]
-                ent = entities_by_id.get(ent_id)
-                if ent is not None:
-                    # Map back to individual sentence IDs where entity name appears
-                    for s in batch_sentence_map.get(start_id, []):
-                        if ent.name.lower() in s["text"].lower() and s["id"] not in ent.text_unit_ids:
-                            ent.text_unit_ids.append(s["id"])
-                            mentions_total += 1
-                continue
-            if end_id in batch_uids and start_id in entity_id_map:
-                ent_id = entity_id_map[start_id]
-                ent = entities_by_id.get(ent_id)
-                if ent is not None:
-                    for s in batch_sentence_map.get(end_id, []):
-                        if ent.name.lower() in s["text"].lower() and s["id"] not in ent.text_unit_ids:
-                            ent.text_unit_ids.append(s["id"])
-                            mentions_total += 1
+                batch_uid = start_id
+                ent = entities_by_id.get(entity_id_map[end_id])
+            elif end_id in batch_uids and start_id in entity_id_map:
+                batch_uid = end_id
+                ent = entities_by_id.get(entity_id_map[start_id])
 
-        # For entities with no mentions recovered from lexical graph,
-        # do a direct text match across all content sentences
+            if batch_uid is None or ent is None:
+                continue
+
+            entity_source_batches.setdefault(ent.id, [])
+            if batch_uid not in entity_source_batches[ent.id]:
+                entity_source_batches[ent.id].append(batch_uid)
+
+            for s in batch_sentence_map.get(batch_uid, []):
+                if s["id"] not in ent.text_unit_ids and _entity_mentioned_in_text(ent.name, ent.aliases, s["text"]):
+                    ent.text_unit_ids.append(s["id"])
+                    mentions_total += 1
+
+        # Batch-level attribution fallback: if an entity was extracted from
+        # a batch but fuzzy matching found zero sentence-level mentions,
+        # assign ALL sentences in its source batches (the LLM definitely
+        # saw the entity in that text, so connectivity is more important
+        # than precision here).
+        batch_fallback_count = 0
+        for ent in entities_by_id.values():
+            if ent.text_unit_ids:
+                continue
+            source_batches = entity_source_batches.get(ent.id, [])
+            for b_uid in source_batches:
+                for s in batch_sentence_map.get(b_uid, []):
+                    if s["id"] not in ent.text_unit_ids:
+                        ent.text_unit_ids.append(s["id"])
+                        batch_fallback_count += 1
+
+        # Global fallback: for entities never found in any batch relationship,
+        # do a fuzzy text match across all content sentences
+        global_fallback_count = 0
         for ent in entities_by_id.values():
             if not ent.text_unit_ids:
                 for s in sentences:
-                    if ent.name.lower() in s["text"].lower():
+                    if _entity_mentioned_in_text(ent.name, ent.aliases, s["text"]):
                         ent.text_unit_ids.append(s["id"])
+                        global_fallback_count += 1
 
-        if mentions_total == 0:
+        total_mentions = mentions_total + batch_fallback_count + global_fallback_count
+        if total_mentions == 0:
             logger.warning("native_sentence_extractor_no_mentions_recovered",
                            extra={"group_id": group_id, "sentences": len(sentences), "entities": len(entities_by_id)})
+        else:
+            logger.info(
+                f"MENTIONS recovery: {mentions_total} fuzzy-matched, "
+                f"{batch_fallback_count} batch-fallback, "
+                f"{global_fallback_count} global-fallback"
+            )
 
         # Convert entity→entity relationships
         relationships: List[Relationship] = []

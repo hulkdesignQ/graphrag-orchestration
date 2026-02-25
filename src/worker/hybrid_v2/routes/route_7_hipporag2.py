@@ -63,9 +63,14 @@ _ENTITY_TYPE_KEYWORDS: Dict[str, List[str]] = {
 
 # Structural signals for exhaustive intent (no domain nouns)
 _EXHAUSTIVE_INTENT_RE = re.compile(
+    r"(?:"
     r"\b(?:list|enumerate|identify|name|find|what\s+are)\b"
     r".{0,40}"
-    r"\b(?:all|every|each|across)\b",
+    r"\b(?:all|every|each|across)\b"
+    r"|"
+    # Entity comparison: "across the set, which entity appears in the most documents"
+    r"\b(?:across)\b.{0,60}\b(?:which|what|compare)\b"
+    r")",
     re.IGNORECASE,
 )
 
