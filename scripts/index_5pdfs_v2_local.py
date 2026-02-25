@@ -418,6 +418,25 @@ async def verify_v2_index(group_id: str):
             group_id=group_id,
         )
         log(f"  SEMANTICALLY_SIMILAR (KNN) edges: {result.single()['knn_count']}")
+
+        # Check for stale legacy nodes (TextChunk / Chunk) that should not exist after reindex
+        result = session.run(
+            """
+            OPTIONAL MATCH (tc:TextChunk {group_id: $group_id})
+            WITH count(tc) AS tc_count
+            OPTIONAL MATCH (c:Chunk {group_id: $group_id})
+            RETURN tc_count, count(c) AS chunk_count
+            """,
+            group_id=group_id,
+        )
+        record = result.single()
+        tc_count = record["tc_count"]
+        chunk_count = record["chunk_count"]
+        if tc_count > 0 or chunk_count > 0:
+            log(f"  ⚠️  STALE LEGACY NODES: TextChunk={tc_count}, Chunk={chunk_count}")
+            log(f"     These are leftover from pre-Sentence migration and should be removed.")
+        else:
+            log(f"  ✅ No stale TextChunk/Chunk nodes (clean Sentence-based graph)")
     
     driver.close()
     log("=" * 70)

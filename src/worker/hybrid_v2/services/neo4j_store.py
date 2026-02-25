@@ -1484,23 +1484,27 @@ class Neo4jStoreV3:
     def delete_document_chunks(self, group_id: str, document_id: str) -> Dict[str, int]:
         """Delete all child nodes for a specific document before re-chunking.
 
-        Removes TextChunk, Sentence, Section, Table, Figure, KeyValue,
-        KeyValuePair, and SignatureBlock nodes linked to the document.
-        The Document node itself is kept (it will be upserted separately).
-        Orphan Entity cleanup is NOT done here — entities may be shared
-        across documents and are handled by maintenance GC.
+        Removes Sentence, TextChunk (legacy), Chunk (legacy), Section, Table,
+        Figure, KeyValue, KeyValuePair, and SignatureBlock nodes linked to the
+        document.  The Document node itself is kept (it will be upserted
+        separately).  Orphan Entity cleanup is NOT done here — entities may be
+        shared across documents and are handled by maintenance GC.
         """
         query = """
         MATCH (d:Document {id: $doc_id, group_id: $group_id})
 
-        // Collect chunks
+        // Collect legacy TextChunk / Chunk nodes
         OPTIONAL MATCH (c:TextChunk)-[:PART_OF|IN_DOCUMENT]->(d)
         WITH d, collect(DISTINCT c) AS chunks
+        OPTIONAL MATCH (c2:Chunk)-[:PART_OF|IN_DOCUMENT]->(d)
+        WITH d, chunks + collect(DISTINCT c2) AS chunks
 
-        // Collect sentences linked to those chunks
-        OPTIONAL MATCH (sent:Sentence)-[:PART_OF]->(ch)
+        // Collect sentences — new path (IN_DOCUMENT) and legacy path (PART_OF→TextChunk)
+        OPTIONAL MATCH (sent:Sentence)-[:IN_DOCUMENT]->(d)
+        WITH d, chunks, collect(DISTINCT sent) AS direct_sentences
+        OPTIONAL MATCH (sent2:Sentence)-[:PART_OF]->(ch)
         WHERE ch IN chunks
-        WITH d, chunks, collect(DISTINCT sent) AS sentences
+        WITH d, chunks, direct_sentences + collect(DISTINCT sent2) AS sentences
 
         // Collect sections
         OPTIONAL MATCH (s:Section {doc_id: $doc_id, group_id: $group_id})
@@ -1556,7 +1560,11 @@ class Neo4jStoreV3:
         return deleted
 
     def delete_group_data(self, group_id: str) -> Dict[str, int]:
-        """Delete all data for a group (for cleanup/reindexing)."""
+        """Delete all data for a group (for cleanup/reindexing).
+
+        Includes legacy TextChunk and Chunk (neo4j_graphrag native label) nodes
+        that may remain from pre-Sentence-migration indexing runs.
+        """
         queries = [
             ("entities", "MATCH (e:Entity {group_id: $group_id}) DETACH DELETE e RETURN count(*) AS count"),
             ("communities", "MATCH (c:Community {group_id: $group_id}) DETACH DELETE c RETURN count(*) AS count"),
@@ -1567,6 +1575,10 @@ class Neo4jStoreV3:
             ("sections", "MATCH (s:Section {group_id: $group_id}) DETACH DELETE s RETURN count(*) AS count"),
             ("sentences", "MATCH (s:Sentence {group_id: $group_id}) DETACH DELETE s RETURN count(*) AS count"),
             ("figures", "MATCH (f:Figure {group_id: $group_id}) DETACH DELETE f RETURN count(*) AS count"),
+            # Legacy node labels from pre-Sentence migration
+            ("text_chunks", "MATCH (c:TextChunk {group_id: $group_id}) DETACH DELETE c RETURN count(*) AS count"),
+            ("chunks", "MATCH (c:Chunk {group_id: $group_id}) DETACH DELETE c RETURN count(*) AS count"),
+            # Documents last — other nodes may reference them
             ("documents", "MATCH (d:Document {group_id: $group_id}) DETACH DELETE d RETURN count(*) AS count"),
         ]
         
