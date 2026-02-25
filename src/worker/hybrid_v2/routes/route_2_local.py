@@ -117,49 +117,9 @@ class LocalSearchHandler(BaseRouteHandler):
                    prompt_variant=prompt_variant,
                    timings_enabled=enable_timings)
         
-        # Stage 2.1: Entity Extraction (explicit entities)
-        logger.info("stage_2.1_entity_extraction")
-        t0 = time.perf_counter()
-        seed_entities = await self.pipeline.disambiguator.disambiguate(query)
-        timings_ms["stage_2.1_ner_ms"] = int((time.perf_counter() - t0) * 1000)
-        logger.info("stage_2.1_complete", num_seeds=len(seed_entities),
-                   duration_ms=timings_ms["stage_2.1_ner_ms"])
-        
-        # Stage 2.2: LazyGraphRAG Iterative Deepening
-        logger.info("stage_2.2_iterative_deepening")
-        t0 = time.perf_counter()
-        evidence_nodes = await self.pipeline.tracer.trace(
-            query=query,
-            seed_entities=seed_entities,
-            top_k=15
-        )
-        timings_ms["stage_2.2_ppr_ms"] = int((time.perf_counter() - t0) * 1000)
-        logger.info("stage_2.2_complete", num_evidence=len(evidence_nodes),
-                   duration_ms=timings_ms["stage_2.2_ppr_ms"])
-        
-        # Stage 2.2.5 + 2.2.6: Run in PARALLEL — they are independent.
-        # 2.2.5 needs evidence_nodes → chunks → doc_ids → language spans
-        # 2.2.6 needs only the query (skeleton enrichment via Voyage vectors)
+        # Stage 2.2.6 (Skeleton) depends only on the query — start it immediately
+        # so it runs in parallel with NER (2.1) + PPR (2.2) + Chunks (2.2.5).
         enable_sentence_citations = os.getenv("ROUTE2_SENTENCE_CITATIONS", "1").strip().lower() in {"1", "true", "yes"}
-
-        async def _run_stage_2_2_5() -> tuple:
-            """Chunk retrieval + language spans."""
-            _t = time.perf_counter()
-            _doc_spans: Dict[str, List[Dict]] = {}
-            _chunks: list = []
-            _escores: Dict[str, float] = {}
-            _rstats: Dict[str, Any] = {}
-            if enable_sentence_citations:
-                _chunks, _escores, _rstats = await self.synthesizer._retrieve_text_chunks(
-                    evidence_nodes, query=query, ner_seed_count=len(seed_entities),
-                    doc_scope_enabled=False,
-                )
-                _doc_ids = list({c.get("metadata", {}).get("document_id", "") for c in _chunks} - {""})
-                if _doc_ids:
-                    _doc_spans = await self._fetch_language_spans(_doc_ids)
-                    logger.info("stage_2.2.5_sentence_spans", num_docs=len(_doc_ids), docs_with_spans=len(_doc_spans))
-            _dur = int((time.perf_counter() - _t) * 1000)
-            return _chunks, _escores, _rstats, _doc_spans, _dur
 
         async def _run_stage_2_2_6() -> tuple:
             """Skeleton sentence enrichment."""
@@ -184,11 +144,55 @@ class LocalSearchHandler(BaseRouteHandler):
             _dur = int((time.perf_counter() - _t) * 1000)
             return _skel_chunks, _dur
 
+        # Fire skeleton enrichment immediately (no dependency on NER/PPR)
+        skeleton_task = asyncio.create_task(_run_stage_2_2_6())
+
+        # Stage 2.1: Entity Extraction (explicit entities)
+        logger.info("stage_2.1_entity_extraction")
+        t0 = time.perf_counter()
+        seed_entities = await self.pipeline.disambiguator.disambiguate(query)
+        timings_ms["stage_2.1_ner_ms"] = int((time.perf_counter() - t0) * 1000)
+        logger.info("stage_2.1_complete", num_seeds=len(seed_entities),
+                   duration_ms=timings_ms["stage_2.1_ner_ms"])
+        
+        # Stage 2.2: LazyGraphRAG Iterative Deepening
+        logger.info("stage_2.2_iterative_deepening")
+        t0 = time.perf_counter()
+        evidence_nodes = await self.pipeline.tracer.trace(
+            query=query,
+            seed_entities=seed_entities,
+            top_k=15
+        )
+        timings_ms["stage_2.2_ppr_ms"] = int((time.perf_counter() - t0) * 1000)
+        logger.info("stage_2.2_complete", num_evidence=len(evidence_nodes),
+                   duration_ms=timings_ms["stage_2.2_ppr_ms"])
+        
+        # Stage 2.2.5: Chunk retrieval + language spans (depends on PPR results)
+        async def _run_stage_2_2_5() -> tuple:
+            """Chunk retrieval + language spans."""
+            _t = time.perf_counter()
+            _doc_spans: Dict[str, List[Dict]] = {}
+            _chunks: list = []
+            _escores: Dict[str, float] = {}
+            _rstats: Dict[str, Any] = {}
+            if enable_sentence_citations:
+                _chunks, _escores, _rstats = await self.synthesizer._retrieve_text_chunks(
+                    evidence_nodes, query=query, ner_seed_count=len(seed_entities),
+                    doc_scope_enabled=False,
+                )
+                _doc_ids = list({c.get("metadata", {}).get("document_id", "") for c in _chunks} - {""})
+                if _doc_ids:
+                    _doc_spans = await self._fetch_language_spans(_doc_ids)
+                    logger.info("stage_2.2.5_sentence_spans", num_docs=len(_doc_ids), docs_with_spans=len(_doc_spans))
+            _dur = int((time.perf_counter() - _t) * 1000)
+            return _chunks, _escores, _rstats, _doc_spans, _dur
+
+        # Run 2.2.5 and await skeleton (already running since before 2.1)
         t0_parallel = time.perf_counter()
         (pre_chunks, _entity_scores, _retrieval_stats, doc_language_spans, dur_2_2_5), \
             (skeleton_coverage_chunks, dur_2_2_6) = await asyncio.gather(
                 _run_stage_2_2_5(),
-                _run_stage_2_2_6(),
+                skeleton_task,
             )
         timings_ms["stage_2.2.5_chunks_spans_ms"] = dur_2_2_5
         timings_ms["stage_2.2.6_skeleton_ms"] = dur_2_2_6
