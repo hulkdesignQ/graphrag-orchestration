@@ -402,20 +402,23 @@ class EvidenceSynthesizer:
         # knowledge graph, constraining enumeration to graph-indexed entities.
         if graph_structural_header:
             constraint = (
-                "IMPORTANT: The Entity-Document Map above is the "
-                "AUTHORITATIVE source for party names and their roles. "
-                "When the user asks about parties or organizations:\n"
-                "1. Include ONLY entries marked [PARTY_TO] or whose "
+                "IMPORTANT: The Entity-Document Map above shows entities "
+                "found in each document.\n"
+                "• For questions about WHICH DOCUMENTS mention an entity, "
+                "count ALL documents listed for that entity (regardless of "
+                "[PARTY_TO] or [---] tags).\n"
+                "• For questions about contractual ROLES or PARTIES:\n"
+                "  1. Include ONLY entries marked [PARTY_TO] or whose "
                 "context clearly shows a signatory role.\n"
-                "2. Exclude [---] entries (addresses, job sites, invoice "
+                "  2. Exclude [---] entries (addresses, job sites, invoice "
                 "recipients).\n"
-                "3. Do NOT add entities from the raw text below that are "
-                "not in the map.\n"
-                "4. Do NOT infer party roles from signature-block text "
+                "  3. Do NOT infer party roles from signature-block text "
                 "(e.g. 'By: X Its Principal Broker' does NOT mean X is "
                 "the broker — it is a title of the individual signing). "
                 "Use the [PARTY_TO] context sentences to determine "
-                "each entity's actual contractual role."
+                "each entity's actual contractual role.\n"
+                "• Do NOT add entities from the raw text below that are "
+                "not in the map."
             )
             context = (
                 graph_structural_header + "\n\n" + constraint + "\n\n---\n\n" + context

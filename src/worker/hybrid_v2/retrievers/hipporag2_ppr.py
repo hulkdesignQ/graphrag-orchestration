@@ -272,6 +272,33 @@ class HippoRAG2PPR:
                         synonym_edge_count += 1
 
             # ----------------------------------------------------------
+            # 5b. Sentence-Sentence edges via SEMANTICALLY_SIMILAR
+            #     Created by step 4.2 sentence KNN — enables cross-document
+            #     PPR traversal between similar sentences.
+            # ----------------------------------------------------------
+            seen_sentence_edges: set = set()
+            sentence_sim_count = 0
+            result = session.run(
+                "MATCH (s1:Sentence {group_id: $group_id})"
+                "-[r:SEMANTICALLY_SIMILAR]->"
+                "(s2:Sentence {group_id: $group_id}) "
+                "WHERE r.similarity >= $threshold "
+                "RETURN s1.id AS src, s2.id AS tgt, "
+                "r.similarity AS weight",
+                group_id=group_id,
+                threshold=synonym_threshold,
+            )
+            for record in result:
+                src_idx = self._node_to_idx.get(record["src"])
+                tgt_idx = self._node_to_idx.get(record["tgt"])
+                if src_idx is not None and tgt_idx is not None:
+                    edge_key = (min(src_idx, tgt_idx), max(src_idx, tgt_idx))
+                    if edge_key not in seen_sentence_edges:
+                        seen_sentence_edges.add(edge_key)
+                        self._add_edge(src_idx, tgt_idx, float(record["weight"]))
+                        sentence_sim_count += 1
+
+            # ----------------------------------------------------------
             # 6. Phase 2: Section graph (optional)
             # ----------------------------------------------------------
             if include_section_graph:
@@ -284,6 +311,7 @@ class HippoRAG2PPR:
             entity_edges=entity_edge_count,
             mentions_edges=mentions_edge_count,
             synonym_edges=synonym_edge_count,
+            sentence_sim_edges=sentence_sim_count,
         )
 
     def _load_section_graph_sync(

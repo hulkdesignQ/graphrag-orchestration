@@ -1211,6 +1211,39 @@ class Neo4jStoreV3:
         
         logger.info(f"Created {count} sentence RELATED_TO edges for group {group_id}")
         return count
+
+    def create_sentence_semantically_similar_edges(
+        self,
+        group_id: str,
+        edges: List[Dict[str, Any]],
+    ) -> int:
+        """Create SEMANTICALLY_SIMILAR edges between sentence nodes for PPR traversal.
+
+        Mirrors create_sentence_related_to_edges but uses the SEMANTICALLY_SIMILAR
+        relationship type that the PPR graph builder loads.
+        """
+        if not edges:
+            return 0
+
+        query = """
+        UNWIND $edges AS e
+        MATCH (s1:Sentence {id: e.source_id, group_id: $group_id})
+        MATCH (s2:Sentence {id: e.target_id, group_id: $group_id})
+        MERGE (s1)-[r:SEMANTICALLY_SIMILAR]->(s2)
+        SET r.score = e.similarity,
+            r.similarity = e.similarity,
+            r.method = 'knn_sentence',
+            r.group_id = $group_id,
+            r.created_at = datetime()
+        RETURN count(r) AS count
+        """
+
+        with self.get_retry_session() as session:
+            result = session.run(query, edges=edges, group_id=group_id)
+            count = result.single()["count"]
+
+        logger.info(f"Created {count} sentence SEMANTICALLY_SIMILAR edges for group {group_id}")
+        return count
     
     def query_sentences_by_vector(
         self,

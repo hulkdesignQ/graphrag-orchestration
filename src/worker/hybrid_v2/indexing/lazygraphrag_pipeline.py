@@ -963,10 +963,8 @@ class LazyGraphRAGIndexingPipeline:
         threshold = settings.SKELETON_KNN_THRESHOLD
         max_k = settings.SKELETON_KNN_MAX_K
         
-        # Clean up stale RELATED_TO edges from previous runs before rebuilding.
+        # Clean up stale RELATED_TO and SEMANTICALLY_SIMILAR edges from previous runs.
         # This ensures re-indexing doesn't leave orphan edges from changed/deleted sentences.
-        # Match on both source and method properties for backward compatibility
-        # (edges created before Feb 12 2026 only had source, not method).
         result = await self.neo4j_store.arun_query(
             """
                 MATCH (:Sentence {group_id: $group_id})-[r:RELATED_TO]->(:Sentence)
@@ -979,6 +977,19 @@ class LazyGraphRAGIndexingPipeline:
         deleted = result.single()["deleted"]
         if deleted > 0:
             logger.info(f"step_4.2_cleanup: deleted {deleted} stale RELATED_TO edges")
+        
+        result = await self.neo4j_store.arun_query(
+            """
+                MATCH (:Sentence {group_id: $group_id})-[r:SEMANTICALLY_SIMILAR]->(:Sentence)
+                WHERE r.method = 'knn_sentence'
+                DELETE r
+                RETURN count(r) AS deleted
+                """,
+            group_id=group_id,
+        )
+        sim_deleted = result.single()["deleted"]
+        if sim_deleted > 0:
+            logger.info(f"step_4.2_cleanup: deleted {sim_deleted} stale SEMANTICALLY_SIMILAR edges")
         
         # Fetch all sentences with embeddings for this group
         result = await self.neo4j_store.arun_query(
@@ -1097,14 +1108,19 @@ class LazyGraphRAGIndexingPipeline:
             logger.info(f"step_4.2_sentence_knn: no edges above threshold {threshold}")
             return {"edges_created": 0, "threshold": threshold}
         
-        # Persist RELATED_TO edges in Neo4j
+        # Persist RELATED_TO edges in Neo4j (legacy, used by step 4.2 consumers)
         count = self.neo4j_store.create_sentence_related_to_edges(group_id, edges_to_create)
+        
+        # Also create SEMANTICALLY_SIMILAR edges so PPR can traverse them
+        # (PPR loads SEMANTICALLY_SIMILAR for cross-document sentence connectivity)
+        sim_count = self.neo4j_store.create_sentence_semantically_similar_edges(group_id, edges_to_create)
         
         logger.info(
             "step_4.2_sentence_knn_edges_created",
             extra={
                 "group_id": group_id,
-                "edges_created": count,
+                "related_to_edges": count,
+                "semantically_similar_edges": sim_count,
                 "threshold": threshold,
                 "max_k": max_k,
                 "sentences_connected": len(edge_count_final),
@@ -1114,6 +1130,7 @@ class LazyGraphRAGIndexingPipeline:
         
         return {
             "edges_created": count,
+            "semantically_similar_edges": sim_count,
             "threshold": threshold,
             "max_k": max_k,
             "sentences_connected": len(edge_count_final),
