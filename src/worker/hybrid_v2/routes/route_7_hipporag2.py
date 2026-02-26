@@ -164,6 +164,27 @@ class HippoRAG2Handler(BaseRouteHandler):
 
     ROUTE_NAME = "route_7_hipporag2"
 
+    # Router-adaptive presets: when the orchestrator passes query_mode, Route 7
+    # adjusts parameters to match the query type's needs.  Without query_mode
+    # (backward-compatible default), all values come from env vars as before.
+    QUERY_MODE_PRESETS: Dict[str, Dict[str, Any]] = {
+        "local_search": {              # Factual extraction — fast & concise
+            "ppr_passage_top_k": 5,
+            "prompt_variant": "v1_concise",
+            "max_tokens": 150,
+        },
+        "global_search": {             # Thematic/community-level — needs breadth
+            "ppr_passage_top_k": 15,
+            "prompt_variant": None,
+            "max_tokens": None,
+        },
+        "drift_multi_hop": {           # Multi-hop reasoning — full context
+            "ppr_passage_top_k": 20,
+            "prompt_variant": None,
+            "max_tokens": None,
+        },
+    }
+
     def __init__(self, pipeline: Any) -> None:
         super().__init__(pipeline)
         self._triple_store = None
@@ -234,6 +255,7 @@ class HippoRAG2Handler(BaseRouteHandler):
         include_context: bool = False,
         weight_profile: Optional[str] = None,
         language: Optional[str] = None,
+        query_mode: Optional[str] = None,
     ) -> RouteResult:
         """Execute Route 7: True HippoRAG 2 retrieval pipeline."""
         enable_timings = os.getenv(
@@ -242,17 +264,26 @@ class HippoRAG2Handler(BaseRouteHandler):
         timings_ms: Dict[str, int] = {}
         t_route_start = time.perf_counter()
 
-        # Config from env
+        # Apply query_mode preset (router-adaptive parameters)
+        preset = self.QUERY_MODE_PRESETS.get(query_mode or "", {})
+
+        # Config from env, with preset overrides
         triple_top_k = int(os.getenv("ROUTE7_TRIPLE_TOP_K", "5"))
         dpr_top_k = int(os.getenv("ROUTE7_DPR_TOP_K", "20"))
         dpr_sentence_top_k = int(os.getenv("ROUTE7_DPR_SENTENCE_TOP_K", "120"))
         ppr_damping = float(os.getenv("ROUTE7_DAMPING", "0.5"))
         passage_node_weight = float(os.getenv("ROUTE7_PASSAGE_NODE_WEIGHT", "0.05"))
-        ppr_passage_top_k = int(os.getenv("ROUTE7_PPR_PASSAGE_TOP_K", "20"))
+        ppr_passage_top_k = preset.get("ppr_passage_top_k") or int(
+            os.getenv("ROUTE7_PPR_PASSAGE_TOP_K", "20")
+        )
         rerank_enabled = os.getenv(
             "ROUTE7_RERANK", "1"
         ).strip().lower() in {"1", "true", "yes"}
         rerank_top_k = int(os.getenv("ROUTE7_RERANK_TOP_K", "20"))
+
+        # Preset can override prompt_variant (only if caller didn't explicitly set one)
+        if prompt_variant is None and preset.get("prompt_variant"):
+            prompt_variant = preset["prompt_variant"]
 
         # Phase 2 feature flags
         structural_seeds_enabled = os.getenv(
@@ -272,6 +303,9 @@ class HippoRAG2Handler(BaseRouteHandler):
             damping=ppr_damping,
             triple_top_k=triple_top_k,
             dpr_top_k=dpr_top_k,
+            query_mode=query_mode,
+            ppr_passage_top_k=ppr_passage_top_k,
+            prompt_variant=prompt_variant,
         )
 
         # ------------------------------------------------------------------
@@ -669,6 +703,8 @@ class HippoRAG2Handler(BaseRouteHandler):
             "route_description": "True HippoRAG 2 with passage-node PPR (v7)",
             "version": "v7.1",
             "rerank_enabled": rerank_enabled,
+            "query_mode": query_mode,
+            "query_mode_preset_applied": query_mode in self.QUERY_MODE_PRESETS if query_mode else False,
         }
 
         # Phase 2 metadata

@@ -388,6 +388,8 @@ class HybridPipeline:
             extra_kwargs: Dict[str, Any] = {}
             if route == QueryRoute.UNIFIED_SEARCH:
                 extra_kwargs["weight_profile"] = weight_profile
+            if route == QueryRoute.HIPPORAG2_SEARCH:
+                extra_kwargs["query_mode"] = route.value
             result = await handler.execute(
                 query, response_type,
                 knn_config=knn_config,
@@ -2195,6 +2197,7 @@ Sub-questions:"""
         include_context: bool = False,
         weight_profile: Optional[str] = None,
         language: Optional[str] = None,
+        query_mode: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Force a specific route regardless of classification.
@@ -2207,6 +2210,7 @@ Sub-questions:"""
             knn_config: Optional KNN configuration for SEMANTICALLY_SIMILAR edge filtering.
             synthesis_model: Optional override for synthesis LLM deployment name.
             weight_profile: Optional Route 5 weight profile name override.
+            query_mode: Optional query mode hint for Route 7 presets (e.g. "local_search").
         """
         # Use modular handlers if available and requested
         if use_modular_handlers and route in self._route_handlers:
@@ -2217,6 +2221,8 @@ Sub-questions:"""
                 extra_kwargs["weight_profile"] = (
                     weight_profile or HybridRouter.get_weight_profile(route)
                 )
+            if route == QueryRoute.HIPPORAG2_SEARCH:
+                extra_kwargs["query_mode"] = query_mode or route.value
             result = await handler.execute(
                 query, response_type,
                 knn_config=knn_config,
