@@ -411,7 +411,8 @@ def _write_analysis_md(
     scenario_results: List[Dict[str, Any]],
     force_route: str = "drift_multi_hop",
 ):
-    route_label = "Route 6 (Concept)" if force_route == "concept_search" else ("Route 5 (Unified)" if force_route == "unified_search" else "Route 4 (Drift Multi-Hop)")
+    route_labels = {"concept_search": "Route 6 (Concept)", "unified_search": "Route 5 (Unified)", "hipporag2_search": "Route 7 (HippoRAG2)", "drift_multi_hop": "Route 4 (Drift Multi-Hop)"}
+    route_label = route_labels.get(force_route, "Route 4 (Drift Multi-Hop)")
     with out_md.open("w", encoding="utf-8") as f:
         f.write(f"# {route_label} Repeatability Benchmark\n\n")
         f.write(f"**Timestamp:** {timestamp}\n\n")
@@ -544,8 +545,8 @@ def main():
         "--force-route",
         type=str,
         default="drift_multi_hop",
-        choices=["drift_multi_hop", "concept_search", "unified_search"],
-        help="Route to force (drift_multi_hop=Route4, concept_search=Route6, unified_search=Route5). Default: drift_multi_hop",
+        choices=["drift_multi_hop", "concept_search", "unified_search", "hipporag2_search"],
+        help="Route to force (drift_multi_hop=Route4, concept_search=Route6, unified_search=Route5, hipporag2_search=Route7). Default: drift_multi_hop",
     )
 
     args = parser.parse_args()
@@ -579,7 +580,8 @@ def main():
     # Scenario configuration
     response_type = args.response_type
     force_route = args.force_route
-    route_label = "Route 6 (Concept)" if force_route == "concept_search" else ("Route 5 (Unified)" if force_route == "unified_search" else "Route 4 (Drift)")
+    route_labels = {"concept_search": "Route 6 (Concept)", "unified_search": "Route 5 (Unified)", "hipporag2_search": "Route 7 (HippoRAG2)", "drift_multi_hop": "Route 4 (Drift)"}
+    route_label = route_labels.get(force_route, "Route 4 (Drift)")
     scenario_name = f"hybrid_{force_route}_{response_type}"
 
     timestamp = _now_utc_stamp()
@@ -610,7 +612,8 @@ def main():
     out_dir = Path(__file__).resolve().parents[1] / "benchmarks"
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    route_prefix = "route6" if force_route == "concept_search" else ("route5" if force_route == "unified_search" else "route4")
+    route_prefixes = {"concept_search": "route6", "unified_search": "route5", "hipporag2_search": "route7", "drift_multi_hop": "route4"}
+    route_prefix = route_prefixes.get(force_route, "route4")
     out_json = out_dir / f"{route_prefix}_drift_multi_hop_{timestamp}.json"
     out_md = out_dir / f"{route_prefix}_drift_multi_hop_{timestamp}.md"
 
