@@ -279,7 +279,7 @@ class HippoRAG2Handler(BaseRouteHandler):
         rerank_enabled = os.getenv(
             "ROUTE7_RERANK", "1"
         ).strip().lower() in {"1", "true", "yes"}
-        rerank_top_k = int(os.getenv("ROUTE7_RERANK_TOP_K", "20"))
+        rerank_top_k = int(os.getenv("ROUTE7_RERANK_TOP_K", "30"))
 
         # Preset can override prompt_variant (only if caller didn't explicitly set one)
         if prompt_variant is None and preset.get("prompt_variant"):
@@ -516,7 +516,10 @@ class HippoRAG2Handler(BaseRouteHandler):
             )
 
         # Determine top passage IDs for chunk fetch
-        top_passage_scores = passage_scores[:ppr_passage_top_k]
+        # When reranker is active, use its full output (rerank_top_k);
+        # otherwise fall back to PPR passage count.
+        passage_limit = len(rerank_all_results) if rerank_all_results else ppr_passage_top_k
+        top_passage_scores = passage_scores[:passage_limit]
         top_chunk_ids = [cid for cid, _ in top_passage_scores]
         ppr_scores_map = {cid: score for cid, score in top_passage_scores}
 
@@ -711,7 +714,7 @@ class HippoRAG2Handler(BaseRouteHandler):
             "entity_seeds_count": len(entity_seeds),
             "passage_seeds_count": len(passage_seeds),
             "passage_node_weight": passage_node_weight,
-            "num_ppr_passages": len(passage_scores[:ppr_passage_top_k]),
+            "num_ppr_passages": len(top_passage_scores),
             "num_ppr_entities": len(entity_scores[:20]),
             "text_chunks_used": synthesis_result.get("text_chunks_used", 0),
             "sentence_evidence_count": len(sentence_evidence),
