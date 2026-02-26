@@ -38,10 +38,11 @@ from llama_index.core.schema import TextNode
 try:
     from neo4j_graphrag.experimental.components.entity_relation_extractor import LLMEntityRelationExtractor
     from neo4j_graphrag.experimental.components.types import TextChunk as NativeTextChunk, TextChunks
-    # neo4j_graphrag >= 1.7.0: NodeType→SchemaEntity, PropertyType→SchemaProperty,
-    # RelationshipType→SchemaRelation, GraphSchema→SchemaConfig
     from neo4j_graphrag.experimental.components.schema import (
-        SchemaEntity, SchemaProperty, SchemaRelation, SchemaConfig,
+        NodeType as SchemaEntity,
+        PropertyType as SchemaProperty,
+        RelationshipType as SchemaRelation,
+        GraphSchema as SchemaConfig,
     )
     from neo4j_graphrag.llm import AzureOpenAILLM
     NATIVE_EXTRACTOR_AVAILABLE = True
@@ -1338,7 +1339,7 @@ class LazyGraphRAGIndexingPipeline:
         logger.info(f"Native extractor produced {len(graph.nodes)} nodes, {len(graph.relationships)} relationships from sentences")
 
         # Convert graph nodes → Entity objects with sentence-based text_unit_ids
-        batch_uids: set[str] = {uid for _, uid in batches}
+        batch_uids: set[str] = {uid for _, uid, _ in batches}
         entity_id_map: Dict[str, str] = {}  # native_node_id → stable entity id
         entities_by_id: Dict[str, Entity] = {}
 
@@ -2827,63 +2828,65 @@ SUMMARY: <summary>"""
         
         This enables matching user queries like "Fabrikam Inc." to entities stored as
         "Fabrikam Construction" by including common variations in the aliases property.
-        
-        Uses neo4j_graphrag >= 1.7.0 SchemaConfig API (entities/relations as dicts).
         """
         # Entity types with alias properties for fuzzy matching
-        entities = {
-            "ORGANIZATION": {
-                "description": "A company, corporation, business entity, or legal organization",
-                "properties": [
-                    {"name": "name", "type": "STRING", "description": "Official/legal name as it appears in the document"},
-                    {"name": "aliases", "type": "LIST", "description": "Common alternative names, abbreviations, short forms, or variations users might use (e.g., 'Fabrikam' for 'Fabrikam Construction Inc.')"},
-                    {"name": "description", "type": "STRING", "description": "Brief description of the organization"},
+        entities = [
+            SchemaEntity(
+                label="ORGANIZATION",
+                description="A company, corporation, business entity, or legal organization",
+                properties=[
+                    SchemaProperty(name="name", type="STRING", description="Official/legal name as it appears in the document"),
+                    SchemaProperty(name="aliases", type="LIST", description="Common alternative names, abbreviations, short forms, or variations users might use (e.g., 'Fabrikam' for 'Fabrikam Construction Inc.')"),
+                    SchemaProperty(name="description", type="STRING", description="Brief description of the organization"),
                 ],
-            },
-            "PERSON": {
-                "description": "A named individual or person",
-                "properties": [
-                    {"name": "name", "type": "STRING", "description": "Full name as it appears in the document"},
-                    {"name": "aliases", "type": "LIST", "description": "Nicknames, maiden names, titles, or common variations"},
-                    {"name": "description", "type": "STRING", "description": "Role or brief description"},
+            ),
+            SchemaEntity(
+                label="PERSON",
+                description="A named individual or person",
+                properties=[
+                    SchemaProperty(name="name", type="STRING", description="Full name as it appears in the document"),
+                    SchemaProperty(name="aliases", type="LIST", description="Nicknames, maiden names, titles, or common variations"),
+                    SchemaProperty(name="description", type="STRING", description="Role or brief description"),
                 ],
-            },
-            "DOCUMENT": {
-                "description": "A legal document, contract, agreement, or formal document",
-                "properties": [
-                    {"name": "name", "type": "STRING", "description": "Document title or name"},
-                    {"name": "aliases", "type": "LIST", "description": "Short names or common references (e.g., 'the contract' for 'Purchase Contract Agreement')"},
-                    {"name": "description", "type": "STRING", "description": "Brief description of document purpose"},
+            ),
+            SchemaEntity(
+                label="DOCUMENT",
+                description="A legal document, contract, agreement, or formal document",
+                properties=[
+                    SchemaProperty(name="name", type="STRING", description="Document title or name"),
+                    SchemaProperty(name="aliases", type="LIST", description="Short names or common references (e.g., 'the contract' for 'Purchase Contract Agreement')"),
+                    SchemaProperty(name="description", type="STRING", description="Brief description of document purpose"),
                 ],
-            },
-            "LOCATION": {
-                "description": "A geographic location, address, or place",
-                "properties": [
-                    {"name": "name", "type": "STRING", "description": "Location name or address"},
-                    {"name": "aliases", "type": "LIST", "description": "Abbreviated forms or common references"},
+            ),
+            SchemaEntity(
+                label="LOCATION",
+                description="A geographic location, address, or place",
+                properties=[
+                    SchemaProperty(name="name", type="STRING", description="Location name or address"),
+                    SchemaProperty(name="aliases", type="LIST", description="Abbreviated forms or common references"),
                 ],
-            },
-            "CONCEPT": {
-                "description": "An abstract concept, term, clause, or named section",
-                "properties": [
-                    {"name": "name", "type": "STRING", "description": "Concept or term name"},
-                    {"name": "aliases", "type": "LIST", "description": "Alternative phrasings or abbreviations"},
-                    {"name": "description", "type": "STRING", "description": "Brief explanation"},
+            ),
+            SchemaEntity(
+                label="CONCEPT",
+                description="An abstract concept, term, clause, or named section",
+                properties=[
+                    SchemaProperty(name="name", type="STRING", description="Concept or term name"),
+                    SchemaProperty(name="aliases", type="LIST", description="Alternative phrasings or abbreviations"),
+                    SchemaProperty(name="description", type="STRING", description="Brief explanation"),
                 ],
-            },
-        }
+            ),
+        ]
         
         # Relationship types
-        relations = {
-            "RELATED_TO": {"description": "General relationship between entities"},
-            "PARTY_TO": {"description": "Entity is a party to a document/agreement"},
-            "LOCATED_IN": {"description": "Entity is located in a place"},
-            "MENTIONS": {"description": "Document mentions an entity"},
-            "DEFINES": {"description": "Document defines a term or concept"},
-            # Azure DI-extracted relationships (FREE add-ons)
-            "FOUND_IN": {"description": "Barcode or Figure found in a Document"},
-            "REFERENCES": {"description": "Figure references another element (paragraph, table, section)"},
-        }
+        relations = [
+            SchemaRelation(label="RELATED_TO", description="General relationship between entities"),
+            SchemaRelation(label="PARTY_TO", description="Entity is a party to a document/agreement"),
+            SchemaRelation(label="LOCATED_IN", description="Entity is located in a place"),
+            SchemaRelation(label="MENTIONS", description="Document mentions an entity"),
+            SchemaRelation(label="DEFINES", description="Document defines a term or concept"),
+            SchemaRelation(label="FOUND_IN", description="Barcode or Figure found in a Document"),
+            SchemaRelation(label="REFERENCES", description="Figure references another element (paragraph, table, section)"),
+        ]
         
         # Define plausible schema triples for guided extraction
         potential_schema = [
@@ -2900,7 +2903,7 @@ SUMMARY: <summary>"""
             ("CONCEPT", "RELATED_TO", "CONCEPT"),
         ]
         
-        return SchemaConfig(entities=entities, relations=relations, potential_schema=potential_schema)
+        return SchemaConfig(node_types=entities, relationship_types=relations, patterns=potential_schema)
 
     @staticmethod
     def _classify_sentence(text: str) -> str:
