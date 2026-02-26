@@ -151,9 +151,6 @@ class Neo4jStoreV3:
         self.database = database
         self._driver = None
 
-        # Determinism: chunk-level extraction cache schema init (best-effort).
-        self._extraction_cache_schema_ready: bool = False
-        self._extraction_cache_schema_lock: asyncio.Lock = asyncio.Lock()
         self._driver_lock = threading.Lock()
         
     @property
@@ -209,37 +206,6 @@ class Neo4jStoreV3:
             self._driver.close()
             self._driver = None
     
-    async def aclose(self):
-        """Reset async state (extraction cache schema flag)."""
-        self._extraction_cache_schema_ready = False
-
-    async def _aensure_extraction_cache_schema(self) -> None:
-        """Ensure ExtractionCache schema exists (best-effort).
-
-        Neo4j emits notifications (UnknownLabel/UnknownPropertyKey) when querying
-        labels/properties that haven't been created yet. Creating the constraint
-        once up-front suppresses those notifications and improves lookup speed.
-        """
-
-        if self._extraction_cache_schema_ready:
-            return
-
-        async with self._extraction_cache_schema_lock:
-            if self._extraction_cache_schema_ready:
-                return
-
-            try:
-                def _sync_create():
-                    with self.get_retry_session() as session:
-                        session.run(
-                            "CREATE CONSTRAINT extraction_cache_key IF NOT EXISTS FOR (c:ExtractionCache) REQUIRE c.key IS UNIQUE"
-                        )
-                await asyncio.to_thread(_sync_create)
-                self._extraction_cache_schema_ready = True
-            except Exception as e:
-                # Caching is optional; never fail the indexing request because of it.
-                logger.warning(f"Failed to ensure ExtractionCache schema (continuing): {e}")
-    
     # ==================== Schema Management ====================
     
     def initialize_schema(self):
@@ -256,9 +222,6 @@ class Neo4jStoreV3:
             "CREATE CONSTRAINT community_id IF NOT EXISTS FOR (c:Community) REQUIRE c.id IS UNIQUE",
             "CREATE CONSTRAINT document_id IF NOT EXISTS FOR (d:Document) REQUIRE d.id IS UNIQUE",
 
-            # Determinism: chunk-level extraction cache
-            "CREATE CONSTRAINT extraction_cache_key IF NOT EXISTS FOR (c:ExtractionCache) REQUIRE c.key IS UNIQUE",
-            
             # Section graph (section-aware retrieval)
             "CREATE CONSTRAINT section_id IF NOT EXISTS FOR (s:Section) REQUIRE s.id IS UNIQUE",
             "CREATE INDEX section_group IF NOT EXISTS FOR (s:Section) ON (s.group_id)",
@@ -344,93 +307,6 @@ class Neo4jStoreV3:
         
         logger.info("Neo4j schema initialization complete")
 
-    # ==================== Extraction Cache (Determinism) ====================
-
-    async def aget_extraction_cache_batch(self, keys: List[str], group_id: str = "") -> Dict[str, str]:
-        """Fetch extraction-cache payloads by key.
-
-        Returns a dict of key -> payload_json for the keys that exist.
-        Keys are internally prefixed with group_id to ensure tenant isolation.
-        """
-        if not keys:
-            return {}
-
-        await self._aensure_extraction_cache_schema()
-
-        # Prefix keys with group_id for tenant isolation
-        prefixed_keys = [f"{group_id}:{k}" if group_id else k for k in keys]
-
-        query = """
-        UNWIND $keys AS k
-        OPTIONAL MATCH (c:ExtractionCache {key: k})
-        RETURN k AS key, c['payload'] AS payload
-        """
-
-        def _sync_get(keys_arg):
-            with self.get_retry_session() as session:
-                result = session.run(query, keys=keys_arg)
-                out: Dict[str, str] = {}
-                prefix_len = len(group_id) + 1 if group_id else 0
-                for record in result:
-                    key = cast(str, record.get("key"))
-                    payload = record.get("payload")
-                    if key and payload:
-                        # Strip prefix before returning to caller
-                        original_key = key[prefix_len:] if prefix_len else key
-                        out[original_key] = cast(str, payload)
-                return out
-
-        return await asyncio.to_thread(_sync_get, prefixed_keys)
-
-    async def aput_extraction_cache_batch(
-        self,
-        items: List[Dict[str, Any]],
-        group_id: str = "",
-    ) -> int:
-        """Upsert extraction-cache payloads.
-
-        Each item should include: key, payload, model (optional), params_hash (optional).
-        Keys are internally prefixed with group_id to ensure tenant isolation.
-        """
-        if not items:
-            return 0
-
-        await self._aensure_extraction_cache_schema()
-
-        # Prefix keys with group_id for tenant isolation
-        prefixed_items = []
-        for item in items:
-            pi = dict(item)
-            if group_id:
-                pi["key"] = f"{group_id}:{pi['key']}"
-            prefixed_items.append(pi)
-
-        query = """
-        UNWIND $items AS item
-        MERGE (c:ExtractionCache {key: item.key})
-        ON CREATE SET
-            c.payload = item.payload,
-            c.model = coalesce(item.model, ''),
-            c.params_hash = coalesce(item.params_hash, ''),
-            c.created_at = datetime(),
-            c.updated_at = datetime(),
-            c.hits = 0
-        ON MATCH SET
-            c.model = coalesce(item.model, c.model),
-            c.params_hash = coalesce(item.params_hash, c.params_hash),
-            c.updated_at = datetime()
-        SET c.hits = coalesce(c.hits, 0) + 1
-        RETURN count(c) AS count
-        """
-
-        def _sync_put(items_arg):
-            with self.get_retry_session() as session:
-                result = session.run(query, items=items_arg)
-                record = result.single()
-                return cast(int, record["count"]) if record and record.get("count") is not None else 0
-
-        return await asyncio.to_thread(_sync_put, prefixed_items)
-    
     # ==================== Entity Operations ====================
     
     def upsert_entity(self, group_id: str, entity: Entity) -> str:

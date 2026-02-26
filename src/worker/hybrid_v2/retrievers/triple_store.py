@@ -195,7 +195,7 @@ async def recognition_memory_filter(
     llm_client: Any,
     query: str,
     candidate_triples: List[Tuple[Triple, float]],
-) -> List[Triple]:
+) -> List[Tuple[Triple, float]]:
     """LLM-based recognition memory filter for retrieved triples.
 
     After the embedding model retrieves the top-K triples by cosine similarity,
@@ -211,17 +211,17 @@ async def recognition_memory_filter(
         candidate_triples: List of (Triple, score) from TripleEmbeddingStore.search().
 
     Returns:
-        List of Triple objects that survived filtering. May be empty.
+        List of (Triple, score) tuples that survived filtering. May be empty.
     """
     if not candidate_triples:
         return []
 
     # Build numbered list of triples for the LLM
     triple_list_lines = []
-    triple_map: Dict[int, Triple] = {}
+    triple_map: Dict[int, Tuple[Triple, float]] = {}
     for i, (triple, score) in enumerate(candidate_triples, 1):
         triple_list_lines.append(f"{i}. {triple.triple_text}")
-        triple_map[i] = triple
+        triple_map[i] = (triple, score)
 
     prompt = f"""You are filtering knowledge graph facts for relevance to a query.
 
@@ -268,4 +268,4 @@ Example: 1, 3, 5"""
             query=query[:60],
         )
         # On failure, pass through all candidates (conservative fallback)
-        return [triple for triple, _ in candidate_triples]
+        return list(candidate_triples)

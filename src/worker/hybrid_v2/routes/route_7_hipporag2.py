@@ -339,10 +339,13 @@ class HippoRAG2Handler(BaseRouteHandler):
         t0 = time.perf_counter()
         entity_seeds: Dict[str, float] = {}
 
-        for triple in surviving_triples:
-            # Accumulate weight for each entity appearing in surviving triples
-            entity_seeds[triple.subject_id] = entity_seeds.get(triple.subject_id, 0) + 1.0
-            entity_seeds[triple.object_id] = entity_seeds.get(triple.object_id, 0) + 1.0
+        # Use raw cosine similarity scores from triple search (upstream HippoRAG2
+        # alignment). Each entity receives fact_score as weight — preserves the
+        # relevance signal and allows PPR's internal normalization to set the
+        # natural entity:passage ratio (~30:70 instead of 95:5).
+        for triple, fact_score in surviving_triples:
+            entity_seeds[triple.subject_id] = entity_seeds.get(triple.subject_id, 0) + fact_score
+            entity_seeds[triple.object_id] = entity_seeds.get(triple.object_id, 0) + fact_score
 
         # Phase 2+3: Add structural seeds (Tier 2) and community seeds (Tier 3) in parallel
         structural_sections: List[str] = []
@@ -368,18 +371,13 @@ class HippoRAG2Handler(BaseRouteHandler):
                     for eid in community_entity_ids:
                         entity_seeds[eid] = entity_seeds.get(eid, 0) + w_community
 
-        # Normalize entity seeds
-        total_e = sum(entity_seeds.values())
-        if total_e > 0:
-            entity_seeds = {k: v / total_e for k, v in entity_seeds.items()}
+        # Do NOT pre-normalize entity seeds — let PPR handle normalization
+        # of the combined entity+passage personalization vector.
 
-        # Build passage seeds from DPR scores (Bug 2 fix: normalize before scaling)
+        # Build passage seeds from DPR scores (raw similarity × passage_node_weight)
         passage_seeds: Dict[str, float] = {}
         for chunk_id, score in dpr_results:
-            passage_seeds[chunk_id] = score
-        total_p = sum(passage_seeds.values())
-        if total_p > 0:
-            passage_seeds = {k: (v / total_p) * passage_node_weight for k, v in passage_seeds.items()}
+            passage_seeds[chunk_id] = score * passage_node_weight
 
         timings_ms["step_3_seed_build_ms"] = int((time.perf_counter() - t0) * 1000)
 
@@ -635,7 +633,7 @@ class HippoRAG2Handler(BaseRouteHandler):
 
         # Triple details
         metadata["triple_seeds"] = [
-            t.triple_text for t in surviving_triples[:10]
+            t.triple_text for t, _s in surviving_triples[:10]
         ]
 
         if include_context:
@@ -871,8 +869,11 @@ class HippoRAG2Handler(BaseRouteHandler):
         query: str,
         query_embedding: List[float],
         top_k: int = 5,
-    ) -> list:
-        """Embed query, match against triple embeddings, LLM-filter survivors."""
+    ) -> List[Tuple]:
+        """Embed query, match against triple embeddings, LLM-filter survivors.
+
+        Returns list of (Triple, score) tuples with cosine similarity scores.
+        """
         from ..retrievers.triple_store import recognition_memory_filter
 
         # Search triple embeddings
@@ -892,7 +893,7 @@ class HippoRAG2Handler(BaseRouteHandler):
         llm_client = getattr(self.pipeline.disambiguator, "llm", None)
         if not llm_client:
             logger.warning("route7_no_llm_for_recognition_memory")
-            return [triple for triple, _ in candidates]
+            return list(candidates)
 
         surviving = await recognition_memory_filter(llm_client, query, candidates)
         return surviving
