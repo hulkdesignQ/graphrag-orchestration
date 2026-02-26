@@ -514,13 +514,9 @@ class HippoRAG2Handler(BaseRouteHandler):
         top_chunk_ids = [cid for cid, _ in top_passage_scores]
         ppr_scores_map = {cid: score for cid, score in top_passage_scores}
 
-        # Pass PPR entity names so _fetch_chunks_by_ids can build focused
-        # 3-sentence windows around entity-relevant sentences.
-        ppr_entity_names = [name for name, _ in entity_scores[:10]]
         pre_fetched_chunks = await self._fetch_chunks_by_ids(
             top_chunk_ids,
             ppr_scores_map=ppr_scores_map,
-            entity_names=ppr_entity_names,
         )
 
         # Convert sentence evidence to coverage_chunks format
@@ -972,15 +968,10 @@ class HippoRAG2Handler(BaseRouteHandler):
     ) -> List[Dict[str, Any]]:
         """Fetch chunk text + metadata from Neo4j by chunk IDs.
 
-        When *entity_names* is provided, returns **focused 3-sentence
-        windows** around sentences that mention those entities instead of
-        the full chunk text.  This reduces noise for synthesis while
-        keeping the entity-relevant context tight.
-
-        Uses a two-pass approach for speed:
-        - Pass 1 (always): fast chunk metadata fetch without sentence join
-        - Pass 2 (only when entity_names given): fetch sentences for the
-          focused-window logic
+        Each Sentence node stores a ``parent_text`` field that contains
+        the surrounding ~3-sentence paragraph context (set at indexing
+        time).  We use that directly as synthesis context so every
+        passage carries enough breadth for multi-fact questions.
 
         Returns flat list of chunk dicts in the format expected by the
         synthesizer's ``pre_fetched_chunks`` parameter, sorted by PPR
@@ -992,7 +983,6 @@ class HippoRAG2Handler(BaseRouteHandler):
         group_id = self.group_id
         driver = self.neo4j_driver
 
-        # ── Pass 1: Sentence metadata ──
         cypher_chunks = """
         UNWIND $chunk_ids AS cid
         MATCH (node:Sentence {id: cid, group_id: $group_id})
@@ -1002,18 +992,13 @@ class HippoRAG2Handler(BaseRouteHandler):
            OR (d)-[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})
         OPTIONAL MATCH (node)-[:IN_SECTION]->(s:Section)
         RETURN cid AS chunk_id,
-               coalesce(node.text, '') AS text,
+               coalesce(node.parent_text, node.text, '') AS text,
                coalesce(node.index_in_doc, 0) AS chunk_index,
                d.id AS document_id, d.title AS document_title,
                s.title AS section_title, s.id AS section_id
         """
 
-        # ── Pass 2: Sentence texts (only when entity_names given) ──
-        ent_lower = (
-            {n.lower() for n in entity_names} if entity_names else set()
-        )
-
-        async def _fetch_chunk_meta():
+        try:
             def _run():
                 with retry_session(driver, read_only=True) as session:
                     records = session.run(
@@ -1023,109 +1008,10 @@ class HippoRAG2Handler(BaseRouteHandler):
                         folder_id=self.folder_id,
                     )
                     return [dict(r) for r in records]
-            return await asyncio.to_thread(_run)
-
-        async def _fetch_sentences():
-            if not ent_lower:
-                return {}
-            cypher_sents = """
-            UNWIND $chunk_ids AS cid
-            MATCH (sent:Sentence {id: cid, group_id: $group_id})
-            RETURN sent.id AS chunk_id, sent.text AS sent_text, coalesce(sent.index_in_doc, 0) AS idx
-            ORDER BY chunk_id, idx
-            """
-            def _run():
-                with retry_session(driver, read_only=True) as session:
-                    records = session.run(
-                        cypher_sents,
-                        chunk_ids=chunk_ids,
-                        group_id=group_id,
-                    )
-                    return [(r["chunk_id"], r["sent_text"]) for r in records]
-            rows = await asyncio.to_thread(_run)
-            result: Dict[str, List[str]] = {}
-            for cid, text in rows:
-                result.setdefault(cid, []).append(text)
-            return result
-
-        async def _fetch_entity_hits():
-            """Use graph MENTIONS edges for precise sentence-entity mapping."""
-            if not entity_names:
-                return {}
-            cypher_hits = """
-            UNWIND $chunk_ids AS cid
-            MATCH (s:Sentence {id: cid, group_id: $group_id})
-            MATCH (s)-[:MENTIONS]->(e:Entity {group_id: $group_id})
-            WHERE e.name IN $entity_names
-            RETURN cid AS chunk_id, coalesce(s.index_in_doc, 0) AS idx
-            """
-            def _run():
-                with retry_session(driver, read_only=True) as session:
-                    records = session.run(
-                        cypher_hits,
-                        chunk_ids=chunk_ids,
-                        group_id=group_id,
-                        entity_names=list(entity_names),
-                    )
-                    return [(r["chunk_id"], r["idx"]) for r in records]
-            rows = await asyncio.to_thread(_run)
-            result: Dict[str, set] = {}
-            for cid, idx in rows:
-                result.setdefault(cid, set()).add(idx)
-            return result
-
-        try:
-            # Run all three queries in parallel
-            results, chunk_sentences, entity_hit_map = await asyncio.gather(
-                _fetch_chunk_meta(),
-                _fetch_sentences(),
-                _fetch_entity_hits(),
-            )
+            results = await asyncio.to_thread(_run)
         except Exception as e:
             logger.warning("route7_fetch_chunks_failed", error=str(e))
             return []
-
-        # Attach sentence_texts and entity hit indices to results
-        for r in results:
-            cid = r.get("chunk_id", "")
-            r["sentence_texts"] = chunk_sentences.get(cid, [])
-            r["_entity_hit_indices"] = entity_hit_map.get(cid, set())
-
-        # ── Build focused 3-sentence windows ──
-        # Uses pre-computed entity hit indices from graph MENTIONS edges
-        # (precise one-to-one sentence→entity mapping from indexing time).
-        # Falls back to full chunk text when no entity hits exist.
-
-        def _focused_text(
-            sentence_texts: List[str],
-            full_text: str,
-            hit_indices: set,
-        ) -> str:
-            if not sentence_texts or not hit_indices:
-                return full_text
-
-            # Expand each hit ±1 and merge overlapping ranges
-            ranges: list[tuple[int, int]] = []
-            for idx in sorted(hit_indices):
-                if idx < 0 or idx >= len(sentence_texts):
-                    continue
-                lo = max(0, idx - 1)
-                hi = min(len(sentence_texts), idx + 2)
-                if ranges and lo <= ranges[-1][1]:
-                    ranges[-1] = (ranges[-1][0], hi)  # merge
-                else:
-                    ranges.append((lo, hi))
-
-            if not ranges:
-                return full_text
-
-            # Build final text from windows
-            windows: list[str] = []
-            for lo, hi in ranges:
-                windows.append(
-                    " ".join(sentence_texts[lo:hi])
-                )
-            return " [...] ".join(windows)
 
         scores = ppr_scores_map or {}
 
@@ -1152,22 +1038,11 @@ class HippoRAG2Handler(BaseRouteHandler):
                 curr_idx = r.get("chunk_index", 0)
                 merge_count = len(prev.get("_merged_ids", [prev.get("chunk_id", "")]))
                 if curr_idx == prev_idx + 1 and merge_count < _MAX_MERGE:
-                    # Adjacent — merge sentences and text
-                    prev_sents = prev.get("sentence_texts") or []
-                    curr_sents = r.get("sentence_texts") or []
-                    # Offset entity hit indices for the appended chunk
-                    prev_hits = prev.get("_entity_hit_indices") or set()
-                    curr_hits = r.get("_entity_hit_indices") or set()
-                    offset = len(prev_sents)
-                    merged_hits = prev_hits | {idx + offset for idx in curr_hits}
-                    prev["sentence_texts"] = prev_sents + curr_sents
-                    prev["_entity_hit_indices"] = merged_hits
                     prev["text"] = (
                         (prev.get("text", "") + " " + r.get("text", ""))
                         .strip()
                     )
                     prev["chunk_index"] = curr_idx  # advance for next merge
-                    # Track merged IDs for PPR score lookup
                     prev.setdefault("_merged_ids", [prev.get("chunk_id", "")])
                     prev["_merged_ids"].append(r.get("chunk_id", ""))
                 else:
@@ -1177,10 +1052,6 @@ class HippoRAG2Handler(BaseRouteHandler):
         chunks_list: List[Dict[str, Any]] = []
         for r in merged_results:
             cid = r.get("chunk_id", "")
-            sentence_texts = r.get("sentence_texts") or []
-            full_text = r.get("text", "")
-            hit_indices = r.get("_entity_hit_indices") or set()
-            focused = _focused_text(sentence_texts, full_text, hit_indices)
 
             # Best PPR score among merged chunk IDs
             merged_ids = r.get("_merged_ids", [cid])
@@ -1189,7 +1060,7 @@ class HippoRAG2Handler(BaseRouteHandler):
             chunks_list.append({
                 "id": cid,
                 "source": r.get("document_title", "Unknown"),
-                "text": focused,
+                "text": r.get("text", ""),
                 "entity": "__ppr_passage__",
                 "_entity_score": 1.0,
                 "_source_entity": "__ppr_passage__",
