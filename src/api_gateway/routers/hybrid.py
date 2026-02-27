@@ -1039,14 +1039,12 @@ async def _run_indexing_job(
         redis_svc = await get_redis_service()
         lock_key = f"lock:{group_id}:indexing"
         async with redis_svc.lock(lock_key, ttl_seconds=600):
-            # Use V2 pipeline (with embedding_v2 property) when Voyage V2 is enabled
-            pipeline = get_lazygraphrag_indexing_pipeline_v2()
-            
             await _indexing_jobs.update(job_id, status="running", progress="Indexing documents...")
-            # Run the pipeline in a separate thread with its own event loop
-            # to avoid blocking uvicorn's main event loop (the pipeline has
-            # many synchronous blocking calls: wtpsplit ONNX inference,
-            # Neo4j sync driver, etc.).
+            # Run the ENTIRE indexing pipeline (factory init + execution) in a
+            # separate thread with its own event loop.  The pipeline contains
+            # many synchronous blocking calls (wtpsplit ONNX inference, Neo4j
+            # sync driver, Azure DI HTTP, etc.) that would freeze uvicorn's
+            # main event loop if run inline.
             import asyncio as _aio
 
             _pipeline_kwargs = dict(
@@ -1066,9 +1064,10 @@ async def _run_indexing_job(
             def _run_pipeline_in_thread():
                 loop = _aio.new_event_loop()
                 try:
-                    return loop.run_until_complete(
-                        pipeline.index_documents(**_pipeline_kwargs)
-                    )
+                    async def _do_indexing():
+                        pipeline = get_lazygraphrag_indexing_pipeline_v2()
+                        return await pipeline.index_documents(**_pipeline_kwargs)
+                    return loop.run_until_complete(_do_indexing())
                 finally:
                     loop.close()
 
