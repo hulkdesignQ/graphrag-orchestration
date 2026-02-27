@@ -45,6 +45,7 @@ USER appuser
 ENV PATH=/home/appuser/.local/bin:$PATH \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app \
+    PYTHONUSERBASE=/home/appuser/.local \
     SERVICE_ROLE=worker
 
 # Worker doesn't expose HTTP ports - communicates via Redis queue only

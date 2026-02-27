@@ -133,8 +133,8 @@ fi
 echo "✅ ACR Endpoint: $ACR_SERVER"
 echo ""
 
-# Build and push Docker image using ACR build (no login required)
-# Both graphrag-api and graphrag-worker use the same image.
+# Build and push Docker images using ACR build (no login required)
+# API and Worker use separate Dockerfiles with the same requirements.
 echo "=================================================="
 echo "🐳 Building and Pushing Docker Images"
 echo "=================================================="
@@ -149,15 +149,23 @@ echo "Worker Image: $WORKER_IMAGE_URI"
 echo "Build Context: $APP_DIR"
 echo ""
 
-echo "⏳ Building and pushing image in ACR (this may take 2-3 minutes)..."
+echo "⏳ Building and pushing API image in ACR..."
 az acr build \
     --registry "$CONTAINER_REGISTRY_NAME" \
     --resource-group "$AZURE_RESOURCE_GROUP" \
     --file Dockerfile.api \
     --image "$API_IMAGE_NAME:$AZURE_ENV_IMAGETAG" \
-    --image "$WORKER_IMAGE_NAME:$AZURE_ENV_IMAGETAG" \
     --build-arg BUILD_DATE="$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
     --build-arg VERSION="$AZURE_ENV_IMAGETAG" \
+    --build-arg CACHE_BUST="$AZURE_ENV_IMAGETAG" \
+    "$APP_DIR"
+
+echo "⏳ Building and pushing Worker image in ACR..."
+az acr build \
+    --registry "$CONTAINER_REGISTRY_NAME" \
+    --resource-group "$AZURE_RESOURCE_GROUP" \
+    --file Dockerfile.worker \
+    --image "$WORKER_IMAGE_NAME:$AZURE_ENV_IMAGETAG" \
     --build-arg CACHE_BUST="$AZURE_ENV_IMAGETAG" \
     "$APP_DIR"
 
