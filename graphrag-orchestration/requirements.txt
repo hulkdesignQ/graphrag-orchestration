@@ -60,6 +60,10 @@ openai>=1.14.0,<2.0.0  # Compatible with llama-index-llms-openai 0.4.x
 # Redis for async job queue (Worker container)
 redis>=5.0.0  # Async Redis client (includes redis.asyncio)
 
+# Sentence segmentation (replaces spaCy doc.sents for higher accuracy on legal/business text)
+wtpsplit>=2.1.0
+onnxruntime>=1.16.0
+
 # Utilities
 python-dotenv>=1.0.0
 structlog>=24.1.0

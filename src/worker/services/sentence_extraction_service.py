@@ -1,13 +1,14 @@
 """Sentence extraction service for skeleton enrichment (Strategy A).
 
 Extracts sentence-level nodes from TextChunks using:
-- spaCy (body text) — handles abbreviation periods correctly
+- wtpsplit (body text) — neural sentence segmentation, handles abbreviations
+  and compound sentences better than spaCy's dependency parser
 - DI table metadata (linearized rows) — structured data
 - DI figure captions — from metadata
 
 Content taxonomy (from ARCHITECTURE_HYBRID_SKELETON_2026-02-11.md):
   EMBED as Sentence nodes:
-    - Body text → spaCy sentence splitting
+    - Body text → wtpsplit sentence splitting
     - Table rows → linearized from DI metadata (source="table_row")
     - Figure captions → from DI metadata (source="figure_caption")
   NOT embedded (metadata only):
@@ -30,35 +31,45 @@ from src.core.config import settings
 logger = structlog.get_logger(__name__)
 
 # ---------------------------------------------------------------------------
-# spaCy initialization (lazy singleton)
+# wtpsplit initialization (lazy singleton)
 # ---------------------------------------------------------------------------
-_nlp = None
-_nlp_lock = threading.Lock()
+_sat = None
+_sat_lock = threading.Lock()
+
+# Model choice: sat-3l-sm balances speed and quality.
+# Quality matches sat-6l-sm on our legal PDF tests; 3× faster on CPU.
+_WTPSPLIT_MODEL = "sat-3l-sm"
 
 
-def _get_nlp():
-    """Lazy-load spaCy model (thread-safe). Already a transitive dep via graphrag==2.7.0."""
-    global _nlp
-    if _nlp is not None:
-        return _nlp
-    with _nlp_lock:
-        if _nlp is None:
-            import spacy
-            try:
-                _nlp = spacy.load("en_core_web_sm")
-                _nlp.max_length = 50_000
-                logger.info("spacy_loaded", model="en_core_web_sm")
-            except OSError:
-                logger.warning("spacy_model_not_found, downloading en_core_web_sm")
-                import subprocess
-                import sys
-                subprocess.run(
-                    [sys.executable, "-m", "spacy", "download", "en_core_web_sm"],
-                    check=True,
-                )
-                _nlp = spacy.load("en_core_web_sm")
-                _nlp.max_length = 50_000
-    return _nlp
+def _get_sat():
+    """Lazy-load wtpsplit SaT model (thread-safe)."""
+    global _sat
+    if _sat is not None:
+        return _sat
+    with _sat_lock:
+        if _sat is None:
+            from wtpsplit import SaT
+            _sat = SaT(_WTPSPLIT_MODEL, ort_providers=["CPUExecutionProvider"])
+            logger.info("wtpsplit_loaded", model=_WTPSPLIT_MODEL)
+    return _sat
+
+
+def _split_sentences(text: str) -> List[str]:
+    """Split text into sentences using wtpsplit.
+
+    Uses do_paragraph_segmentation=True to handle embedded newlines
+    from DI-extracted PDF text (line wrapping, section breaks).
+    Returns a flat list of stripped, non-empty sentence strings.
+    """
+    sat = _get_sat()
+    result = sat.split(text, do_paragraph_segmentation=True)
+    sentences = []
+    for item in result:
+        if isinstance(item, list):
+            sentences.extend(s.strip() for s in item if s.strip())
+        elif isinstance(item, str) and item.strip():
+            sentences.append(item.strip())
+    return sentences
 
 
 # ---------------------------------------------------------------------------
@@ -153,7 +164,7 @@ def extract_sentences_from_chunk(
       section_path, page, confidence, tokens, parent_text
 
     Sources:
-      - "paragraph":       spaCy-split body text sentences
+      - "paragraph":       wtpsplit-split body text sentences
       - "table_row":       linearized DI table rows
       - "figure_caption":  DI figure caption text
       - "signature_party": party name + role from DI signature block
@@ -161,13 +172,10 @@ def extract_sentences_from_chunk(
     sentences: List[Dict[str, Any]] = []
     idx = 0
 
-    # ─── Source A: Body text → spaCy sentence detection ──────────
+    # ─── Source A: Body text → wtpsplit sentence detection ─────
     clean_text = _clean_chunk_text_for_spacy(chunk_text)
     if clean_text:
-        nlp = _get_nlp()
-        doc = nlp(clean_text)
-        for sent in doc.sents:
-            sent_text = sent.text.strip()
+        for sent_text in _split_sentences(clean_text):
             if not sent_text:
                 continue
             if _is_noise_sentence(sent_text):
@@ -381,7 +389,7 @@ def extract_sentences_from_di_units(
     """Extract sentences directly from DI units, bypassing TextChunk creation.
 
     Each DI unit is a LlamaIndex Document with ``.text`` and ``.metadata``.
-    Body text is split with spaCy; tables, figures, and signature blocks are
+    Body text is split with wtpsplit; tables, figures, and signature blocks are
     extracted from DI metadata the same way ``extract_sentences_from_chunk``
     handles them.
 
@@ -414,13 +422,10 @@ def extract_sentences_from_di_units(
         if role in SKIP_ROLES:
             continue
 
-        # ─── Source A: Body text → spaCy sentences ───────────────
+        # ─── Source A: Body text → wtpsplit sentences ────────────
         clean_text = _clean_chunk_text_for_spacy(unit_text)
         if clean_text:
-            nlp = _get_nlp()
-            doc = nlp(clean_text)
-            for sent in doc.sents:
-                sent_text = sent.text.strip()
+            for sent_text in _split_sentences(clean_text):
                 if not sent_text or _is_noise_sentence(sent_text) or _is_kvp_label(sent_text):
                     continue
                 text_key = sent_text.strip().lower()
@@ -608,17 +613,14 @@ def extract_sentences_from_raw_text(
     doc_title: str = "",
     doc_source: str = "",
 ) -> List[Dict[str, Any]]:
-    """Extract sentences from raw text (non-DI fallback) using spaCy."""
+    """Extract sentences from raw text (non-DI fallback) using wtpsplit."""
     sentences: List[Dict[str, Any]] = []
     clean_text = _clean_chunk_text_for_spacy(text)
     if not clean_text:
         return sentences
 
-    nlp = _get_nlp()
-    doc = nlp(clean_text)
     sent_idx = 0
-    for sent in doc.sents:
-        sent_text = sent.text.strip()
+    for sent_text in _split_sentences(clean_text):
         if not sent_text or _is_noise_sentence(sent_text) or _is_kvp_label(sent_text):
             continue
         sentences.append({
