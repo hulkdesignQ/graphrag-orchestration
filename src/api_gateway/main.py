@@ -79,20 +79,9 @@ async def lifespan(app: FastAPI):
             
             # Initialize Neo4j schema for hybrid routes (vector indexes, constraints)
             try:
-                from src.worker.hybrid.services.neo4j_store import Neo4jStoreV3
                 from src.worker.hybrid_v2.services.neo4j_store import Neo4jStoreV3 as Neo4jStoreV3_V2
                 from src.core.config import settings as app_settings
                 if app_settings.NEO4J_URI and app_settings.NEO4J_USERNAME and app_settings.NEO4J_PASSWORD:
-                    # V1 schema (OpenAI 3072-dim embeddings)
-                    hybrid_store = Neo4jStoreV3(
-                        uri=app_settings.NEO4J_URI,
-                        username=app_settings.NEO4J_USERNAME,
-                        password=app_settings.NEO4J_PASSWORD,
-                    )
-                    hybrid_store.initialize_schema()
-                    logger.info("hybrid_neo4j_schema_initialized", 
-                               message="V1 vector indexes and constraints created")
-                    
                     # V2 schema (Voyage 2048-dim embeddings) 
                     hybrid_store_v2 = Neo4jStoreV3_V2(
                         uri=app_settings.NEO4J_URI,
@@ -125,16 +114,9 @@ async def lifespan(app: FastAPI):
         llm_service = LLMService()
         if llm_service.llm:
             logger.info("llm_service_initialized", 
-                       model=llm_service.config.get("AZURE_OPENAI_DEPLOYMENT_NAME"))
-            if llm_service.embed_model:
-                logger.info(
-                    "v1_fallback_embedder_initialized",
-                    v1_deployment=llm_service.config.get("AZURE_OPENAI_EMBEDDING_DEPLOYMENT"),
-                    v1_endpoint=llm_service.config.get("AZURE_OPENAI_ENDPOINT"),
-                    primary_embedder=app_settings.VOYAGE_MODEL_NAME,
-                    primary_dimensions=app_settings.VOYAGE_EMBEDDING_DIM,
-                    note="V1 Azure OpenAI embedding is a fallback; primary embedder is Voyage (selected per-group at query time)",
-                )
+                       model=llm_service.config.get("AZURE_OPENAI_DEPLOYMENT_NAME"),
+                       embedder=app_settings.VOYAGE_MODEL_NAME,
+                       embedding_dim=app_settings.VOYAGE_EMBEDDING_DIM)
         else:
             logger.warning("llm_not_configured",
                           message="Azure OpenAI not configured - LLM features disabled")

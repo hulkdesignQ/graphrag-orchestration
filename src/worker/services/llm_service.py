@@ -41,8 +41,9 @@ class LLMService:
         """Get the current configuration for health checks."""
         return {
             "AZURE_OPENAI_DEPLOYMENT_NAME": settings.AZURE_OPENAI_DEPLOYMENT_NAME,
-            "AZURE_OPENAI_EMBEDDING_DEPLOYMENT": settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT,
             "AZURE_OPENAI_ENDPOINT": settings.AZURE_OPENAI_ENDPOINT,
+            "VOYAGE_MODEL_NAME": settings.VOYAGE_MODEL_NAME,
+            "VOYAGE_EMBEDDING_DIM": settings.VOYAGE_EMBEDDING_DIM,
         }
 
     def _initialize(self) -> None:
@@ -114,54 +115,8 @@ class LLMService:
                     logger.error(f"Failed to initialize LLM: {e}")
                     raise
                 
-                # Initialize V1 legacy Azure OpenAI Embedding (fallback for groups not yet on Voyage V2)
-                # Primary embedder is Voyage voyage-context-3 (selected at query time in hybrid.py)
-                try:
-                    logger.info("Initializing V1 legacy Azure OpenAI embedding model (fallback)...")
-                    logger.info(f"V1 fallback embedding deployment: {settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT}")
-                    logger.info(f"V1 fallback embedding dimensions: {settings.AZURE_OPENAI_EMBEDDING_DIMENSIONS}")
-                    logger.info(f"Primary embedder: {settings.VOYAGE_MODEL_NAME} ({settings.VOYAGE_EMBEDDING_DIM}D) — selected per-group at query time")
-                    
-                    # Use separate endpoint for embeddings if configured (Switzerland North)
-                    embedding_endpoint = settings.AZURE_OPENAI_EMBEDDING_ENDPOINT or settings.AZURE_OPENAI_ENDPOINT
-                    embedding_token_provider = token_provider
-                    
-                    logger.info(f"Embedding endpoint: {embedding_endpoint}")
-                    
-                    # If using separate embedding endpoint, create new token provider
-                    if settings.AZURE_OPENAI_EMBEDDING_ENDPOINT and settings.AZURE_OPENAI_EMBEDDING_ENDPOINT != settings.AZURE_OPENAI_ENDPOINT:
-                        logger.info(f"Using separate embedding endpoint: {settings.AZURE_OPENAI_EMBEDDING_ENDPOINT}")
-                        if not settings.AZURE_OPENAI_EMBEDDING_API_KEY:
-                            embedding_credential = DefaultAzureCredential()
-                            embedding_token_provider = get_bearer_token_provider(
-                                embedding_credential,
-                                "https://cognitiveservices.azure.com/.default"
-                            )
-                    
-                    # LlamaIndex's AzureOpenAIEmbedding + AAD can incorrectly behave as if the token is an api-key.
-                    # Use the official OpenAI Azure client with `azure_ad_token_provider` instead.
-                    from src.worker.services.azure_ad_openai_embedding import AzureADOpenAIEmbedding
-
-                    logger.info("Creating AzureADOpenAIEmbedding instance...")
-                    # text-embedding-3-* models support dimensions parameter
-                    embed_dimensions = None
-                    if "embedding-3" in settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT:
-                        embed_dimensions = settings.AZURE_OPENAI_EMBEDDING_DIMENSIONS
-                        logger.info(f"Setting V1 fallback embedding dimensions to {embed_dimensions} for {settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT}")
-                    
-                    self._embed_model = AzureADOpenAIEmbedding(
-                        model=settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT,  # V1 legacy deployment
-                        deployment_name=settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT,
-                        azure_endpoint=embedding_endpoint,
-                        api_version=settings.AZURE_OPENAI_API_VERSION,
-                        azure_ad_token_provider=embedding_token_provider,
-                        dimensions=embed_dimensions,
-                    )
-                    logger.info(f"✅ V1 fallback embedding model initialized: {settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT} (primary: {settings.VOYAGE_MODEL_NAME})")
-                except Exception as e:
-                    logger.error(f"❌ Failed to initialize V1 fallback embedding model: {e}", exc_info=True)
-                    logger.error(f"Embedding config: deployment={settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT}, endpoint={embedding_endpoint}")
-                    raise
+                # V1 OpenAI embedding removed — all embeddings use Voyage V2 (voyage-context-3, 2048D)
+                logger.info(f"Embeddings: {settings.VOYAGE_MODEL_NAME} ({settings.VOYAGE_EMBEDDING_DIM}D) — V1 OpenAI fallback removed")
             else:
                 logger.info("Using API key authentication for OpenAI")
                 # Initialize LLM with API key
@@ -172,31 +127,15 @@ class LLMService:
                     api_version=settings.AZURE_OPENAI_API_VERSION,
                     temperature=0.0,  # Deterministic outputs for repeatability
                 )
-                
-                # Initialize V1 legacy Embedding Model with API key (fallback for groups not yet on Voyage V2)
-                # Primary embedder is Voyage voyage-context-3 (selected at query time in hybrid.py)
-                # Only pass dimensions if using embedding-3 models (ada-002 doesn't support it)
-                embed_kwargs = {
-                    "model": settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT,  # V1 legacy deployment
-                    "engine": settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT,
-                    "api_key": settings.AZURE_OPENAI_API_KEY,
-                    "azure_endpoint": settings.AZURE_OPENAI_ENDPOINT,
-                    "api_version": settings.AZURE_OPENAI_API_VERSION,
-                }
-                # text-embedding-3-* models support dimensions parameter, ada-002 does not
-                if "embedding-3" in settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT:
-                    embed_kwargs["dimensions"] = str(settings.AZURE_OPENAI_EMBEDDING_DIMENSIONS)
-                
-                self._embed_model = AzureOpenAIEmbedding(**embed_kwargs)
+                # V1 OpenAI embedding removed — all embeddings use Voyage V2
+                logger.info(f"Embeddings: {settings.VOYAGE_MODEL_NAME} ({settings.VOYAGE_EMBEDDING_DIM}D) — V1 OpenAI fallback removed")
             
-            # Configure LlamaIndex global settings
+            # Configure LlamaIndex global settings (embed_model not set — use Voyage V2 directly)
             LlamaSettings.llm = self._llm
-            LlamaSettings.embed_model = self._embed_model
             
             logger.info(
                 f"Initialized Azure OpenAI: LLM={settings.AZURE_OPENAI_DEPLOYMENT_NAME}, "
-                f"V1 fallback embeddings={settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT}, "
-                f"Primary embeddings={settings.VOYAGE_MODEL_NAME} ({settings.VOYAGE_EMBEDDING_DIM}D)"
+                f"Embeddings={settings.VOYAGE_MODEL_NAME} ({settings.VOYAGE_EMBEDDING_DIM}D)"
             )
         except ImportError as e:
             logger.error(f"LlamaIndex Azure OpenAI packages not installed: {e}")
@@ -379,7 +318,7 @@ class LLMService:
             return {
                 "status": "connected",
                 "llm_model": settings.AZURE_OPENAI_DEPLOYMENT_NAME,
-                "embedding_model": settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT,
+                "embedding_model": settings.VOYAGE_MODEL_NAME,
             }
         except Exception as e:
             return {"status": "error", "error": str(e)}
