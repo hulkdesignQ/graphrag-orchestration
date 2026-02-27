@@ -1434,16 +1434,18 @@ class Neo4jStoreV3:
 
         // Collect legacy TextChunk / Chunk nodes
         OPTIONAL MATCH (c:TextChunk)-[:PART_OF|IN_DOCUMENT]->(d)
-        WITH d, collect(DISTINCT c) AS chunks
+        WITH d, collect(DISTINCT c) AS tc_chunks
         OPTIONAL MATCH (c2:Chunk)-[:PART_OF|IN_DOCUMENT]->(d)
-        WITH d, chunks + collect(DISTINCT c2) AS chunks
+        WITH d, tc_chunks, collect(DISTINCT c2) AS native_chunks
+        WITH d, tc_chunks + native_chunks AS chunks
 
         // Collect sentences — new path (IN_DOCUMENT) and legacy path (PART_OF→TextChunk)
         OPTIONAL MATCH (sent:Sentence)-[:IN_DOCUMENT]->(d)
         WITH d, chunks, collect(DISTINCT sent) AS direct_sentences
         OPTIONAL MATCH (sent2:Sentence)-[:PART_OF]->(ch)
         WHERE ch IN chunks
-        WITH d, chunks, direct_sentences + collect(DISTINCT sent2) AS sentences
+        WITH d, chunks, direct_sentences, collect(DISTINCT sent2) AS legacy_sentences
+        WITH d, chunks, direct_sentences + legacy_sentences AS sentences
 
         // Collect sections
         OPTIONAL MATCH (s:Section {doc_id: $doc_id, group_id: $group_id})

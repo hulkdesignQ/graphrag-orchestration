@@ -129,15 +129,23 @@ def _is_kvp_label(text: str) -> bool:
 
 
 def _clean_chunk_text_for_spacy(chunk_text: str) -> str:
-    """Clean chunk text before spaCy processing.
+    """Clean chunk text before sentence splitting.
 
     DI chunk text is markdown-formatted. Strip:
+    - Signature block section — handled separately via structured metadata
+    - HTML elements (<table>, <!-- --> comments) — not sentence content
     - Markdown headers (# Title) — already in section_path
     - <figure> blocks — handled separately
     - Numbered list markers, bullets
     - Excessive whitespace
     """
-    text = re.sub(r"^#+\s+.*$", "", chunk_text, flags=re.MULTILINE)
+    # Strip everything from "## Signature Block" onwards (DI-labeled, handled via Source D)
+    text = re.sub(r"^##\s+Signature\s+Block\b.*", "", chunk_text, flags=re.MULTILINE | re.DOTALL)
+    # Strip HTML table elements and HTML comments (DI artifacts)
+    text = re.sub(r"<table>.*?</table>", "", text, flags=re.DOTALL)
+    text = re.sub(r"<table\b[^>]*>.*?$", "", text, flags=re.MULTILINE | re.DOTALL)
+    text = re.sub(r"<!--.*?-->", "", text, flags=re.DOTALL)
+    text = re.sub(r"^#+\s+.*$", "", text, flags=re.MULTILINE)
     text = re.sub(r"<figure>.*?</figure>", "", text, flags=re.DOTALL)
     text = re.sub(r"^\d+\\\.\s*", "", text, flags=re.MULTILINE)
     text = re.sub(r"^\d+\.\s+", "", text, flags=re.MULTILINE)
