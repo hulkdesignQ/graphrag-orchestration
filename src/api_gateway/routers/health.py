@@ -10,9 +10,11 @@ logger = structlog.get_logger()
 
 
 @router.get("/health")
+@router.head("/health")
 async def health_check() -> Dict[str, str]:
     """
     Health check endpoint for container orchestration.
+    Supports both GET and HEAD (used by Azure health probes).
     """
     return {"status": "healthy", "service": "graphrag-orchestration"}
 
