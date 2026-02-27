@@ -573,24 +573,26 @@ class LocalSearchHandler(BaseRouteHandler):
         OPTIONAL MATCH (seed)-[rel:RELATED_TO {source: 'knn_sentence'}]-(related:Sentence)
         WHERE related.group_id = $group_id
         
-        // Collect seed + related into a unified set
+        // Collect seed + related into a unified set (section-aware decay)
         WITH collect(DISTINCT {node: seed, score: score, hop: 0, via: 'seed'}) AS seeds,
-             collect(DISTINCT {node: related, score: score * rel.similarity * 0.8, hop: 1, via: 'related_to'}) AS related_nodes
+             collect(DISTINCT {node: related, score: score * rel.similarity *
+                    CASE WHEN related.section_path = seed.section_path THEN 0.85 ELSE 0.6 END,
+                    hop: 1, via: 'related_to'}) AS related_nodes
         WITH seeds + [r IN related_nodes WHERE r.node IS NOT NULL] AS all_anchors
         UNWIND all_anchors AS anchor
         WITH DISTINCT anchor.node AS sent, max(anchor.score) AS sent_score, 
              min(anchor.hop) AS min_hop, collect(DISTINCT anchor.via)[0] AS via
         
-        // EXPAND: NEXT/PREV neighbours for local context window
+        // EXPAND: NEXT_IN_SECTION neighbours for section-bounded context window
         CALL {
             WITH sent
-            OPTIONAL MATCH path = (sent)-[:NEXT*1..2]->(fwd:Sentence)
+            OPTIONAL MATCH path = (sent)-[:NEXT_IN_SECTION*1..2]->(fwd:Sentence)
             WHERE fwd.group_id = $group_id
             RETURN collect(DISTINCT {node: fwd, hop_type: 'next'}) AS next_nodes
         }
         CALL {
             WITH sent
-            OPTIONAL MATCH path = (sent)<-[:NEXT*1..2]-(prev:Sentence)
+            OPTIONAL MATCH path = (sent)<-[:NEXT_IN_SECTION*1..2]-(prev:Sentence)
             WHERE prev.group_id = $group_id
             RETURN collect(DISTINCT {node: prev, hop_type: 'prev'}) AS prev_nodes
         }
@@ -630,6 +632,7 @@ class LocalSearchHandler(BaseRouteHandler):
                sent.text AS text,
                sent.source AS source,
                sent.section_path AS section_path,
+               sent.hierarchical_id AS hierarchical_id,
                sent.parent_text AS parent_text,
                sent.page AS page,
                sent.chunk_id AS chunk_id,

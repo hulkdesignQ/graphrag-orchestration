@@ -331,14 +331,17 @@ class HippoRAG2PPR:
         section_sim_threshold: float,
     ) -> None:
         """Load Section nodes and edges for Phase 2 augmentation."""
-        # Section nodes
+        # Section nodes — include section_ordinal for ordinal-weighted edges
         result = session.run(
             "MATCH (s:Section {group_id: $group_id}) "
-            "RETURN s.id AS id, s.title AS title",
+            "RETURN s.id AS id, s.title AS title, s.section_ordinal AS ordinal",
             group_id=group_id,
         )
+        section_ordinals: Dict[str, int] = {}
         for record in result:
             self._add_node(record["id"], "section", record["title"] or "")
+            if record["ordinal"] is not None:
+                section_ordinals[record["id"]] = record["ordinal"]
 
         # Passage <-> Section via IN_SECTION
         result = session.run(
@@ -354,7 +357,7 @@ class HippoRAG2PPR:
             if src_idx is not None and tgt_idx is not None:
                 self._add_edge(src_idx, tgt_idx, section_edge_weight)
 
-        # Section <-> Section via SEMANTICALLY_SIMILAR
+        # Section <-> Section via SEMANTICALLY_SIMILAR — ordinal-weighted
         result = session.run(
             "MATCH (s1:Section {group_id: $group_id})"
             "-[sim:SEMANTICALLY_SIMILAR]->"
@@ -369,7 +372,13 @@ class HippoRAG2PPR:
             src_idx = self._node_to_idx.get(record["src"])
             tgt_idx = self._node_to_idx.get(record["tgt"])
             if src_idx is not None and tgt_idx is not None:
-                self._add_edge(src_idx, tgt_idx, float(record["weight"]))
+                base_weight = float(record["weight"])
+                # Decay by ordinal distance (closer siblings = higher weight)
+                src_ord = section_ordinals.get(record["src"], 0)
+                tgt_ord = section_ordinals.get(record["tgt"], 0)
+                ordinal_distance = abs(src_ord - tgt_ord)
+                decay = 1.0 / (1.0 + ordinal_distance * 0.2)
+                self._add_edge(src_idx, tgt_idx, base_weight * decay)
 
     def run_ppr(
         self,

@@ -97,6 +97,10 @@ class Sentence:
     tokens: int = 0
     parent_text: Optional[str] = None  # Parent paragraph for "sentence search, paragraph display"
     metadata: Dict[str, Any] = field(default_factory=dict)  # KVPs, tables, source URL, title
+    # Hierarchical content indexing (thesis-style §1.2.3-S5 addressing)
+    index_in_section: int = 0          # 0-based ordinal within parent section
+    total_in_section: int = 0          # Total sentences in the same section
+    hierarchical_id: str = ""          # Full address, e.g., "2.1.3-S5"
 
 
 @dataclass
@@ -1038,6 +1042,9 @@ class Neo4jStoreV3:
             sent.tokens = s.tokens,
             sent.parent_text = s.parent_text,
             sent.metadata = s.metadata,
+            sent.index_in_section = s.index_in_section,
+            sent.total_in_section = s.total_in_section,
+            sent.hierarchical_id = s.hierarchical_id,
             sent.group_id = $group_id,
             sent.updated_at = datetime()
         
@@ -1090,6 +1097,9 @@ class Neo4jStoreV3:
                 "parent_text": s.parent_text or "",
                 "embedding_v2": s.embedding_v2,
                 "metadata": meta_str,
+                "index_in_section": s.index_in_section,
+                "total_in_section": s.total_in_section,
+                "hierarchical_id": s.hierarchical_id,
             })
         
         with self.get_retry_session() as session:
@@ -1104,7 +1114,7 @@ class Neo4jStoreV3:
             return count
     
     def _create_sentence_next_edges(self, group_id: str, sentences: List["Sentence"]) -> None:
-        """Create NEXT edges between sequential sentences within each document."""
+        """Create NEXT and NEXT_IN_SECTION edges between sequential sentences."""
         from collections import defaultdict
 
         doc_sentences: Dict[str, List["Sentence"]] = defaultdict(list)
@@ -1112,13 +1122,22 @@ class Neo4jStoreV3:
             doc_sentences[s.document_id].append(s)
 
         next_pairs = []
+        next_in_section_pairs = []
         for doc_id, doc_sents in doc_sentences.items():
             sorted_sents = sorted(doc_sents, key=lambda s: s.index_in_doc)
             for i in range(len(sorted_sents) - 1):
+                curr = sorted_sents[i]
+                nxt = sorted_sents[i + 1]
                 next_pairs.append({
-                    "from_id": sorted_sents[i].id,
-                    "to_id": sorted_sents[i + 1].id,
+                    "from_id": curr.id,
+                    "to_id": nxt.id,
                 })
+                # NEXT_IN_SECTION: only between consecutive sentences in same section
+                if curr.section_path and curr.section_path == nxt.section_path:
+                    next_in_section_pairs.append({
+                        "from_id": curr.id,
+                        "to_id": nxt.id,
+                    })
         
         if not next_pairs:
             return
@@ -1132,6 +1151,16 @@ class Neo4jStoreV3:
         
         with self.get_retry_session() as session:
             session.run(query, pairs=next_pairs, group_id=group_id)
+
+        if next_in_section_pairs:
+            query_section = """
+            UNWIND $pairs AS p
+            MATCH (a:Sentence {id: p.from_id, group_id: $group_id})
+            MATCH (b:Sentence {id: p.to_id, group_id: $group_id})
+            MERGE (a)-[:NEXT_IN_SECTION]->(b)
+            """
+            with self.get_retry_session() as session:
+                session.run(query_section, pairs=next_in_section_pairs, group_id=group_id)
     
     def link_sentences_to_extra_chunks(
         self,

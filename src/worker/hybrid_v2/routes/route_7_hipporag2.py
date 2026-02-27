@@ -1106,6 +1106,7 @@ class HippoRAG2Handler(BaseRouteHandler):
         RETURN cid AS chunk_id,
                coalesce(node.text, '') AS text,
                coalesce(node.index_in_doc, 0) AS chunk_index,
+               node.hierarchical_id AS hierarchical_id,
                d.id AS document_id, d.title AS document_title,
                s.title AS section_title, s.id AS section_id
         """
@@ -1146,7 +1147,11 @@ class HippoRAG2Handler(BaseRouteHandler):
                 prev_idx = prev.get("chunk_index", 0)
                 curr_idx = r.get("chunk_index", 0)
                 merge_count = len(prev.get("_merged_ids", [prev.get("chunk_id", "")]))
-                if curr_idx == prev_idx + 1 and merge_count < _MAX_MERGE:
+                # Option B: use hierarchical_id section prefix for merge guard
+                prev_sec = (prev.get("hierarchical_id") or "").rsplit("-S", 1)[0]
+                curr_sec = (r.get("hierarchical_id") or "").rsplit("-S", 1)[0]
+                same_section = (prev_sec == curr_sec) and bool(prev_sec)
+                if same_section and curr_idx == prev_idx + 1 and merge_count < _MAX_MERGE:
                     prev["text"] = (
                         (prev.get("text", "") + " " + r.get("text", ""))
                         .strip()
@@ -1176,6 +1181,7 @@ class HippoRAG2Handler(BaseRouteHandler):
                     "document_id": r.get("document_id", ""),
                     "section_path": r.get("section_title", ""),
                     "chunk_index": r.get("chunk_index", 0),
+                    "hierarchical_id": r.get("hierarchical_id", ""),
                 },
             })
 
@@ -1221,10 +1227,35 @@ class HippoRAG2Handler(BaseRouteHandler):
             if not matched_sections:
                 return [], []
 
-            # Resolve entities from matched sections
+            # Expand matched sections to include child sections
+            expanded_sections = list(matched_sections)
+            if self.neo4j_driver:
+                try:
+                    def _expand_children():
+                        with retry_session(self.neo4j_driver, read_only=True) as session:
+                            records = session.run("""
+                                UNWIND $paths AS parent_path
+                                MATCH (parent:Section {group_id: $group_id})
+                                WHERE parent.path_key = parent_path
+                                MATCH (child:Section {group_id: $group_id})-[:SUBSECTION_OF*1..3]->(parent)
+                                RETURN DISTINCT child.path_key AS child_path
+                            """, paths=matched_sections, group_id=self.group_id)
+                            return [r["child_path"] for r in records if r["child_path"]]
+                    child_paths = await asyncio.to_thread(_expand_children)
+                    expanded_sections.extend(child_paths)
+                    expanded_sections = list(set(expanded_sections))
+                    logger.debug(
+                        "route7_child_section_expansion",
+                        matched=len(matched_sections),
+                        expanded=len(expanded_sections),
+                    )
+                except Exception as e:
+                    logger.debug("route7_child_section_expansion_failed", error=str(e))
+
+            # Resolve entities from expanded sections
             section_entities = await resolve_section_entities(
                 async_neo4j=self._async_neo4j,
-                section_paths=matched_sections,
+                section_paths=expanded_sections,
                 group_id=self.group_id,
                 folder_id=self.folder_id,
             )

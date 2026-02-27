@@ -387,6 +387,14 @@ class LazyGraphRAGIndexingPipeline:
         section_stats = await self._build_section_graph_from_docs(group_id, expanded_docs)
         stats["sections"] = section_stats.get("sections_created", 0)
         stats["section_edges"] = section_stats.get("in_section_edges", 0)
+
+        # 4.5.1) Assign hierarchical IDs to sentences (needs both sentences + sections).
+        h_id_stats = await self._assign_sentence_hierarchical_ids(group_id)
+        stats["hierarchical_ids_assigned"] = h_id_stats.get("assigned", 0)
+
+        # 4.5.2) Backfill Section.total_sentences from IN_SECTION edge count.
+        total_stats = await self._backfill_section_total_sentences(group_id)
+        stats["section_totals_backfilled"] = total_stats.get("updated", 0)
         
         # 4.6–4.8) Section enrichment + KVP embedding.
         # Wave 1: Independent stages run in parallel.
@@ -722,6 +730,8 @@ class LazyGraphRAGIndexingPipeline:
             title = doc_title_map.get(s.get("document_id", ""), "")
             sp = s.get("section_path", "")
             source = s.get("source", "paragraph")
+            idx_sec = s.get("index_in_section", 0)
+            total_sec = s.get("total_in_section", 0)
             parts: List[str] = []
             if title:
                 parts.append(f"Document: {title}")
@@ -733,6 +743,8 @@ class LazyGraphRAGIndexingPipeline:
                 parts.append(f"Figure: {sp}" if sp else "Figure")
             elif sp:
                 parts.append(f"Section: {sp}")
+            if total_sec > 0:
+                parts.append(f"Position: {idx_sec + 1}/{total_sec}")
             return f"[{' | '.join(parts)}] " if parts else ""
 
         try:
@@ -798,6 +810,8 @@ class LazyGraphRAGIndexingPipeline:
                 embedding_v2=emb,
                 tokens=raw.get("tokens", 0),
                 parent_text=raw.get("parent_text"),
+                index_in_section=raw.get("index_in_section", 0),
+                total_in_section=raw.get("total_in_section", 0),
             ))
 
         # ── Persist in Neo4j ──
@@ -861,10 +875,38 @@ class LazyGraphRAGIndexingPipeline:
                             "title": title,
                             "depth": depth,
                             "parent_path_key": parent_path_key,
+                            "_first_seen_order": len(all_sections),
                         }
 
         if not all_sections:
             return {"sections_created": 0, "in_section_edges": 0}
+
+        # Compute section_ordinal and hierarchical_id
+        from collections import defaultdict as _defaultdict
+        sibling_groups: Dict[tuple, list] = _defaultdict(list)
+        for section in all_sections.values():
+            parent = section.get("parent_path_key") or "__root__"
+            sib_key = (section["doc_id"], parent)
+            sibling_groups[sib_key].append(section)
+
+        for siblings in sibling_groups.values():
+            siblings.sort(key=lambda s: s.get("_first_seen_order", 0))
+            for ordinal, section in enumerate(siblings, 1):
+                section["section_ordinal"] = ordinal
+
+        def _assign_h_ids(doc_id_val, parent_path_key=None, prefix=""):
+            parent_key = parent_path_key or "__root__"
+            children = sibling_groups.get((doc_id_val, parent_key), [])
+            for child in children:
+                h_id = str(child["section_ordinal"]) if not prefix else f"{prefix}.{child['section_ordinal']}"
+                child["hierarchical_id"] = h_id
+                _assign_h_ids(doc_id_val, child["path_key"], h_id)
+
+        for did in set(s["doc_id"] for s in all_sections.values()):
+            _assign_h_ids(did)
+
+        for s in all_sections.values():
+            s.pop("_first_seen_order", None)
 
         section_data = list(all_sections.values())
 
@@ -880,6 +922,8 @@ class LazyGraphRAGIndexingPipeline:
                     sec.section_path = s.path_key,
                     sec.title = s.title,
                     sec.depth = s.depth,
+                    sec.section_ordinal = s.section_ordinal,
+                    sec.hierarchical_id = s.hierarchical_id,
                     sec.updated_at = datetime()
                 RETURN count(sec) AS count
                 """,
@@ -936,6 +980,62 @@ class LazyGraphRAGIndexingPipeline:
             extra={"group_id": group_id, "sections_created": sections_created},
         )
         return {"sections_created": sections_created, "in_section_edges": 0}
+
+    async def _assign_sentence_hierarchical_ids(self, group_id: str) -> Dict[str, Any]:
+        """Post-processing: assign hierarchical_id to Sentence nodes.
+
+        Computes full address (e.g., "2.1.3-S5") from Section.hierarchical_id
+        and Sentence.index_in_section. Must run after both sentence upsert
+        and section graph creation.
+        """
+        # Sentences linked to a section
+        result = await self.neo4j_store.arun_query(
+            """
+            MATCH (sent:Sentence {group_id: $group_id})-[:IN_SECTION]->(sec:Section {group_id: $group_id})
+            WHERE sec.hierarchical_id IS NOT NULL
+            SET sent.hierarchical_id = sec.hierarchical_id + '-S' + toString(sent.index_in_section + 1)
+            RETURN count(sent) AS updated
+            """,
+            group_id=group_id,
+        )
+        count = result[0]["updated"] if result else 0
+
+        # Sentences with no section get a root-prefixed ID
+        result2 = await self.neo4j_store.arun_query(
+            """
+            MATCH (sent:Sentence {group_id: $group_id})
+            WHERE sent.hierarchical_id IS NULL OR sent.hierarchical_id = ''
+            SET sent.hierarchical_id = '0-S' + toString(sent.index_in_section + 1)
+            RETURN count(sent) AS updated
+            """,
+            group_id=group_id,
+        )
+        root_count = result2[0]["updated"] if result2 else 0
+
+        logger.info(
+            "sentence_hierarchical_ids_assigned",
+            extra={"group_id": group_id, "assigned": count, "root_assigned": root_count},
+        )
+        return {"assigned": count + root_count}
+
+    async def _backfill_section_total_sentences(self, group_id: str) -> Dict[str, Any]:
+        """Backfill Section.total_sentences from IN_SECTION edge count."""
+        result = await self.neo4j_store.arun_query(
+            """
+            MATCH (sec:Section {group_id: $group_id})
+            OPTIONAL MATCH (s:Sentence)-[:IN_SECTION]->(sec)
+            WITH sec, count(s) AS total
+            SET sec.total_sentences = total
+            RETURN count(sec) AS updated
+            """,
+            group_id=group_id,
+        )
+        count = result[0]["updated"] if result else 0
+        logger.info(
+            "section_total_sentences_backfilled",
+            extra={"group_id": group_id, "updated": count},
+        )
+        return {"updated": count}
 
     async def _build_sentence_knn_edges(
         self,
@@ -3261,7 +3361,8 @@ SUMMARY: <summary>"""
             MATCH (s:Section {group_id: $group_id})
             WHERE s.structural_embedding IS NULL
             RETURN s.id AS section_id, s.title AS title,
-                   s.path_key AS path_key, s.summary AS summary
+                   s.path_key AS path_key, s.summary AS summary,
+                   s.hierarchical_id AS hierarchical_id
             """,
             read_only=True,
             group_id=group_id,
@@ -3272,6 +3373,7 @@ SUMMARY: <summary>"""
                 "title": record["title"] or "",
                 "path_key": record["path_key"] or "",
                 "summary": record["summary"] or "",
+                "hierarchical_id": record["hierarchical_id"] or "",
             }
             for record in result
         ]
@@ -3279,7 +3381,7 @@ SUMMARY: <summary>"""
         if not sections_to_embed:
             return {"sections_embedded": 0}
         
-        # Build structural texts: title + path_key + summary (when available)
+        # Build structural texts: §-prefixed title + path_key + summary
         texts_to_embed = []
         for sec in sections_to_embed:
             parts = [p for p in [sec["title"], sec["path_key"]] if p]
@@ -3288,6 +3390,10 @@ SUMMARY: <summary>"""
                 header_text = sec["path_key"]
             else:
                 header_text = " | ".join(parts) if parts else "[Untitled Section]"
+            # Prepend hierarchical ID for structural positioning context
+            h_id = sec.get("hierarchical_id", "")
+            if h_id:
+                header_text = f"§{h_id} {header_text}"
             # Append summary for richer semantic signal
             if sec["summary"]:
                 combined = f"{header_text} — {sec['summary']}"

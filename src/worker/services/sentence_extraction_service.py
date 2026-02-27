@@ -392,6 +392,7 @@ def extract_sentences_from_di_units(
     all_sentences: List[Dict[str, Any]] = []
     seen_texts: Dict[str, str] = {}  # lowered text → sentence id (dedup)
     global_idx = 0
+    section_counters: Dict[str, int] = {}  # section_path → next index_in_section
 
     for unit in di_units:
         meta = getattr(unit, "metadata", None) or {}
@@ -427,6 +428,9 @@ def extract_sentences_from_di_units(
                     continue
                 sent_id = f"{doc_id}_sent_{global_idx}"
                 seen_texts[text_key] = sent_id
+                section_key = section_path or "[Document Root]"
+                idx_in_section = section_counters.get(section_key, 0)
+                section_counters[section_key] = idx_in_section + 1
                 all_sentences.append({
                     "id": sent_id,
                     "text": sent_text,
@@ -440,6 +444,7 @@ def extract_sentences_from_di_units(
                     "confidence": 1.0,
                     "tokens": len(sent_text.split()),
                     "parent_text": clean_text[:500] if clean_text else "",
+                    "index_in_section": idx_in_section,
                 })
                 global_idx += 1
 
@@ -464,6 +469,9 @@ def extract_sentences_from_di_units(
                         continue
                     sent_id = f"{doc_id}_sent_{global_idx}"
                     seen_texts[text_key] = sent_id
+                    section_key = section_path or "[Document Root]"
+                    idx_in_section = section_counters.get(section_key, 0)
+                    section_counters[section_key] = idx_in_section + 1
                     all_sentences.append({
                         "id": sent_id,
                         "text": row_text,
@@ -477,6 +485,7 @@ def extract_sentences_from_di_units(
                         "confidence": 1.0,
                         "tokens": len(row_text.split()),
                         "parent_text": "",
+                        "index_in_section": idx_in_section,
                     })
                     global_idx += 1
 
@@ -494,6 +503,9 @@ def extract_sentences_from_di_units(
                     continue
                 sent_id = f"{doc_id}_sent_{global_idx}"
                 seen_texts[text_key] = sent_id
+                section_key = section_path or "[Document Root]"
+                idx_in_section = section_counters.get(section_key, 0)
+                section_counters[section_key] = idx_in_section + 1
                 all_sentences.append({
                     "id": sent_id,
                     "text": caption,
@@ -507,6 +519,7 @@ def extract_sentences_from_di_units(
                     "confidence": 1.0,
                     "tokens": len(caption.split()),
                     "parent_text": "",
+                    "index_in_section": idx_in_section,
                 })
                 global_idx += 1
 
@@ -530,6 +543,9 @@ def extract_sentences_from_di_units(
                     continue
                 sent_id = f"{doc_id}_sent_{global_idx}"
                 seen_texts[text_key] = sent_id
+                section_key = section_path or "[Document Root]"
+                idx_in_section = section_counters.get(section_key, 0)
+                section_counters[section_key] = idx_in_section + 1
                 all_sentences.append({
                     "id": sent_id,
                     "text": text,
@@ -543,6 +559,7 @@ def extract_sentences_from_di_units(
                     "confidence": 1.0,
                     "tokens": len(text.split()),
                     "parent_text": "",
+                    "index_in_section": idx_in_section,
                 })
                 global_idx += 1
             if signed_date:
@@ -551,6 +568,9 @@ def extract_sentences_from_di_units(
                 if text_key not in seen_texts:
                     sent_id = f"{doc_id}_sent_{global_idx}"
                     seen_texts[text_key] = sent_id
+                    section_key = section_path or "[Document Root]"
+                    idx_in_section = section_counters.get(section_key, 0)
+                    section_counters[section_key] = idx_in_section + 1
                     all_sentences.append({
                         "id": sent_id,
                         "text": date_text,
@@ -564,8 +584,14 @@ def extract_sentences_from_di_units(
                         "confidence": 1.0,
                         "tokens": len(date_text.split()),
                         "parent_text": "",
+                        "index_in_section": idx_in_section,
                     })
                     global_idx += 1
+
+    # Backfill total_in_section from section_counters
+    for sent in all_sentences:
+        sk = sent.get("section_path") or "[Document Root]"
+        sent["total_in_section"] = section_counters.get(sk, 0)
 
     logger.info(
         "di_sentence_extraction_complete",
@@ -590,24 +616,31 @@ def extract_sentences_from_raw_text(
 
     nlp = _get_nlp()
     doc = nlp(clean_text)
-    for idx, sent in enumerate(doc.sents):
+    sent_idx = 0
+    for sent in doc.sents:
         sent_text = sent.text.strip()
         if not sent_text or _is_noise_sentence(sent_text) or _is_kvp_label(sent_text):
             continue
         sentences.append({
-            "id": f"{doc_id}_sent_{idx}",
+            "id": f"{doc_id}_sent_{sent_idx}",
             "text": sent_text,
             "chunk_id": "",
             "document_id": doc_id,
             "source": "paragraph",
             "index_in_chunk": 0,
-            "index_in_doc": idx,
+            "index_in_doc": sent_idx,
             "section_path": "",
             "page": None,
             "confidence": 1.0,
             "tokens": len(sent_text.split()),
             "parent_text": clean_text[:500],
+            "index_in_section": sent_idx,
         })
+        sent_idx += 1
+
+    # Backfill total_in_section (all sentences are in root section)
+    for sent in sentences:
+        sent["total_in_section"] = len(sentences)
 
     logger.info(
         "raw_text_sentence_extraction_complete",

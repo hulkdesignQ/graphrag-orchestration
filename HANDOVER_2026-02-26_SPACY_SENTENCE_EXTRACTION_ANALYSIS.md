@@ -1,0 +1,354 @@
+# Session Handover — 2026-02-26: spaCy Sentence Extraction Gap Analysis
+
+**Session focus:** Deep investigation into why spaCy fails to extract complete sentences, with root-cause analysis and concrete improvement recommendations.
+
+---
+
+## Background
+
+The sentence extraction pipeline (`src/worker/services/sentence_extraction_service.py`) feeds every retrieval route that uses Sentence nodes. When sentences are dropped or fragmented, the graph has blind spots that no downstream route can recover from.
+
+Previous fix (commit `019e5840`, 2026-02-18): lowered `SKELETON_MIN_SENTENCE_WORDS` from 5→3, which rescued "Afterward, deposit is forfeited." and improved Q-G1 from 71%→100%. But that fix only addressed one of **three** independent failure modes.
+
+---
+
+## Three Failure Modes Identified
+
+### Failure Mode 1: spaCy Mis-splits at Legal Abbreviations (CRITICAL)
+
+spaCy's dependency parser treats legal abbreviations like `Art.`, `Para.`, `Ref.` as sentence-ending periods, fragmenting complete sentences.
+
+| Input | spaCy output | Impact |
+|-------|-------------|--------|
+| `Pursuant to Art. 5, Para. 2, the tenant is liable.` | `["Pursuant to Art.", "5, Para.", "2, the tenant is liable."]` | 3 fragments — first two dropped, third loses context |
+| `Under Art. IV, Sec. 3, arbitration is mandatory.` | `["Under Art.", "IV, Sec. 3, arbitration is mandatory."]` | "Under Art." dropped, second fragment misleading |
+| `Ref. A-101, dated Dec. 31, 2024, is controlling.` | `["Ref.", "A-101, dated Dec. 31, 2024, is controlling."]` | "Ref." dropped, reference number severed from doc |
+
+**Abbreviations that confuse spaCy:** `Art.`, `Para.`, `Ref.`, `Cl.`, `Sec.` (when followed by numbers/Roman numerals). Already handled correctly: `Dr.`, `Mr.`, `Inc.`, `Ltd.`, `U.S.`, `Esq.`, `Prof.`, `Jan.`–`Dec.`, `St.`
+
+**Proposed fix — custom spaCy pipeline component:**
+
+```python
+from spacy.language import Language
+from spacy.tokens import Doc
+
+LEGAL_ABBREVS = {
+    'art', 'para', 'sec', 'cl', 'ref', 'no', 'inc', 'ltd', 'corp', 'co',
+    'sr', 'jr', 'dr', 'mr', 'mrs', 'ms', 'prof', 'esq', 'dept', 'div',
+    'approx', 'est', 'govt', 'intl', 'natl', 'supp', 'vol', 'pt',
+}
+
+@Language.component('legal_sent_boundary_fix')
+def legal_sent_boundary_fix(doc):
+    """Prevent false sentence splits after legal abbreviations."""
+    changes = []
+    for i, token in enumerate(doc):
+        if token.is_sent_start and i > 0:
+            prev = doc[i - 1]
+            if prev.text == '.' and i >= 2:
+                if doc[i - 2].text.lower() in LEGAL_ABBREVS:
+                    changes.append(i)
+            elif prev.text.endswith('.') and len(prev.text) > 1:
+                if prev.text[:-1].lower() in LEGAL_ABBREVS:
+                    changes.append(i)
+    if not changes:
+        return doc
+    sent_starts = [token.is_sent_start for token in doc]
+    for idx in changes:
+        sent_starts[idx] = False
+    words = [t.text for t in doc]
+    spaces = [t.whitespace_ != '' for t in doc]
+    return Doc(doc.vocab, words=words, spaces=spaces, sent_starts=sent_starts)
+```
+
+**Tested results:**
+
+| Input | Before fix | After fix |
+|-------|-----------|-----------|
+| `Pursuant to Art. 5, Para. 2, the tenant is liable for damages. Landlord may terminate.` | 4 fragments | ✅ 2 correct sentences |
+| `Under Art. IV, Sec. 3, arbitration is mandatory. The parties agree.` | 3 fragments | ✅ 2 correct sentences |
+| `Ref. A-101, dated Dec. 31, 2024, is the controlling document.` | 2 fragments | ✅ 1 correct sentence |
+| Already-correct sentences (Dr., U.S., Esq., etc.) | Correct | ✅ Unchanged |
+
+**Where to add:** In `_get_nlp()` at line 48–50 of `sentence_extraction_service.py`, after `spacy.load()`:
+
+```python
+_nlp = spacy.load("en_core_web_sm")
+_nlp.add_pipe('legal_sent_boundary_fix', after='parser')
+_nlp.max_length = 50_000
+```
+
+### Failure Mode 2: `min_chars=30` Threshold Too Aggressive
+
+The `SKELETON_MIN_SENTENCE_CHARS = 30` setting drops all sentences shorter than 30 characters. This is more aggressive than `min_words=3` and blocks **many legitimate legal sentences**.
+
+**Sentences dropped by min_chars=30 that should be kept:**
+
+| Sentence | Chars | Words | Status |
+|----------|-------|-------|--------|
+| `Tenant forfeits deposit.` | 24 | 3 | **DROPPED** — Q-G1 related |
+| `All terms are binding.` | 22 | 4 | **DROPPED** — meaningful legal content |
+| `Buyer assumes all risk.` | 23 | 4 | **DROPPED** — meaningful legal content |
+| `Landlord may terminate.` | 23 | 3 | **DROPPED** — meaningful legal content |
+| `No refund after 30 days.` | 26 | 5 | **DROPPED** — meaningful legal content |
+| `Monthly rent: $2,500.00.` | 24 | 3 | **DROPPED** — financial content |
+| `The lease term is 12 months.` | 28 | 6 | **DROPPED** — meaningful legal content |
+| `Effective as of Jan. 1, 2025.` | 29 | 6 | **DROPPED** — date reference |
+
+**True noise that min_chars catches (correctly):**
+- `See above.` (10c), `N/A` (3c), `Page 2 of 5` (11c), `Total:` (6c), `End of section.` (15c)
+
+**Recommendation:** Lower `SKELETON_MIN_SENTENCE_CHARS` from 30 → 20 in `src/core/config.py`. At 20, all true noise is still filtered, while 13+ meaningful sentences are rescued. The `numeric_only` and `kvp_pattern` filters provide secondary protection against noise in the 20–29 char range.
+
+### Failure Mode 3: ALL_CAPS Filter Drops Emphasized Legal Content
+
+Legal documents frequently use ALL CAPS for binding terms. The filter at line 104:
+```python
+if ALL_CAPS_RE.match(text) and len(text.split()) < 10:
+    return True
+```
+
+This drops:
+- `ALL PARTIES AGREE TO THE TERMS.` (31c, 7w) — a binding statement
+- `DEFAULT AND REMEDIES APPLY.` (27c, 5w) — section content leaked as body text
+- `THE ABOVE TERMS APPLY TO ALL PARTIES.` (37c, 7w) — binding language
+
+**Recommendation:** Raise the ALL_CAPS word threshold from 10 → 6, OR add a keyword allowlist for legal terms (`DEFAULT`, `AGREEMENT`, `PARTIES`, `BINDING`, `REMEDIES`, `ARBITRATION`). Most true noise ALL CAPS (headers, labels) is under 5 words, while meaningful ALL CAPS sentences tend to be 5+ words.
+
+---
+
+## Interaction Between Failure Modes
+
+The three failures compound. Example:
+
+```
+Pursuant to Art. 5, Para. 2, the tenant forfeits deposit.
+```
+
+1. **spaCy mis-split** → `"Pursuant to Art."` / `"5, Para."` / `"2, the tenant forfeits deposit."`
+2. **min_chars** → `"Pursuant to Art."` (16c) DROPPED, `"5, Para."` (8c) DROPPED
+3. **Result:** Only `"2, the tenant forfeits deposit."` survives — missing its legal citation context
+
+With the abbreviation fix applied first, spaCy produces the full sentence, and neither min_chars nor min_words filters it.
+
+---
+
+## `_clean_chunk_text_for_spacy()` — Additional Observations
+
+The cleaning function (lines 120–135) performs well but has one edge:
+
+| Pattern | What it strips | Risk |
+|---------|---------------|------|
+| `r"^\d+\.\s+"` | Numbered list markers (`1. `, `42. `) | Also strips clause numbers (`4.2 ` is NOT matched — safe) |
+| `r"^[·•\-\*]\s+"` | Bullets | Fine — bullets are formatting |
+| `r"^#+\s+.*$"` | Markdown headers | Headers are stored in `section_path` so no data loss |
+
+**Not a problem:** Numbered sub-sections like `4.2` survive cleaning because the regex requires `\s+` after the period, and `4.2` has a digit after the period. Cleaning preserves `"4.2 Landlord may pursue legal remedies."` correctly.
+
+---
+
+## Recommended Fix Priority
+
+| Priority | Fix | Effort | Impact |
+|----------|-----|--------|--------|
+| **P0** | Add `legal_sent_boundary_fix` spaCy component | Small (20 LOC) | Prevents sentence fragmentation — fixes root cause |
+| **P1** | Lower `SKELETON_MIN_SENTENCE_CHARS` 30→20 | 1-line config | Rescues 13+ short-but-meaningful sentences |
+| **P2** | Tighten ALL_CAPS word threshold 10→6 | 1-line change | Rescues binding legal statements in caps |
+
+All three fixes are independent and non-breaking — they only admit sentences that were previously dropped, never remove sentences that were previously kept.
+
+---
+
+## Key Files
+
+| File | Purpose |
+|------|---------|
+| `src/worker/services/sentence_extraction_service.py` | Sentence extraction — spaCy init (`_get_nlp`), cleaning, noise filters |
+| `src/core/config.py:116-117` | `SKELETON_MIN_SENTENCE_CHARS=30`, `SKELETON_MIN_SENTENCE_WORDS=3` |
+| `scripts/analyze_dropped_sentences.py` | Threshold analysis tool (connects to Neo4j, tests all filters) |
+| `scripts/diagnose_sentence_search.py` | Sentence retrieval diagnostics |
+
+## Verification After Fix
+
+1. Apply fixes to `sentence_extraction_service.py` and `config.py`
+2. Delete existing Sentence nodes: `MATCH (s:Sentence {group_id: 'test-5pdfs-v2-fix2'}) DETACH DELETE s`
+3. Re-run sentence extraction via `scripts/test_skeleton_e2e.py` or API re-index
+4. Run `scripts/analyze_dropped_sentences.py` to confirm fewer dropped sentences
+5. Benchmark all routes to verify no regressions: `python scripts/benchmark_route3_global_search.py --force-route unified_search`
+
+---
+
+## Comprehensive 11-Category Extraction Audit (All 5 PDFs)
+
+Full pipeline audit testing representative text from all 5 documents through the actual extraction code. **Critical sentence survival rate: 90%** (27/30 benchmark-critical sentences kept).
+
+### Category 4: `_is_kvp_label()` False Positives
+
+The regex `^[A-Z][^.!?]*:\s*[A-Z][a-z]` with `< 8 words` drops legitimate sentences:
+
+| Sentence | Words | Dropped? |
+|----------|-------|----------|
+| "Warranty period: One year from completion date." | 7 | ❌ YES — false positive |
+| "Builder: Fabrikam Construction, Inc., Pocatello, ID 83201." | 7 | ❌ YES — false positive |
+| "Pumper: Fabrikam Inc. shall service the tank." | 7 | ❌ YES — false positive |
+| "Owner: Contoso Ltd. is responsible for all taxes." | 8 | ✅ NO (at threshold) |
+| "Agent: Walt Flood Realty shall manage the property." | 8 | ✅ NO (at threshold) |
+
+**Fix:** Raise threshold from 8 → 10.
+
+### Category 5: Heading Content Loss
+
+`_clean_chunk_text_for_spacy()` strips ALL 15 markdown heading lines. Content is preserved in `section_path` metadata but invisible to sentence-level vector search.
+
+Impact: Low for current queries but matters if users search heading terms directly.
+
+### Category 6: SKIP_ROLES Filtering
+
+DI "title" and "sectionHeading" roles skip the entire paragraph. By design, but same impact as Category 5.
+
+### Category 7: numeric_only Filter
+
+Strips `[\d,.$%\s\-/·•]`, drops if remaining alpha < 10 chars:
+
+| Sentence | Alpha After Strip | Dropped? |
+|----------|-------------------|----------|
+| "Total: $29,900.00." | 5 ("Total") | ❌ YES |
+| "SUBTOTAL: 29,900.00" | 8 ("SUBTOTAL") | ❌ YES |
+| "Invoice #1256003" | 7 ("Invoice") | ❌ YES |
+
+**Fix:** Lower alpha threshold from 10 → 6.
+
+### Category 8: DI Paragraph Split
+
+If Azure DI splits a sentence across two paragraphs, each half becomes an independent (broken) sentence. Cannot be fixed in spaCy — would need DI paragraph merging heuristic.
+
+### Category 9: Dedup Weakness
+
+Dedup uses case-insensitive exact match. Extra whitespace, line breaks, and OCR spacing variants create duplicates. Creates wasted embeddings but does NOT cause sentence loss.
+
+**Fix:** Normalize whitespace in dedup key: `re.sub(r'\s+', ' ', text).strip().lower()`.
+
+### Category 10: Numbered List Stripping — SAFE
+
+Regex `^\d+\.\s+` correctly strips list markers without affecting sub-sections (1.1, 4.2) or mid-sentence periods. Installment amounts like "$20,000.00 upon signing" are preserved. No action needed.
+
+### Category 11: Merged with Category 5
+
+---
+
+## Benchmark Question Impact Summary
+
+| Question | Term at Risk | Gap Category | Fix Priority |
+|----------|-------------|--------------|-------------|
+| Q-G1 | "not transferable" | #3 ALL_CAPS | P1 |
+| Q-G3 | "TOTAL" / "AMOUNT DUE" | #7 numeric_only | P2 |
+| Q-G5 | "CONFIDENTIAL" | #3 ALL_CAPS | P1 |
+| Q-D7 | "2024-06-15" | #2 min_chars | P1 |
+| Q-G9 | "Warranty period" | #4 kvp_label | P2 |
+
+---
+
+## Complete Fix Priority Table
+
+| Priority | Fix | LOC | Risk | Gain |
+|----------|-----|-----|------|------|
+| **P0** | `legal_sent_boundary_fix` spaCy component | ~20 new | Low | Prevents all legal-abbrev fragmentation |
+| **P1** | `SKELETON_MIN_SENTENCE_CHARS` 30→20 | 1 line | Low | Recovers "Effective date" + similar |
+| **P1** | ALL_CAPS word threshold 10→6 | 1 line | Low | Recovers "THIS WARRANTY IS NOT TRANSFERABLE" |
+| **P2** | `_is_kvp_label` word threshold 8→10 | 1 line | Low | Recovers "Warranty period: ..." etc. |
+| **P2** | numeric_only alpha threshold 10→6 | 1 line | Medium | Recovers "Invoice #1256003", "Total: $29,900" |
+| **P3** | Whitespace-normalize dedup key | 1 line | None | Prevents duplicate embeddings |
+| **P4** | Emit heading text as sentences | ~10 LOC | Medium | Makes headings searchable at sentence level |
+
+All P0-P2 fixes are additive (admit previously-dropped sentences) and non-breaking.
+
+## Baseline Comparison: spaCy sm vs PySBD vs wtpsplit (2026-02-27)
+
+### Question: "Would a better baseline make the patch less brittle?"
+
+Tested 3 baselines on 25 known legal edge cases + 10 unseen abbreviations:
+
+### Raw Baseline Scores (no patches)
+
+| Baseline | Known/25 | Unseen/10 | Latency | Docker + | New Deps |
+|----------|----------|-----------|---------|----------|----------|
+| spaCy sm (current) | 19 | 7 | 99ms | 0 MB | none |
+| PySBD 0.3.4 | 18 | 0 | 7ms | <1 MB | pysbd (stale, 2021) |
+| wtpsplit SaT (ONNX) | 24 | **10** | 410ms | ~480 MB | wtpsplit+onnxruntime |
+
+### With Minimal Patching
+
+| Approach | Known/25 | Unseen/10 | Patch Complexity |
+|----------|----------|-----------|------------------|
+| PySBD + NL-fix + abbreviation merge | 24 | ? | Medium (NL normalization + post-merge) |
+| wtpsplit + NL-fix (`text.replace("\n"," ")`) | **25** | **10** | Trivial (1 line) |
+| spaCy sm + `legal_sent_boundary_fix_v2` | **25** | 9 | Small (37-word allowlist, 20 LOC) |
+
+### Critical Finding: spaCy Tokenization Bug in v1 Fix
+
+The v1 `legal_sent_boundary_fix` only checked `token.text.endswith(".")`. But spaCy tokenizes **unknown** abbreviations as two tokens (`"Supp"` + `"."`), so the fix missed them.
+
+**v2 fix** handles both tokenization styles:
+
+```python
+LEGAL_ABBREVS = {
+    'art', 'para', 'sec', 'cl', 'ref', 'no', 'inc', 'ltd', 'corp', 'co',
+    'sr', 'jr', 'dr', 'mr', 'mrs', 'ms', 'prof', 'esq', 'dept', 'div',
+    'approx', 'est', 'govt', 'intl', 'natl', 'supp', 'vol', 'pt', 'st',
+    'subch', 'ch', 'app', 'exh', 'amdt', 'reg', 'par', 'chap',
+}
+
+@Language.component("legal_sent_boundary_fix_v2")
+def legal_sent_boundary_fix_v2(doc):
+    for token in doc[:-1]:
+        # Case 1: Merged period token (e.g. "Art.")
+        if (token.text.endswith(".") and len(token.text) > 1 and
+            token.text[:-1].lower() in LEGAL_ABBREVS):
+            doc[token.i + 1].is_sent_start = False
+        # Case 2: Split period token (e.g. "Supp" + ".")
+        elif (token.text == "." and token.i > 0 and
+              doc[token.i - 1].text.lower() in LEGAL_ABBREVS and
+              token.i + 1 < len(doc)):
+            doc[token.i + 1].is_sent_start = False
+    return doc
+```
+
+**Must register BEFORE parser:** `nlp.add_pipe("legal_sent_boundary_fix_v2", before="parser")`
+
+### The 1 Case That Differentiates
+
+`"Per Reg. 44 CFR 206, the standard applies."`
+- wtpsplit: ✅ (neural model understands regulatory citation syntax)
+- spaCy + legal_fix_v2: ❌ (parser splits at `CFR` — syntax confusion, not abbreviation issue)
+
+This is a parser limitation with multi-token regulatory references (`44 CFR 206`), not an abbreviation problem. The fix cannot address it without suppressing legitimate splits.
+
+### Why spaCy sm IS a Good Baseline
+
+spaCy's dependency parser generalizes to unseen abbreviations via syntactic context:
+- When it sees `Xyz. 5`, it recognizes "abbreviation + number" → keeps sentence together
+- Scored 7/10 on unseen abbreviations **without any patch** (vs PySBD 0/10)
+- PySBD only knows hardcoded rules — MORE brittle for novel abbreviations
+
+### Answer: Is a Better Baseline Less Brittle?
+
+**Yes, but marginally.** wtpsplit IS genuinely less brittle (10/10 unseen, zero rules needed), but:
+- The gap is 1 case (9/10 vs 10/10) after v2 fix
+- The deployment cost is +480 MB Docker, +25s cold start, 4.1x latency, 2 new deps
+- wtpsplit still needs NL normalization (same as PySBD)
+
+**Pragmatic recommendation:** Ship `spaCy sm + legal_fix_v2` now. Revisit wtpsplit when multi-language support is needed (wtpsplit covers 85+ languages).
+
+### Threshold Brittleness (Separate Issue)
+
+The `min_chars`, `ALL_CAPS`, `numeric_only`, and `kvp_label` thresholds remain brittle regardless of the sentence splitting baseline. These are filtering heuristics, not splitting decisions. The recommended threshold changes (P1/P2) are the same regardless of which splitter we use.
+
+---
+
+## Git State
+
+```
+e720c65 (HEAD, main, origin/main) feat(route7): increase rerank_top_k from 20 to 30
+```
+
+No uncommitted changes at session start.

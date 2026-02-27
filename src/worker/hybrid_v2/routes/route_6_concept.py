@@ -1343,6 +1343,8 @@ class ConceptSearchHandler(BaseRouteHandler):
 
         # Build evidence dicts matching _retrieve_sentence_evidence schema
         evidence: List[Dict[str, Any]] = []
+        # Collect seed section paths for proximity boosting
+        seed_sections = {s.get("section_path", "") for s in seeds if s.get("section_path")}
         for r in results:
             parts = []
             if r.get("prev_text"):
@@ -1353,14 +1355,19 @@ class ConceptSearchHandler(BaseRouteHandler):
             passage = " ".join(parts)
 
             chunk_text = (r.get("chunk_text") or "").strip()
+            ev_section = r.get("section_key") or r.get("section_path", "")
+            # Section-proximity boost: same section as seeds gets 1.3× score
+            ev_score = synthetic_score
+            if ev_section and ev_section in seed_sections:
+                ev_score = synthetic_score * 1.3
             evidence.append({
                 "text": passage,
                 "sentence_text": r.get("text", ""),
                 "chunk_text": chunk_text,
-                "score": synthetic_score,
+                "score": ev_score,
                 "document_title": r.get("document_title", "Unknown"),
                 "document_id": r.get("document_id", ""),
-                "section_path": r.get("section_key") or r.get("section_path", ""),
+                "section_path": ev_section,
                 "page": r.get("page"),
                 "sentence_id": r.get("sentence_id", ""),
                 "expansion_source": "entity",

@@ -59,6 +59,7 @@ class Citation:
     document_url: str = ""  # Blob storage URL for clickable links
     page_number: Optional[int] = None  # Page number from Azure DI
     section_path: str = ""  # Section hierarchy (e.g., "Terms > Payment")
+    hierarchical_id: str = ""  # Hierarchical address (e.g., "2.1.3-S5")
     start_offset: Optional[int] = None  # Character offset in document (from DI spans)
     end_offset: Optional[int] = None  # End character offset in document
     # Polygon geometry for pixel-accurate highlighting
@@ -85,6 +86,8 @@ class Citation:
             result["page_number"] = self.page_number
         if self.section_path:
             result["section_path"] = self.section_path
+        if self.hierarchical_id:
+            result["hierarchical_id"] = self.hierarchical_id
         if self.start_offset is not None:
             result["start_offset"] = self.start_offset
         if self.end_offset is not None:
