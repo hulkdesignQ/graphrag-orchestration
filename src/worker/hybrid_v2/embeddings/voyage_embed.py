@@ -69,6 +69,14 @@ MAX_CONTEXT_TOKENS = 30000
 # Approximate tokens per character (conservative estimate for English)
 TOKENS_PER_CHAR_ESTIMATE = 0.25
 
+# ============================================================================
+# API Batch Limits (per contextualized_embed() call)
+# ============================================================================
+# See: https://docs.voyageai.com/docs/contextualized-chunk-embeddings
+MAX_API_INPUTS = 1000       # Max inner lists (documents/bins) per call
+MAX_API_TOTAL_TOKENS = 110000  # Conservative limit (API allows 120K)
+MAX_API_TOTAL_CHUNKS = 16000   # Max chunks across all inputs per call
+
 
 class VoyageEmbedService:
     """
@@ -234,6 +242,11 @@ class VoyageEmbedService:
         contextualized_embed() method which embeds chunks with awareness of
         their surrounding document context.
         
+        Per the Voyage AI docs, all documents are passed in a single API call
+        (or batched into a few calls respecting API limits). Each inner list
+        represents one document's chunks:
+            inputs = [["doc1_s1", "doc1_s2"], ["doc2_s1", "doc2_s2", "doc2_s3"]]
+        
         Args:
             document_chunks: List of documents, where each document is a list
                            of its text chunks. E.g.:
@@ -250,49 +263,81 @@ class VoyageEmbedService:
             
         Note on Large Documents:
             Documents exceeding the 32K token context window are automatically
-            bin-packed into multiple batches. Each bin is embedded separately,
-            then results are concatenated. Cross-bin context is preserved via
-            the knowledge graph (no token overlap needed).
+            bin-packed into multiple bins. Each bin becomes a separate input in
+            the API call, then results are concatenated. Cross-bin context is
+            preserved via the knowledge graph (no token overlap needed).
         """
-        all_embeddings: List[List[List[float]]] = []
-        total_tokens_used = 0
-        total_chunks = 0
-        
-        for doc_chunks in document_chunks:
-            # Check if document needs bin-packing
+        total_chunks = sum(len(dc) for dc in document_chunks)
+
+        # Phase 1: Bin-pack large documents, track mapping
+        # Each entry: (original_doc_idx, bin_chunks)
+        effective_inputs: List[tuple] = []
+        for doc_idx, doc_chunks in enumerate(document_chunks):
             bins = self._bin_pack_chunks(doc_chunks)
-            total_chunks += len(doc_chunks)
-            
-            if len(bins) == 1:
-                # Small document - single API call
-                result = self._client.contextualized_embed(
-                    inputs=[doc_chunks],
-                    model=self.model_name,
-                    input_type="document",
-                    output_dimension=settings.VOYAGE_EMBEDDING_DIM,
+            for bin_chunks in bins:
+                effective_inputs.append((doc_idx, bin_chunks))
+
+        # Phase 2: Batch effective inputs into API calls respecting limits
+        batches: List[List[int]] = []  # Each batch is list of indices into effective_inputs
+        current_batch: List[int] = []
+        current_tokens = 0
+        current_chunks = 0
+
+        for ei_idx, (_, bin_chunks) in enumerate(effective_inputs):
+            bin_tokens = sum(self._estimate_tokens(c) for c in bin_chunks)
+            bin_chunk_count = len(bin_chunks)
+
+            would_exceed = (
+                len(current_batch) + 1 > MAX_API_INPUTS
+                or current_tokens + bin_tokens > MAX_API_TOTAL_TOKENS
+                or current_chunks + bin_chunk_count > MAX_API_TOTAL_CHUNKS
+            )
+
+            if would_exceed and current_batch:
+                batches.append(current_batch)
+                current_batch = []
+                current_tokens = 0
+                current_chunks = 0
+
+            current_batch.append(ei_idx)
+            current_tokens += bin_tokens
+            current_chunks += bin_chunk_count
+
+        if current_batch:
+            batches.append(current_batch)
+
+        # Phase 3: Call API once per batch (ideally just 1 call)
+        effective_embeddings: List[Optional[List[List[float]]]] = [None] * len(effective_inputs)
+        total_tokens_used = 0
+
+        for batch_idx, batch in enumerate(batches):
+            inputs = [effective_inputs[i][1] for i in batch]
+            result = self._client.contextualized_embed(
+                inputs=inputs,
+                model=self.model_name,
+                input_type="document",
+                output_dimension=settings.VOYAGE_EMBEDDING_DIM,
+            )
+
+            # Map results back using the index field for safety
+            for result_item in result.results:
+                ei_idx = batch[result_item.index]
+                effective_embeddings[ei_idx] = result_item.embeddings
+
+            if hasattr(result, 'usage') and result.usage:
+                total_tokens_used += result.usage.total_tokens
+
+            if len(batches) > 1:
+                logger.debug(
+                    f"Embedded batch {batch_idx + 1}/{len(batches)} "
+                    f"with {len(inputs)} document inputs"
                 )
-                all_embeddings.append(result.results[0].embeddings)
-                # Track tokens used
-                if hasattr(result, 'usage') and result.usage:
-                    total_tokens_used += result.usage.total_tokens
-            else:
-                # Large document - embed each bin, concatenate results
-                doc_embeddings: List[List[float]] = []
-                for bin_idx, bin_chunks in enumerate(bins):
-                    result = self._client.contextualized_embed(
-                        inputs=[bin_chunks],
-                        model=self.model_name,
-                        input_type="document",
-                        output_dimension=settings.VOYAGE_EMBEDDING_DIM,
-                    )
-                    doc_embeddings.extend(result.results[0].embeddings)
-                    # Track tokens used
-                    if hasattr(result, 'usage') and result.usage:
-                        total_tokens_used += result.usage.total_tokens
-                    logger.debug(
-                        f"Embedded bin {bin_idx + 1}/{len(bins)} with {len(bin_chunks)} chunks"
-                    )
-                all_embeddings.append(doc_embeddings)
+
+        # Phase 4: Reassemble by original document (maintain chunk order)
+        all_embeddings: List[List[List[float]]] = [[] for _ in document_chunks]
+        for ei_idx, (doc_idx, _) in enumerate(effective_inputs):
+            if effective_embeddings[ei_idx] is not None:
+                all_embeddings[doc_idx].extend(effective_embeddings[ei_idx])
         
         # Log usage (fire-and-forget)
         if total_tokens_used > 0:
@@ -314,7 +359,7 @@ class VoyageEmbedService:
         logger.debug(
             f"Contextual embedded {len(document_chunks)} documents with "
             f"{total_chunks} total chunks ({total_tokens_used} tokens) "
-            f"using Voyage ({self.model_name})"
+            f"in {len(batches)} API call(s) using Voyage ({self.model_name})"
         )
         
         return all_embeddings
