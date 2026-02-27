@@ -573,10 +573,63 @@ These should be applied regardless:
 
 ---
 
+## Session 2 (2026-02-27): Noise Filter + Cypher25 Fix + Reindex
+
+### Noise Audit
+
+Audited all 208 sentences. Found **19 noise items**:
+- 3 HTML artifacts (`<table>`, `<!-- PageBreak -->`)
+- 5 signature-party body text leaks (Source A double-processing)
+- 5 signature structured items (Source D — intentionally kept)
+- 3 SUBTOTAL table rows, 3 form labels
+
+### Fixes Applied
+
+1. **HTML stripping** in `_clean_chunk_text_for_spacy()`:
+   - Strip `<table>...</table>` and unclosed `<table>` tags
+   - Strip `<!-- -->` HTML comments
+
+2. **Signature block section stripping**:
+   - Strip everything from `## Signature Block` onwards (DI-labeled heading)
+   - Prevents body text path (Source A) from double-processing signature content
+   - Source D (structured metadata) still extracts signature party/date sentences
+
+3. **Cypher 25 fix** in `delete_document_chunks()` (neo4j_store.py):
+   - `WITH d, chunks + collect(DISTINCT c2) AS chunks` → split into two WITH clauses
+   - Same fix for `direct_sentences + collect(DISTINCT sent2) AS sentences`
+   - Cypher 25 disallows implicit grouping keys inside aggregation expressions
+
+### Reindex Results
+
+- **207 sentences** (from 208 — noise filter removed HTML/signature leaks)
+- 213 entities, 670 relationships, 55 sections
+- 108 skeleton RELATED_TO edges
+- 207 hierarchical IDs assigned
+- GDS failed (Aura connection timeout from Codespace SIGTERM interrupts) — 0 communities
+
+### Route 7 Benchmark After Reindex
+
+| Metric | Score |
+|--------|-------|
+| Positive pass | 10/10 |
+| Negative pass | 9/9 |
+| Avg containment | 0.86 |
+| Avg F1 | 0.35 |
+| LLM eval (gpt-5.1) | **55/57** |
+
+All 19 questions pass. LLM eval matches the baseline (55/57).
+
+### Codespace SIGKILL Issue
+
+The reindex process consistently gets SIGKILL'd ~80s after start when the API server is also running (combined memory ~6GB peak). Workaround: stop the API server first, then run reindex with SIGTERM handler. The process catches 10+ SIGTERMs but survives as long as system memory is sufficient to avoid SIGKILL escalation.
+
+---
+
 ## Git State
 
 ```
-b20351a (HEAD, main) fix(neo4j-retry): add __getitem__ to _EagerResult for subscript access
+3c61475 (HEAD, main) fix: Cypher25 implicit grouping in delete_document_chunks + noise filters
+869adb7 (origin/main) docs: update handover with wtpsplit benchmark results
+b20351a fix(neo4j-retry): add __getitem__ to _EagerResult for subscript access
 6f4cbdc feat(sentence-extraction): replace spaCy with wtpsplit for sentence splitting
-e720c65 (origin/main) feat(route7): increase rerank_top_k from 20 to 30
 ```
