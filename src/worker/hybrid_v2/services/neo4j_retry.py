@@ -100,6 +100,9 @@ class _EagerResult:
     def __bool__(self):
         return bool(self._records)
 
+    def __getitem__(self, index):
+        return self._records[index]
+
 
 # ── Async EagerResult + Retry Session ────────────────────────────────────────
 
