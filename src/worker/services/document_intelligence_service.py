@@ -913,8 +913,10 @@ class DocumentIntelligenceService:
     _LETTERHEAD_MAX_PARAGRAPHS = 5
     _LETTERHEAD_MAX_WORDS = 50
     # KVP-like paragraph start — stops letterhead collection.
+    # Matches "Invoice #: 12345", "Date: December", and standalone labels
+    # like "TO:", "FROM:", "BILL TO:" (colon at end, nothing after).
     _LETTERHEAD_KVP_STOP_RE = re.compile(
-        r'^[A-Za-z][A-Za-z\s]{0,20}(?:#\s*)?:\s*\S',
+        r'^[A-Za-z][A-Za-z\s]{0,20}(?:#\s*)?:\s*\S|^[A-Za-z][A-Za-z\s]{0,20}:\s*$',
     )
 
     @staticmethod
@@ -1756,7 +1758,9 @@ class DocumentIntelligenceService:
                 if kind == "sections":
                     child_sections.append(idx)
                 elif kind == "paragraphs":
-                    para_indices.append(idx)
+                    # Exclude letterhead paragraphs — they get their own DI unit
+                    if idx not in letterhead_para_indices:
+                        para_indices.append(idx)
                 elif kind == "tables":
                     table_indices.append(idx)
 
@@ -1845,9 +1849,11 @@ class DocumentIntelligenceService:
                 is_first_unit = len(docs) == 0
 
                 # Propagate paragraph-level role to chunk metadata.
-                # If ALL paragraphs share the same role (letterhead,
-                # pageHeader, pageFooter, ...), tag the DI unit so
-                # sentence extraction can handle it specially.
+                # Only propagate roles that sentence extraction handles
+                # specially.  Do NOT propagate structural roles (title,
+                # sectionHeading, signature) — they'd hit SKIP_ROLES and
+                # suppress the entire chunk.
+                _PROPAGATE_ROLES = {"letterhead", "pageHeader", "pageFooter"}
                 chunk_role = ""
                 if para_idx:
                     if letterhead_para_indices and all(
@@ -1857,8 +1863,9 @@ class DocumentIntelligenceService:
                     else:
                         roles = {para_role_map.get(i, "") for i in para_idx}
                         roles.discard("")
-                        if len(roles) == 1:
-                            chunk_role = roles.pop()
+                        propagatable = roles & _PROPAGATE_ROLES
+                        if len(propagatable) == 1:
+                            chunk_role = propagatable.pop()
 
                 docs.append(
                     Document(
@@ -1951,11 +1958,54 @@ class DocumentIntelligenceService:
                 },
             ))
 
+        # Emit a single DI unit for letterhead paragraphs (excluded from
+        # sections above).  Join them into one text block.
+        if letterhead_para_indices:
+            lh_texts = []
+            lh_page = None
+            for i in sorted(letterhead_para_indices):
+                para = paragraphs[i] if i < len(paragraphs) else None
+                if not para:
+                    continue
+                para_content = (getattr(para, "content", "") or "").strip()
+                if para_content:
+                    lh_texts.append(para_content)
+                if lh_page is None:
+                    regions = getattr(para, "bounding_regions", None) or []
+                    if regions:
+                        lh_page = getattr(regions[0], "page_number", None)
+            lh_joined = "\n".join(lh_texts)
+            if lh_joined:
+                docs.append(Document(
+                    text=lh_joined,
+                    metadata={
+                        "group_id": group_id,
+                        "source": "document-intelligence",
+                        "url": url,
+                        "chunk_type": "role",
+                        "section_path": [],
+                        "di_section_path": [],
+                        "di_section_part": "role",
+                        "role": "letterhead",
+                        "tables": [],
+                        "table_count": 0,
+                        "paragraph_count": len(lh_texts),
+                        "key_value_pairs": [],
+                        "kvp_count": 0,
+                        **({"page_number": lh_page} if lh_page is not None else {}),
+                    },
+                ))
+
         # De-dup exact duplicates (can happen when roots include nested sections).
-        seen: set[tuple[str, str]] = set()
+        # Include role in key so orphan/role-tagged units don't collide.
+        seen: set[tuple[str, str, str]] = set()
         unique: List[Document] = []
         for d in docs:
-            key = (str(d.metadata.get("url") or ""), str(d.metadata.get("di_section_path") or ""))
+            key = (
+                str(d.metadata.get("url") or ""),
+                str(d.metadata.get("di_section_path") or ""),
+                str(d.metadata.get("role") or ""),
+            )
             if key in seen:
                 continue
             seen.add(key)

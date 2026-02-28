@@ -115,9 +115,10 @@ _LETTERHEAD_MAX_PARAGRAPHS = 5
 _LETTERHEAD_MAX_WORDS = 50
 
 # KVP-like paragraph start — stops letterhead collection.
-# Matches "Invoice #: 12345", "Date: December", "Bill To: Address", etc.
+# Matches "Invoice #: 12345", "Date: December", "Bill To: Address",
+# and standalone labels like "TO:", "FROM:", "BILL TO:" (colon at end).
 _LETTERHEAD_KVP_STOP_RE = re.compile(
-    r'^[A-Za-z][A-Za-z\s]{0,20}(?:#\s*)?:\s*\S',
+    r'^[A-Za-z][A-Za-z\s]{0,20}(?:#\s*)?:\s*\S|^[A-Za-z][A-Za-z\s]{0,20}:\s*$',
 )
 
 _SIG_UNDERSCORE_RE = re.compile(r'^[_\-=\s]{3,}$')
@@ -147,8 +148,8 @@ def _detect_letterhead_indices(di_units: List[Any]) -> List[int]:
         # Stop at first heading — everything after is real content
         if role in ("title", "sectionHeading"):
             break
-        # Skip already-handled DI roles (headers, footers, page numbers)
-        if role in ("pageHeader", "pageFooter", "pageNumber", "signature"):
+        # Skip already-handled DI roles (headers, footers, page numbers, letterhead)
+        if role in ("pageHeader", "pageFooter", "pageNumber", "signature", "letterhead"):
             continue
         page = meta.get("page_number")
         # Only page 1 (or unknown page)
