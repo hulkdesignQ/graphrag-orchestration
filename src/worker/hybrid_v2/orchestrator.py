@@ -211,6 +211,10 @@ class HybridPipeline:
         self.folder_id = folder_id  # None means search all folders
         self.neo4j_driver = neo4j_driver
 
+        # Set group_id on TrackedLLM for Cosmos DB usage partitioning
+        if hasattr(self.llm, "set_accumulator"):
+            object.__setattr__(self.llm, "_group_id", group_id)
+
         # Cached one-time checks for Neo4j indexes (used by Route 2 Local Search)
         self._textchunk_fulltext_index_checked = False
         
@@ -378,11 +382,20 @@ class HybridPipeline:
         # Step 0: Route the query and determine weight profile
         route, weight_profile = await self.router.route_with_profile(query)
         
+        # Step 0b: Create per-request TokenAccumulator and attach to TrackedLLM
+        from src.core.services.token_accumulator import TokenAccumulator
+        accumulator = TokenAccumulator()
+        if hasattr(self.llm, "set_accumulator"):
+            self.llm.set_accumulator(accumulator)
+            self.llm.set_route(route.value if hasattr(route, "value") else str(route))
+        
         # =======================================================================
         # Modular Handler Dispatch (Jan 2026 refactor)
         # =======================================================================
         if use_modular_handlers and route in self._route_handlers:
             handler = self._route_handlers[route]
+            # Attach accumulator to handler for RouteResult.usage population
+            handler._token_accumulator = accumulator
             # Pass weight profile to Route 5 (other routes ignore keyword args
             # they don't accept via **kwargs, but Route 5 uses it for seed weighting)
             extra_kwargs: Dict[str, Any] = {}
@@ -399,6 +412,12 @@ class HybridPipeline:
                 language=language,
                 **extra_kwargs,
             )
+            # Attach accumulated token usage to the result
+            if result.usage is None and accumulator.call_count > 0:
+                result.usage = accumulator.snapshot()
+            # Detach accumulator to avoid leaking across requests
+            if hasattr(self.llm, "set_accumulator"):
+                self.llm.set_accumulator(None)
             # Convert RouteResult to dict for API compatibility
             return result.to_dict()
         

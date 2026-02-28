@@ -2343,6 +2343,12 @@ Response:"""
                 from src.worker.services.llm_service import LLMService
                 llm_service = LLMService()
                 llm = llm_service._create_llm_client(synthesis_model)
+                # Propagate tracking context from the default LLM to the override
+                if hasattr(self.llm, "_accumulator") and hasattr(llm, "set_accumulator"):
+                    llm.set_accumulator(object.__getattribute__(self.llm, "_accumulator"))
+                    object.__setattr__(llm, "_group_id", object.__getattribute__(self.llm, "_group_id"))
+                    object.__setattr__(llm, "_user_id", object.__getattribute__(self.llm, "_user_id"))
+                    object.__setattr__(llm, "_route", object.__getattribute__(self.llm, "_route"))
                 logger.info(
                     "synthesis_model_override",
                     requested_model=synthesis_model,

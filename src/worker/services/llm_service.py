@@ -11,6 +11,7 @@ import os
 
 from src.core.config import settings
 from src.core.services.usage_tracker import UsageTracker
+from src.core.services.tracked_llm import TrackedLLM
 from src.core.models.usage import UsageType
 
 logger = logging.getLogger(__name__)
@@ -109,8 +110,11 @@ class LLMService:
                         }
                         logger.info(f"Using reasoning_effort={settings.AZURE_OPENAI_REASONING_EFFORT} for {settings.AZURE_OPENAI_DEPLOYMENT_NAME}")
 
-                    self._llm = AzureOpenAI(**llm_kwargs)
-                    logger.info("LLM initialized successfully with managed identity")
+                    self._llm = TrackedLLM(
+                        AzureOpenAI(**llm_kwargs),
+                        deployment_name=settings.AZURE_OPENAI_DEPLOYMENT_NAME,
+                    )
+                    logger.info("LLM initialized successfully with managed identity (tracked)")
                 except Exception as e:
                     logger.error(f"Failed to initialize LLM: {e}")
                     raise
@@ -120,18 +124,22 @@ class LLMService:
             else:
                 logger.info("Using API key authentication for OpenAI")
                 # Initialize LLM with API key
-                self._llm = AzureOpenAI(
-                    engine=settings.AZURE_OPENAI_DEPLOYMENT_NAME,
-                    api_key=settings.AZURE_OPENAI_API_KEY,
-                    azure_endpoint=settings.AZURE_OPENAI_ENDPOINT,
-                    api_version=settings.AZURE_OPENAI_API_VERSION,
-                    temperature=0.0,  # Deterministic outputs for repeatability
+                self._llm = TrackedLLM(
+                    AzureOpenAI(
+                        engine=settings.AZURE_OPENAI_DEPLOYMENT_NAME,
+                        api_key=settings.AZURE_OPENAI_API_KEY,
+                        azure_endpoint=settings.AZURE_OPENAI_ENDPOINT,
+                        api_version=settings.AZURE_OPENAI_API_VERSION,
+                        temperature=0.0,
+                    ),
+                    deployment_name=settings.AZURE_OPENAI_DEPLOYMENT_NAME,
                 )
                 # V1 OpenAI embedding removed — all embeddings use Voyage V2
                 logger.info(f"Embeddings: {settings.VOYAGE_MODEL_NAME} ({settings.VOYAGE_EMBEDDING_DIM}D) — V1 OpenAI fallback removed")
             
             # Configure LlamaIndex global settings (embed_model not set — use Voyage V2 directly)
-            LlamaSettings.llm = self._llm
+            # LlamaSettings needs the raw LlamaIndex LLM; TrackedLLM is for our pipeline calls.
+            LlamaSettings.llm = self._llm._llm if isinstance(self._llm, TrackedLLM) else self._llm
             
             logger.info(
                 f"Initialized Azure OpenAI: LLM={settings.AZURE_OPENAI_DEPLOYMENT_NAME}, "
@@ -181,8 +189,13 @@ class LLMService:
         """
         return self._create_llm_client(settings.HYBRID_SYNTHESIS_MODEL)
 
-    def _create_llm_client(self, deployment_name: str, reasoning_effort: Optional[str] = None) -> Any:
-        """Helper to create LLM instance with correct auth and settings."""
+    def _create_llm_client(self, deployment_name: str, reasoning_effort: Optional[str] = None, group_id: Optional[str] = None, user_id: Optional[str] = None) -> Any:
+        """Helper to create LLM instance with correct auth, settings, and token tracking.
+        
+        Returns a TrackedLLM wrapper that automatically records token usage
+        from every acomplete()/complete() call to both a per-request
+        TokenAccumulator (for RouteResult.usage) and Cosmos DB (for dashboards).
+        """
         from llama_index.llms.azure_openai import AzureOpenAI
         from azure.identity import DefaultAzureCredential, get_bearer_token_provider
         
@@ -222,33 +235,28 @@ class LLMService:
         if reasoning_effort and deployment_name.startswith(("o1", "o3", "o4")):
             llm_kwargs["additional_kwargs"] = {"reasoning_effort": reasoning_effort}
             
-        return AzureOpenAI(**llm_kwargs)
+        raw_llm = AzureOpenAI(**llm_kwargs)
+        return TrackedLLM(
+            raw_llm,
+            deployment_name=deployment_name,
+            group_id=group_id or "unknown",
+            user_id=user_id,
+        )
 
     def generate(self, prompt: str, group_id: Optional[str] = None, user_id: Optional[str] = None, **kwargs) -> str:
-        """Generate a response from the LLM with usage tracking."""
+        """Generate a response from the LLM with usage tracking.
+        
+        Token tracking is handled automatically by the TrackedLLM wrapper.
+        group_id/user_id are set on the wrapper for Cosmos DB partitioning.
+        """
         if not self._llm:
             raise RuntimeError("LLM not initialized")
+        # Update tracking context on the wrapper
+        if group_id and hasattr(self._llm, '_group_id'):
+            object.__setattr__(self._llm, '_group_id', group_id)
+        if user_id and hasattr(self._llm, '_user_id'):
+            object.__setattr__(self._llm, '_user_id', user_id)
         response = self._llm.complete(prompt, **kwargs)
-        
-        # Track usage if metadata available
-        if hasattr(response, 'raw') and response.raw:
-            usage = response.raw.get('usage', {})
-            if usage and (group_id or user_id):
-                # Fire-and-forget: schedule async task but don't await
-                try:
-                    loop = asyncio.get_event_loop()
-                    task = loop.create_task(UsageTracker().log_llm_usage(
-                        partition_id=group_id or "unknown",
-                        user_id=user_id,
-                        model=settings.AZURE_OPENAI_DEPLOYMENT_NAME,
-                        prompt_tokens=usage.get('prompt_tokens', 0),
-                        completion_tokens=usage.get('completion_tokens', 0)
-                    ))
-                    _background_tasks.add(task)
-                    task.add_done_callback(_background_tasks.discard)
-                except Exception:
-                    pass  # Fire-and-forget: ignore failures
-        
         return str(response)
 
     def embed(self, text: str, group_id: Optional[str] = None, user_id: Optional[str] = None) -> list:
