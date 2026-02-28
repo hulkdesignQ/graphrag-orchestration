@@ -900,6 +900,55 @@ class DocumentIntelligenceService:
             return len(after) <= 40
         return False
 
+    # ── Letterhead detection ──────────────────────────────────────
+    _LETTERHEAD_MAX_PARAGRAPHS = 5
+    _LETTERHEAD_MAX_WORDS = 50
+    # KVP-like paragraph start — stops letterhead collection.
+    _LETTERHEAD_KVP_STOP_RE = re.compile(
+        r'^[A-Za-z][A-Za-z\s]{0,20}(?:#\s*)?:\s*\S',
+    )
+
+    @staticmethod
+    def _detect_letterhead_paragraph_indices(
+        paragraphs,  # List[DocumentParagraph]
+    ) -> Set[int]:
+        """Identify letterhead paragraph indices (page 1, before first heading, no role).
+
+        Collects contiguous no-role paragraphs from the document start.
+        Stops at: first heading, first KVP-like paragraph (``Key: Value``),
+        page boundary, or size thresholds.
+
+        Returns a set of paragraph indices.  Empty if no letterhead detected or
+        candidates exceed size thresholds.
+        """
+        candidates: List[int] = []
+        candidate_words = 0
+        for i, para in enumerate(paragraphs):
+            role = getattr(para, "role", None) or ""
+            if role in ("title", "sectionHeading"):
+                break  # first heading — stop
+            if role in ("pageHeader", "pageFooter", "pageNumber", "signature"):
+                continue
+            # Page check via bounding_regions
+            regions = getattr(para, "bounding_regions", None) or []
+            if regions:
+                page = getattr(regions[0], "page_number", None)
+                if page is not None and page != 1:
+                    break  # no longer on page 1
+            content = (getattr(para, "content", "") or "").strip()
+            if not content:
+                continue
+            # Stop at KVP-like content (e.g. "Invoice #: 12345", "Date: Dec")
+            if DocumentIntelligenceService._LETTERHEAD_KVP_STOP_RE.match(content):
+                break
+            candidates.append(i)
+            candidate_words += len(content.split())
+            if len(candidates) > DocumentIntelligenceService._LETTERHEAD_MAX_PARAGRAPHS:
+                return set()
+            if candidate_words > DocumentIntelligenceService._LETTERHEAD_MAX_WORDS:
+                return set()
+        return set(candidates)
+
     def _detect_signature_block_paragraphs(self, result: AnalyzeResult) -> Set[int]:
         """Detect paragraph indices within signature block windows.
 
@@ -1361,6 +1410,7 @@ class DocumentIntelligenceService:
 
         if result.paragraphs:
             sig_block_indices = self._detect_signature_block_paragraphs(result)
+            letterhead_indices = self._detect_letterhead_paragraph_indices(result.paragraphs)
             in_sig_block = False
 
             for i, para in enumerate(result.paragraphs):
@@ -1373,6 +1423,10 @@ class DocumentIntelligenceService:
                 # Skip headers/footers (noise)
                 if role in ("pageHeader", "pageFooter", "pageNumber"):
                     in_sig_block = False
+                    continue
+
+                # Skip letterhead — handled as dedicated sentence node
+                if i in letterhead_indices:
                     continue
 
                 is_sig = i in sig_block_indices
@@ -1541,13 +1595,16 @@ class DocumentIntelligenceService:
         paragraphs: List[DocumentParagraph],
         tables: List[DocumentTable],
     ) -> str:
+        letterhead_indices = self._detect_letterhead_paragraph_indices(paragraphs)
         lines: List[str] = []
-        for para in paragraphs:
+        for i, para in enumerate(paragraphs):
             if not getattr(para, "content", None):
                 continue
             role = getattr(para, "role", None) or ""
             content = str(para.content).strip()
             if role in ("pageHeader", "pageFooter", "pageNumber"):
+                continue
+            if i in letterhead_indices:
                 continue
             if role == "title":
                 lines.append(f"# {content}")

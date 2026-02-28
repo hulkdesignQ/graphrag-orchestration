@@ -11,6 +11,7 @@ Content taxonomy (from ARCHITECTURE_HYBRID_SKELETON_2026-02-11.md):
     - Body text → wtpsplit sentence splitting
     - Table rows → linearized from DI metadata (source="table_row")
     - Figure captions → from DI metadata (source="figure_caption")
+    - Letterhead → page-1 pre-heading heuristic (source="letterhead")
   NOT embedded (metadata only):
     - KVPs, titles, headers/footers, barcodes, selection marks, signatures
 
@@ -109,12 +110,67 @@ SUBTOTAL_RE = re.compile(
 )
 
 
+# Max letterhead paragraphs / words before we treat it as real body text
+_LETTERHEAD_MAX_PARAGRAPHS = 5
+_LETTERHEAD_MAX_WORDS = 50
+
+# KVP-like paragraph start — stops letterhead collection.
+# Matches "Invoice #: 12345", "Date: December", "Bill To: Address", etc.
+_LETTERHEAD_KVP_STOP_RE = re.compile(
+    r'^[A-Za-z][A-Za-z\s]{0,20}(?:#\s*)?:\s*\S',
+)
+
 _SIG_UNDERSCORE_RE = re.compile(r'^[_\-=\s]{3,}$')
 _SIG_FIELD_LABEL_RE = re.compile(
     r'^(?:Date[d]?|Signature[s]?|Sign|Initials?|Print(?:ed)?|'
     r'Title[s]?|Name[s]?|N/?A|By)\s*[:\s]*$',
     re.IGNORECASE,
 )
+
+
+def _detect_letterhead_indices(di_units: List[Any]) -> List[int]:
+    """Identify letterhead paragraphs: page 1, before first heading, no role.
+
+    Collects contiguous no-role paragraphs from the document start.
+    Stops at: first heading, first KVP-like paragraph (``Key: Value``),
+    page boundary, or size thresholds.
+
+    Returns ordered list of unit indices that form the letterhead block.
+    Empty list if no letterhead detected or candidates exceed size thresholds.
+    """
+    candidates: List[int] = []
+    candidate_texts: List[str] = []
+
+    for i, unit in enumerate(di_units):
+        meta = getattr(unit, "metadata", None) or {}
+        role = meta.get("role", "")
+        # Stop at first heading — everything after is real content
+        if role in ("title", "sectionHeading"):
+            break
+        # Skip already-handled DI roles (headers, footers, page numbers)
+        if role in ("pageHeader", "pageFooter", "pageNumber", "signature"):
+            continue
+        page = meta.get("page_number")
+        # Only page 1 (or unknown page)
+        if page is not None and page != 1:
+            break
+        text = (getattr(unit, "text", "") or "").strip()
+        if not text:
+            continue
+        # Stop at KVP-like content (e.g. "Invoice #: 12345", "Date: Dec")
+        if _LETTERHEAD_KVP_STOP_RE.match(text):
+            break
+        candidates.append(i)
+        candidate_texts.append(text)
+        if len(candidates) > _LETTERHEAD_MAX_PARAGRAPHS:
+            return []  # Too many — likely real body text
+
+    if not candidates:
+        return []
+    total_words = sum(len(t.split()) for t in candidate_texts)
+    if total_words > _LETTERHEAD_MAX_WORDS:
+        return []  # Too long — not letterhead
+    return candidates
 
 
 def _synthesize_signature_sentences(sig_block: dict) -> List[str]:
@@ -467,7 +523,55 @@ def extract_sentences_from_di_units(
     _first_header_captured = False
     _first_footer_captured = False
 
-    for unit in di_units:
+    # ─── Source F: Letterhead detection (page 1, before first heading) ──
+    # DI doesn't label letterhead specifically — it comes through as regular
+    # paragraphs with no role.  Detect top-of-page-1 orphaned text and
+    # consolidate into one sentence with source="letterhead".
+    letterhead_indices = set(_detect_letterhead_indices(di_units))
+    if letterhead_indices:
+        lh_texts = []
+        lh_page = None
+        for li in sorted(letterhead_indices):
+            u = di_units[li]
+            lh_texts.append((getattr(u, "text", "") or "").strip())
+            if lh_page is None:
+                lh_page = (getattr(u, "metadata", None) or {}).get("page_number")
+        lh_joined = ". ".join(t.rstrip(".") for t in lh_texts if t)
+        if lh_joined:
+            text_key = lh_joined.strip().lower()
+            if text_key not in seen_texts:
+                sent_id = f"{doc_id}_sent_{global_idx}"
+                seen_texts[text_key] = sent_id
+                section_key = "[Letterhead]"
+                idx_in_section = section_counters.get(section_key, 0)
+                section_counters[section_key] = idx_in_section + 1
+                all_sentences.append({
+                    "id": sent_id,
+                    "text": lh_joined,
+                    "chunk_id": "",
+                    "document_id": doc_id,
+                    "source": "letterhead",
+                    "index_in_chunk": 0,
+                    "index_in_doc": global_idx,
+                    "section_path": "[Letterhead]",
+                    "page": lh_page,
+                    "confidence": 1.0,
+                    "tokens": len(lh_joined.split()),
+                    "parent_text": "",
+                    "index_in_section": idx_in_section,
+                })
+                global_idx += 1
+        logger.info(
+            "letterhead_detected",
+            doc_id=doc_id,
+            paragraph_count=len(letterhead_indices),
+            text_preview=lh_joined[:100] if lh_joined else "",
+        )
+
+    for unit_idx, unit in enumerate(di_units):
+        # Skip letterhead paragraphs — already consolidated above
+        if unit_idx in letterhead_indices:
+            continue
         meta = getattr(unit, "metadata", None) or {}
         unit_text = getattr(unit, "text", "") or ""
 
