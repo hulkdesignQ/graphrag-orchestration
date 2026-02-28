@@ -1,6 +1,10 @@
 # Architecture Design: Hybrid LazyGraphRAG + HippoRAG 2 System
 
-**Last Updated:** February 22, 2026
+**Last Updated:** February 28, 2026
+
+**Recent Updates (February 28, 2026):**
+- ✅ **Sentence Source Tagging — Signature, Header/Footer, Letterhead:** Three-layer architecture propagates DI paragraph roles through the section-aware pipeline. Signature raw lines joined into single sentence, page headers/footers extracted at first occurrence, letterhead detected via spatial heuristic. Reindex: 197 sentences (180 paragraph + 12 table_row + 2 page_footer + 2 signature_party + 1 letterhead). See [§36.7](#367-sentence-source-tagging--signature-headerfooter-letterhead).
+- ✅ **Indexing Pipeline Cleanup:** Removed dead `:Figure` node pipeline (−213 lines), added table caption extraction, token/credit tracking system. See [§36](#36-indexing-pipeline-cleanup--usage-based-credit-system-february-28-2026).
 
 **Recent Updates (February 22, 2026):**
 - ✅ **Route 6 Q-D Bug Audit — 22/30 → 25/30:** First LLM-judged Q-D benchmark on Route 6 found three failure types. Four bugs fixed (R6-VIII enumeration truncation, R6-IX no comparison rule, R6-X chunk_text discarded, R6-XI entity counting needs graph traversal). Deployed via commits `f84896c` + `07d2c96`. chunk_text synthesis attempt (`a497305`) catastrophically regressed Q-D and Q-G by cutting off retrieved sentences after byte 700; fully reverted. Final Q-D: 25/30. Q-G stable: 52/57. See [§33.22](#3322-route-6-q-d-bug-audit--four-bugs-found-and-fixed-2026-02-22).
@@ -10647,3 +10651,82 @@ Plan Cards:
 ```
 
 **Commits:** `a68bad6` (GDS tracking + dashboard + frontend credit fields)
+
+### 36.7. Sentence Source Tagging — Signature, Header/Footer, Letterhead
+
+**Problem:** Azure Document Intelligence returns raw paragraphs with structural roles (`pageHeader`, `pageFooter`, `title`, `sectionHeading`, `signature`), but the `_build_section_aware_documents()` pipeline strips these roles when grouping paragraphs into section-based DI units. Downstream sentence extraction receives DI units with no `role` metadata, so all content becomes `source="paragraph"` — losing the ability to distinguish structural elements from body text.
+
+Specific issues:
+1. **Signature blocks** — Individual raw lines ("By:", "Date:", party names) were indexed as separate noise sentences
+2. **Page headers/footers** — Repeated on every page but never extracted as searchable first-occurrence sentences
+3. **Letterhead** — Company name, address, phone/fax at document top, absorbed into section_0 body text, polluting entity extraction and retrieval
+
+**Solution — Three-layer architecture:**
+
+```
+Layer 1: document_intelligence_service.py   (raw DI paragraph → role detection)
+  ├── _detect_letterhead_paragraph_indices() — Heuristic: page 1, before first heading, no role
+  │   Stop conditions: title/sectionHeading role, KVP pattern (Key: Value or Label:), page boundary
+  ├── _detect_signature_block_paragraphs()  — Existing: handwritten spans + keyword anchors
+  └── Role from DI: pageHeader, pageFooter, title, sectionHeading, pageNumber
+
+Layer 2: _build_section_aware_documents()   (role → DI unit metadata propagation)
+  ├── Letterhead paragraphs EXCLUDED from section walk's para_indices
+  ├── Letterhead emitted as separate DI unit with role="letterhead"
+  ├── Orphan pageHeader/pageFooter paragraphs (not in any section) emitted as DI units
+  ├── Only _PROPAGATE_ROLES {"letterhead","pageHeader","pageFooter"} written to metadata
+  │   (NOT title/sectionHeading — they'd hit SKIP_ROLES and suppress entire chunks)
+  └── De-dup key includes role to prevent collision of role-tagged units with same path
+
+Layer 3: extract_sentences_from_di_units()  (DI unit → Sentence node creation)
+  ├── role="pageHeader" + first occurrence → source="page_header", section="[Page Header]"
+  ├── role="pageFooter" + first occurrence → source="page_footer", section="[Page Footer]"
+  ├── role="letterhead"                   → source="letterhead",   section="[Letterhead]"
+  └── signature_block metadata            → source="signature_party" (joined raw lines)
+```
+
+**Source tag pipeline downstream effects:**
+
+| Source | Embedding Prefix | Denoiser Bypass | Special Retrieval |
+|--------|-----------------|-----------------|-------------------|
+| `paragraph` | (none) | No — full noise check | — |
+| `table_row` | `[Table row]` | Yes | — |
+| `table_caption` | `[Table caption]` | Yes | — |
+| `signature_party` | `[Signature]` | Yes | WHERE source='signature_party' |
+| `page_header` | `[Page header]` | Yes | — |
+| `page_footer` | `[Page footer]` | Yes | — |
+| `letterhead` | `[Letterhead]` | Yes | — |
+
+**KVP stop regex** (critical for letterhead boundary detection):
+```
+^[A-Za-z][A-Za-z\s]{0,20}(?:#\s*)?:\s*\S    — "Invoice #: 12345", "Date: December"
+^[A-Za-z][A-Za-z\s]{0,20}:\s*$               — "TO:", "FROM:", "BILL TO:"
+```
+Both branches required — without the standalone label match, contoso invoice collects 9 paragraphs (past the 5-paragraph letterhead limit) because `"TO:"` has no content after the colon.
+
+**Reindex results (test-5pdfs-v2-fix2, 5 PDFs):**
+
+| Source | Count | Notes |
+|--------|-------|-------|
+| paragraph | 180 | No regression from 194 baseline (14 removed by prior denoise) |
+| table_row | 12 | Unchanged |
+| page_footer | 2 | **New** — builders warranty + contoso invoice |
+| signature_party | 2 | Unchanged (joined raw lines format) |
+| letterhead | 1 | **New** — contoso invoice company info |
+| **Total** | **197** | +3 from structured extraction |
+
+**Commits:**
+- `c0a37ad` — fix: replace brittle signature sentence synthesis with raw lines
+- `b6e969a` — fix: join signature raw lines into single sentence
+- `36d9e1a` — feat: attach signature metadata, extract first-occurrence headers/footers
+- `0037851` — Remove dead :Figure node pipeline from V2 indexing
+- `db54a44` — feat: detect letterhead paragraphs and extract as dedicated sentence
+- `8c1e12d` — Extract table captions as Sentence nodes (source=table_caption)
+- `f12062a` — fix: propagate paragraph roles through section-aware DI path
+- `b8fb85d` — fix: letterhead detection now works in section-aware DI path
+
+**Key files:**
+- `sentence_extraction_service.py` — All sentence creation, noise filtering, role-based extraction
+- `document_intelligence_service.py` — Letterhead/signature detection, role propagation to DI units
+- `lazygraphrag_pipeline.py` — Embedding prefixes by source
+- `route_5_unified.py` — `_STRUCTURED_SOURCES` denoiser bypass set
