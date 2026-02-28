@@ -214,6 +214,11 @@ class ChatUsage(BaseModel):
     prompt_tokens: int
     completion_tokens: int
     total_tokens: int
+    rerank_tokens: int = 0
+    embed_tokens: int = 0
+    credits_used: int = 0
+    credits_remaining: Optional[int] = None
+    credits_limit: Optional[int] = None
 
 
 class ChatResponse(BaseModel):
@@ -352,6 +357,11 @@ async def _execute_query(
                 "prompt_tokens": usage_raw.get("prompt_tokens", 0),
                 "completion_tokens": usage_raw.get("completion_tokens", 0),
                 "total_tokens": usage_raw.get("total_tokens", 0),
+                "rerank_tokens": usage_raw.get("rerank_tokens", 0),
+                "embed_tokens": usage_raw.get("embed_tokens", 0),
+                "credits_used": usage_raw.get("credits_used", 0),
+                "credits_remaining": usage_raw.get("credits_remaining"),
+                "credits_limit": usage_raw.get("credits_limit"),
             },
             "thoughts": thoughts,
             "context": result.get("context", {}),

@@ -2108,6 +2108,7 @@ Output:
         try:
             # 1. Setup GDS session (Aura Serverless Graph Analytics)
             logger.info(f"📊 Connecting to Aura GDS session: {session_name}")
+            session_start = time.time()
             api_creds = AuraAPICredentials(
                 client_id=settings.AURA_DS_CLIENT_ID,
                 client_secret=settings.AURA_DS_CLIENT_SECRET
@@ -2375,6 +2376,28 @@ Output:
                 logger.info(f"🧹 Deleted GDS session: {session_name}")
             except Exception as cleanup_err:
                 logger.warning(f"⚠️  Could not delete session {session_name}: {cleanup_err}")
+            
+            # Track GDS usage (billed by memory-hours)
+            session_duration = int(time.time() - session_start)
+            algorithms_run = [a for a, v in [
+                ("knn", stats["knn_edges"]), ("louvain", stats["communities"]),
+                ("pagerank", stats["pagerank_nodes"]),
+            ] if v > 0]
+            try:
+                from src.core.services.usage_tracker import get_usage_tracker
+                from src.core.services.credit_schedule import compute_gds_credits
+                tracker = get_usage_tracker()
+                gds_credits = compute_gds_credits(memory_gb=2, duration_seconds=session_duration)
+                await tracker.log_gds_usage(
+                    partition_id=group_id,
+                    memory_gb=2,
+                    duration_seconds=session_duration,
+                    nodes_processed=stats.get("pagerank_nodes", 0),
+                    algorithms_run=algorithms_run,
+                    cost_estimate_usd=gds_credits * 0.001,
+                )
+            except Exception as track_err:
+                logger.warning(f"⚠️  GDS usage tracking failed: {track_err}")
             
             # Mark GDS as freshly computed for this group
             self.neo4j_store.clear_gds_stale(group_id)

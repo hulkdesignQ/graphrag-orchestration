@@ -13,6 +13,7 @@ class UsageType(str, Enum):
     EMBEDDING = "embedding"
     DOC_INTEL = "doc_intel"
     RERANK = "rerank"
+    GDS_SESSION = "gds_session"
 
 
 class UsageRecord(BaseModel):
@@ -41,6 +42,12 @@ class UsageRecord(BaseModel):
     # Document Intelligence-specific fields
     pages_analyzed: Optional[int] = Field(None, description="Pages processed by Azure DI")
     document_id: Optional[str] = Field(None, description="Document ID")
+    
+    # GDS session-specific fields
+    gds_memory_gb: Optional[int] = Field(None, description="GDS session memory tier in GB")
+    gds_duration_seconds: Optional[int] = Field(None, description="GDS session wall-clock duration")
+    gds_algorithms_run: Optional[list[str]] = Field(None, description="GDS algorithms executed")
+    gds_nodes_processed: Optional[int] = Field(None, description="Nodes in GDS projection")
     
     # Common fields
     route: Optional[str] = Field(None, description="Route used (route_2, route_3, route_4)")

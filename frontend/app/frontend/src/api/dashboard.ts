@@ -17,6 +17,7 @@ export interface PlanLimits {
     max_documents: number;
     max_document_size_mb: number;
     max_storage_gb: number;
+    monthly_credits: number | null;
     graphrag_enabled: boolean;
     advanced_analytics: boolean;
     custom_models: boolean;
@@ -54,6 +55,9 @@ export interface UsageStats {
     documents_limit: number;
     storage_used_gb: number;
     storage_limit_gb: number;
+    credits_used_month: number;
+    credits_limit_month: number | null;
+    credits_remaining: number | null;
     recent_queries: Array<Record<string, any>>;
     top_topics: Array<Record<string, any>>;
 }

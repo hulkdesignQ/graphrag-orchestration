@@ -61,6 +61,11 @@ _RERANK_DEFAULT = 0.05
 # ============================================================================
 DOC_INTEL_PRICE_PER_PAGE: float = 0.01  # $0.01/page for prebuilt-layout
 
+# ============================================================================
+# Neo4j Aura Serverless GDS — per memory-hour
+# ============================================================================
+GDS_PRICE_PER_HOUR_PER_GB: float = 0.035  # ~$0.07/hr for a 2 GB session
+
 
 # ============================================================================
 # Credit computation helpers
@@ -106,6 +111,13 @@ def compute_rerank_credits(
 def compute_doc_intel_credits(pages: int) -> int:
     """Compute credits for a Document Intelligence call."""
     cost = pages * DOC_INTEL_PRICE_PER_PAGE
+    return _usd_to_credits(cost)
+
+
+def compute_gds_credits(memory_gb: int, duration_seconds: int) -> int:
+    """Compute credits for a GDS session (billed by memory-hours)."""
+    hours = duration_seconds / 3600
+    cost = memory_gb * hours * GDS_PRICE_PER_HOUR_PER_GB
     return _usd_to_credits(cost)
 
 

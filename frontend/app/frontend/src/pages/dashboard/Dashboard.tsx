@@ -100,6 +100,7 @@ const Dashboard = () => {
 
     const queryDay = usePct(usage.queries_today, usage.queries_limit_day);
     const queryMonth = usePct(usage.queries_this_month, usage.queries_limit_month);
+    const credits = usePct(usage.credits_used_month, usage.credits_limit_month ?? 0);
     const docs = usePct(usage.documents_count, usage.documents_limit);
     const storage = usePct(usage.storage_used_gb, usage.storage_limit_gb);
 
@@ -148,6 +149,17 @@ const Dashboard = () => {
                 </div>
 
                 <div className={styles.statCard}>
+                    <span className={styles.statLabel}>Credits Used</span>
+                    <span className={styles.statValue}>{usage.credits_used_month.toLocaleString()}</span>
+                    <span className={styles.statSubtext}>
+                        of {usage.credits_limit_month != null ? usage.credits_limit_month.toLocaleString() : "∞"} monthly credits
+                    </span>
+                    <div className={styles.statBar}>
+                        <div className={`${styles.statBarFill} ${credits.color}`} style={{ width: `${credits.pct}%` }} />
+                    </div>
+                </div>
+
+                <div className={styles.statCard}>
                     <span className={styles.statLabel}>Documents</span>
                     <span className={styles.statValue}>{usage.documents_count}</span>
                     <span className={styles.statSubtext}>of {usage.documents_limit} limit</span>
@@ -177,6 +189,7 @@ const Dashboard = () => {
                                 <th>Route</th>
                                 <th>Model</th>
                                 <th>Tokens</th>
+                                <th>Credits</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -186,6 +199,7 @@ const Dashboard = () => {
                                     <td>{q.route || "—"}</td>
                                     <td>{q.model || "—"}</td>
                                     <td>{q.total_tokens ?? "—"}</td>
+                                    <td>{q.credits_used ?? "—"}</td>
                                 </tr>
                             ))}
                         </tbody>
@@ -228,6 +242,11 @@ const Dashboard = () => {
                                     <p className={styles.planCardDetail}>{info.queries_per_day} queries/day</p>
                                     <p className={styles.planCardDetail}>{info.max_documents} documents</p>
                                     <p className={styles.planCardDetail}>{info.max_storage_gb} GB storage</p>
+                                    <p className={styles.planCardDetail}>
+                                        {info.monthly_credits != null
+                                            ? `${info.monthly_credits.toLocaleString()} credits/mo`
+                                            : "Unlimited credits"}
+                                    </p>
                                     <p className={styles.planCardDetail}>
                                         {info.graphrag_enabled ? "✅ GraphRAG" : "❌ GraphRAG"}
                                     </p>

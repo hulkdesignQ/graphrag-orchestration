@@ -184,6 +184,46 @@ class UsageTracker:
             await self._write_record(record)
         except Exception as e:
             logger.warning("rerank_usage_tracking_failed", error=str(e))
+
+    async def log_gds_usage(
+        self,
+        partition_id: str,
+        memory_gb: int,
+        duration_seconds: int,
+        nodes_processed: int = 0,
+        algorithms_run: Optional[list[str]] = None,
+        user_id: Optional[str] = None,
+        cost_estimate_usd: Optional[float] = None,
+    ) -> None:
+        """
+        Log GDS session usage (Aura Serverless billed by memory-hours).
+
+        Fire-and-forget: Does not raise exceptions or block the caller.
+        """
+        try:
+            record = UsageRecord(
+                partition_id=partition_id,
+                user_id=user_id,
+                usage_type=UsageType.GDS_SESSION,
+                gds_memory_gb=memory_gb,
+                gds_duration_seconds=duration_seconds,
+                gds_algorithms_run=algorithms_run or [],
+                gds_nodes_processed=nodes_processed,
+                cost_estimate_usd=cost_estimate_usd,
+            )
+
+            logger.info(
+                "gds_usage_tracked",
+                partition_id=partition_id,
+                memory_gb=memory_gb,
+                duration_seconds=duration_seconds,
+                algorithms=algorithms_run,
+                nodes=nodes_processed,
+            )
+
+            await self._write_record(record)
+        except Exception as e:
+            logger.warning("gds_usage_tracking_failed", error=str(e))
     
     async def _write_record(self, record: UsageRecord) -> None:
         """

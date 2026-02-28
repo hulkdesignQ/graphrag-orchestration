@@ -71,6 +71,10 @@ class UsageStatsResponse(BaseModel):
     documents_limit: int = 0
     storage_used_gb: float = 0.0
     storage_limit_gb: float = 0.0
+    # Credit system
+    credits_used_month: int = 0
+    credits_limit_month: Optional[int] = None
+    credits_remaining: Optional[int] = None
     # Recent activity
     recent_queries: List[Dict[str, Any]] = []
     top_topics: List[Dict[str, Any]] = []
@@ -221,6 +225,7 @@ async def get_my_usage(
                 "model": r.get("model", ""),
                 "route": r.get("route", ""),
                 "total_tokens": r.get("total_tokens", 0),
+                "credits_used": r.get("credits_used", 0),
             }
             for r in sorted_records
         ]
@@ -237,6 +242,18 @@ async def get_my_usage(
     except Exception:
         logger.warning("dashboard_usage_fetch_failed", user_id=user_id)
 
+    # Read credit balance from Redis
+    credits_used_month = 0
+    credits_limit_month: Optional[int] = None
+    credits_remaining: Optional[int] = None
+    try:
+        credit_info = await enforcer.check_credit_limits(user_id)
+        credits_used_month = credit_info.get("credits_used", 0)
+        credits_limit_month = credit_info.get("credits_limit")
+        credits_remaining = credit_info.get("credits_remaining")
+    except Exception:
+        logger.warning("dashboard_credit_fetch_failed", user_id=user_id)
+
     return UsageStatsResponse(
         queries_today=usage["queries_today"],
         queries_this_month=usage["queries_this_month"],
@@ -246,6 +263,9 @@ async def get_my_usage(
         documents_limit=limits.max_documents,
         storage_used_gb=storage_used_gb,
         storage_limit_gb=limits.max_storage_gb,
+        credits_used_month=credits_used_month,
+        credits_limit_month=credits_limit_month,
+        credits_remaining=credits_remaining,
         recent_queries=recent_queries,
         top_topics=[],
     )
@@ -279,6 +299,7 @@ async def get_available_plans(
             "queries_per_month": limits.queries_per_month,
             "max_documents": limits.max_documents,
             "max_storage_gb": limits.max_storage_gb,
+            "monthly_credits": limits.monthly_credits,
             "graphrag_enabled": limits.graphrag_enabled,
             "advanced_analytics": limits.advanced_analytics,
             "custom_models": limits.custom_models,
