@@ -118,20 +118,23 @@ _SIG_FIELD_LABEL_RE = re.compile(
 
 
 def _synthesize_signature_sentences(sig_block: dict) -> List[str]:
-    """Return substantive lines from a structured signature block.
+    """Return a single joined sentence from a structured signature block.
 
     Instead of constructing a template sentence from parsed party/role data
-    (which is brittle and depends on regex extraction), we return the **raw
-    paragraph lines** — filtering only underscore filler and bare field labels.
+    (which is brittle and depends on regex extraction), we join the **raw
+    paragraph lines** into one sentence — filtering only underscore filler
+    and bare field labels.
 
-    Each returned line is stored as a separate sentence with
-    ``source="signature_party"``, which bypasses the noise-denoiser and gets
-    a ``[Signature Block]`` embedding context prefix, making even short
-    fragments like party names retrievable via semantic search.
+    Joining keeps all fragments (party names, roles, dates) in one embedding
+    vector so semantic search can match any combination (e.g. "who is the
+    authorized representative" matches the sentence containing both the name
+    and the role).  The sentence is stored with ``source="signature_party"``
+    which bypasses the noise-denoiser and gets a ``[Signature Block]``
+    embedding context prefix.
     """
     raw_lines = sig_block.get("raw_lines") or []
 
-    sentences: List[str] = []
+    parts: List[str] = []
     for line in raw_lines:
         line = line.strip()
         if not line:
@@ -140,9 +143,13 @@ def _synthesize_signature_sentences(sig_block: dict) -> List[str]:
             continue
         if _SIG_FIELD_LABEL_RE.match(line):
             continue
-        sentences.append(line)
+        parts.append(line)
 
-    return sentences
+    if not parts:
+        return []
+    # Strip trailing periods before joining to avoid "Ltd.." doubles
+    joined = ". ".join(p.rstrip(".") for p in parts)
+    return [joined]
 
 
 def _is_noise_sentence(
