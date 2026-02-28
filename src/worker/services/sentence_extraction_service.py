@@ -109,35 +109,38 @@ SUBTOTAL_RE = re.compile(
 )
 
 
-def _synthesize_signature_sentences(sig_block: dict) -> List[str]:
-    """Synthesize semantically meaningful sentences from a structured signature block.
+_SIG_UNDERSCORE_RE = re.compile(r'^[_\-=\s]{3,}$')
+_SIG_FIELD_LABEL_RE = re.compile(
+    r'^(?:Date[d]?|Signature[s]?|Sign|Initials?|Print(?:ed)?|'
+    r'Title[s]?|Name[s]?|N/?A|By)\s*[:\s]*$',
+    re.IGNORECASE,
+)
 
-    Returns a list of sentences (typically one) that capture all parties and
-    the signed date in natural language so they are retrievable via semantic search.
+
+def _synthesize_signature_sentences(sig_block: dict) -> List[str]:
+    """Return substantive lines from a structured signature block.
+
+    Instead of constructing a template sentence from parsed party/role data
+    (which is brittle and depends on regex extraction), we return the **raw
+    paragraph lines** — filtering only underscore filler and bare field labels.
+
+    Each returned line is stored as a separate sentence with
+    ``source="signature_party"``, which bypasses the noise-denoiser and gets
+    a ``[Signature Block]`` embedding context prefix, making even short
+    fragments like party names retrievable via semantic search.
     """
-    parties = sig_block.get("parties") or []
-    signed_date = (sig_block.get("signed_date") or "").strip()
+    raw_lines = sig_block.get("raw_lines") or []
 
     sentences: List[str] = []
-
-    if parties:
-        # Build one sentence listing all signing parties with their roles.
-        party_parts = []
-        for p in parties:
-            name = (p.get("name") or "").strip()
-            role = (p.get("role") or "").strip()
-            if name and role:
-                party_parts.append(f"{name} as {role}")
-            elif name:
-                party_parts.append(name)
-        if party_parts:
-            joined = ", ".join(party_parts[:-1]) + " and " + party_parts[-1] if len(party_parts) > 1 else party_parts[0]
-            if signed_date:
-                sentences.append(f"This document was signed by {joined} on {signed_date}.")
-            else:
-                sentences.append(f"This document was signed by {joined}.")
-    elif signed_date:
-        sentences.append(f"This document was signed on {signed_date}.")
+    for line in raw_lines:
+        line = line.strip()
+        if not line:
+            continue
+        if _SIG_UNDERSCORE_RE.match(line):
+            continue
+        if _SIG_FIELD_LABEL_RE.match(line):
+            continue
+        sentences.append(line)
 
     return sentences
 
@@ -342,7 +345,7 @@ def extract_sentences_from_chunk(
                 "text": sig_text,
                 "chunk_id": chunk_id,
                 "document_id": document_id,
-                "source": "signature_block",
+                "source": "signature_party",
                 "index_in_chunk": idx,
                 "section_path": section_path,
                 "page": metadata.get("page_number"),
@@ -590,7 +593,7 @@ def extract_sentences_from_di_units(
                         "text": sig_text,
                         "chunk_id": "",
                         "document_id": doc_id,
-                        "source": "signature_block",
+                        "source": "signature_party",
                         "index_in_chunk": 0,
                         "index_in_doc": global_idx,
                         "section_path": section_path,
