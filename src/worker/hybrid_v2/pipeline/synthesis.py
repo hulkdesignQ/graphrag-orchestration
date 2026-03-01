@@ -2225,7 +2225,7 @@ Response:"""
                 
                 # Extract section information from metadata
                 meta = chunk.get("metadata", {})
-                section_path = meta.get("section_path") or meta.get("di_section_path")
+                section_path = meta.get("section_path") or meta.get("di_section_path") or meta.get("section_path_key")
                 section_str = "General"
                 if isinstance(section_path, list) and section_path:
                     section_str = " > ".join(str(x) for x in section_path if x)
