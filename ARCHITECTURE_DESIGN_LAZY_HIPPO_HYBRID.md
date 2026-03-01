@@ -10730,3 +10730,88 @@ Both branches required — without the standalone label match, contoso invoice c
 - `document_intelligence_service.py` — Letterhead/signature detection, role propagation to DI units
 - `lazygraphrag_pipeline.py` — Embedding prefixes by source
 - `route_5_unified.py` — `_STRUCTURED_SOURCES` denoiser bypass set
+
+---
+
+## 37. DI Chunking Quality: Cross-Page, Dedup & Sentence Splitting Fixes (March 2026)
+
+**Problem:** Quality audit of the 5 benchmark PDFs (test-5pdfs-v2-fix2) revealed 10 surface issues across P1–P4 priorities, traced to 5 systemic problems in the three-layer pipeline (Azure DI → section-aware docs → sentence extraction):
+
+| ID | Issue | Root Cause | Affected Docs |
+|----|-------|-----------|---------------|
+| SP1 | Near-duplicate sentences | All sections walked as roots — child sections emitted twice | BUILDERS WARRANTY, purchase_contract |
+| SP2 | Cross-page content misattributed to page 1 | `emit_chunk` took page from FIRST paragraph's bounding_regions only | purchase_contract (page 2+3 → all page 1) |
+| SP3 | Mega-signature (2700+ chars) swallowing body text | Signature downward walk crossed section boundaries; upward walk missed ALL-CAPS implicit headings | PROPERTY MANAGEMENT (AGENT'S FEES trapped) |
+| SP4 | Orphan paragraphs dropped | Only `pageHeader`/`pageFooter` rescued — address, invoice#, customer info lost | contoso_invoice, purchase_contract |
+| SP5 | Paragraph breaks preserved in sentences | `\n\n` from DI not split by sentence splitter | purchase_contract (7 sentences with embedded newlines) |
+
+**Solution — 9 generic fixes (no document-specific logic):**
+
+All fixes operate on structural patterns from Azure DI output, not on document-specific content.
+
+| Fix | Layer | What It Does |
+|-----|-------|-------------|
+| **A1** True root detection | DI service | Builds `child_set` from section `elements` refs; only walks true roots. Parent sections with children use paragraph-level spans (not section-level) to avoid text overlap. |
+| **A2** Per-paragraph page attribution | DI service + sentence extraction | DI service emits `paragraph_pages` list (offset, length, page) in unit metadata. `_page_for_sentence()` maps sentence position → paragraph span → correct page. |
+| **A3** Signature section boundary stops | DI service | Downward walk stops at `sectionHeading`/`title` roles (prevents signature window bleeding into next section). |
+| **A3b** ALL-CAPS implicit heading stop | DI service | Upward walk stops at short (3–60 char) ALL-CAPS paragraphs that DI didn't tag as headings (e.g. "AGENT'S FEES"). |
+| **A4** Rescue all orphan paragraphs | DI service | Removed `_ORPHAN_ROLES` filter — ALL unvisited paragraphs emitted (not just header/footer). Tags `chunk_type="orphan"` for non-role paragraphs. |
+| **A5** Letterhead span exclusion | DI service | When section elements include a letterhead paragraph, uses paragraph-level span aggregation instead of section-level to avoid duplicating letterhead text. |
+| **A6** Expanded signature anchors | DI service | Added 4 typed-sig patterns: `IN WITNESS WHEREOF`, `executed as of`, `signature of (the) part`, `SIGNED in duplicate`. |
+| **A7** Spec-list joining | Sentence extraction | `_join_spec_list_sentences()` groups consecutive short (<15 token) Key:Value or digit-prefixed items into pipe-separated sentences. Pattern: `^[A-Za-z0-9][^:]{0,30}:\s*.{1,40}$`. |
+| **A8** Paragraph break normalization | Sentence extraction | Single `\n` → space (PDF line wrapping). `\n\n` → `. ` (paragraph boundary → sentence boundary). Strip leading `. ` artifacts from resulting sentences. |
+
+**Pipeline flow with fixes applied:**
+```
+Azure DI AnalyzeResult
+  │
+  ▼
+_build_section_aware_documents()
+  ├── [A1] Build child_set → walk only true root sections
+  ├── [A5] Letterhead paragraphs excluded from section walk
+  ├── [A3/A3b] Signature detection respects section boundaries + ALL-CAPS headings
+  ├── [A4] All unvisited paragraphs rescued as orphan DI units
+  └── [A2] paragraph_pages metadata emitted per DI unit
+  │
+  ▼
+extract_sentences_from_di_units()
+  ├── [A8] Text cleaning: \n→space, \n\n→". ", strip leading dots
+  ├── [A2] _page_for_sentence() for correct page attribution
+  ├── [A6] Expanded signature anchor detection
+  └── [A7] Spec-list joining post-processing
+```
+
+**Before/After comparison (test-5pdfs-v2-fix2, 5 PDFs):**
+
+| Metric | Before | After | Change |
+|--------|--------|-------|--------|
+| Total sentences | 197 | 197 | Same count, dramatically different quality |
+| Exact duplicates | Multiple | 0 | ✅ Eliminated |
+| Substring near-duplicates | 10+ | 0 | ✅ Eliminated |
+| Sentences with embedded `\n` | 7+ | 0 (1 in letterhead) | ✅ Fixed |
+| Leading dot artifacts | — | 0 | ✅ Clean |
+| Purchase contract pages | All page 1 | p1:20, p2:4, p3:8 | ✅ Cross-page fixed |
+| PMA signature size | 2703 chars (mega) | ~120 chars (proper) | ✅ AGENT'S FEES recovered |
+| PMA AGENT'S FEES | Trapped in signature | 10 separate sentences on p2 | ✅ Recovered |
+| Builders WARRANTY pages | All page 1 | p1:79, p2:3 | ✅ Cross-page fixed |
+| Orphan paragraphs rescued | 0 | ~8 (address, invoice#, etc.) | ✅ No data loss |
+
+**Per-document summary:**
+
+| Document | Sents | Pages | Sources |
+|----------|-------|-------|---------|
+| BUILDERS LIMITED WARRANTY | 82 | p1:79, p2:3 | 81 paragraph, 1 page_footer |
+| HOLDING TANK SERVICING CONTRACT | 21 | p1:21 | 18 paragraph, 3 table_row |
+| PROPERTY MANAGEMENT AGREEMENT | 45 | p1:27, p2:18 | 44 paragraph, 1 signature_party |
+| contoso_lifts_invoice | 17 | p1:17 | 6 paragraph, 9 table_row, 1 page_footer, 1 letterhead |
+| purchase_contract | 32 | p1:20, p2:4, p3:8 | 31 paragraph, 1 signature_party |
+
+**Commits:**
+- `b50b047` — fix: 7 cross-page and chunking quality fixes for DI sentence extraction
+- `750c055` — fix: refine signature upward-walk ALL_CAPS stop + spec-list digit prefix
+- `3c0865a` — fix: convert paragraph breaks to sentence boundaries in text cleaning
+- `1614e3ef` — fix: strip leading dot artifacts from sentence text
+
+**Key files modified:**
+- `src/worker/services/document_intelligence_service.py` — Fixes A1, A2, A3, A3b, A4, A5, A6
+- `src/worker/services/sentence_extraction_service.py` — Fixes A2 (consumer), A7, A8
