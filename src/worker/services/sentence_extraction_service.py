@@ -299,6 +299,16 @@ def _is_noise_sentence(
     min_words = min_words or settings.SKELETON_MIN_SENTENCE_WORDS
     
     text = text.strip()
+
+    # Informative KVP lines ("Contact: Elizabeth Nolasco", "Email: x@y.com",
+    # "Phone: (813) 902-4455") are real body content — use relaxed thresholds
+    # and skip PHONE_FAX_RE / numeric-cleanup filters.
+    _kvp_m = re.match(r'^[A-Za-z][\w\s]{0,20}:\s+(.+)', text)
+    _is_informative_kvp = bool(_kvp_m and len(_kvp_m.group(1).strip()) >= 3)
+    if _is_informative_kvp:
+        min_chars = min(min_chars, 15)
+        min_words = min(min_words, 2)
+
     if len(text) < min_chars:
         return True
     if len(text.split()) < min_words:
@@ -309,11 +319,13 @@ def _is_noise_sentence(
     if ALL_CAPS_RE.match(text) and len(text.split()) < 10:
         return True
     # Numeric-only content (table cells like "12,450.00")
+    # Skip for informative KVP lines (e.g. "Phone: (813) 902-4455")
     cleaned = re.sub(r"[\d,.$%\s\-/·•]", "", text)
-    if len(cleaned) < 10:
+    if not _is_informative_kvp and len(cleaned) < 10:
         return True
     # Phone/fax lines — contact metadata, not sentence content
-    if PHONE_FAX_RE.match(text):
+    # Skip for informative KVP lines — labeled phone numbers are body content
+    if not _is_informative_kvp and PHONE_FAX_RE.match(text):
         return True
     # Address-only lines (e.g. "811 Ocean Drive, Suite 405, Tampa, FL 33602")
     if ADDRESS_ONLY_RE.match(text):
@@ -334,10 +346,21 @@ def _is_noise_sentence(
 
 
 def _is_kvp_label(text: str) -> bool:
-    """Detect form-style 'Key: Value' patterns that are short and label-like."""
-    if FORM_LABEL_RE.match(text) and len(text.split()) < 8:
-        return True
-    return False
+    """Detect form-style 'Key: Value' patterns that are short and label-like.
+
+    Exempts informative KVP lines where the value part contains
+    substantive content (proper names, emails, multi-word values).
+    """
+    if not (FORM_LABEL_RE.match(text) and len(text.split()) < 8):
+        return False
+    # Extract the value portion after the colon
+    colon_idx = text.find(":")
+    if colon_idx >= 0:
+        value = text[colon_idx + 1:].strip()
+        # Keep if value has substantive content (2+ words, email, or 10+ chars)
+        if len(value.split()) >= 2 or "@" in value or len(value) >= 10:
+            return False
+    return True
 
 
 def _clean_chunk_text_for_spacy(chunk_text: str) -> str:
