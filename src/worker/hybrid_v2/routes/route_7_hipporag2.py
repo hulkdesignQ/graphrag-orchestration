@@ -278,7 +278,7 @@ class HippoRAG2Handler(BaseRouteHandler):
         )
         # Semantic search replaces cross-encoder reranker (better for short
         # metadata sentences due to contextual embeddings).
-        semantic_search_top_k_cfg = int(os.getenv("ROUTE7_SEMANTIC_SEARCH_TOP_K", "100"))
+        semantic_search_top_k_cfg = int(os.getenv("ROUTE7_SEMANTIC_SEARCH_TOP_K", "30"))
 
         # Preset can override prompt_variant (only if caller didn't explicitly set one)
         if prompt_variant is None and preset.get("prompt_variant"):
@@ -325,10 +325,10 @@ class HippoRAG2Handler(BaseRouteHandler):
         # Step 2: Parallel — Triple linking + Semantic search/DPR
         #
         # Semantic search (sentence_embeddings_v2 vector index) replaces
-        # the cross-encoder reranker for both passage seeding and final
-        # ranking.  Contextual embeddings (voyage-context-3) handle short
-        # metadata sentences much better than the reranker, which penalizes
-        # brief texts.  DPR still runs as a fallback.
+        # DPR for passage seeding into PPR.  Contextual embeddings
+        # (voyage-context-3) handle short metadata sentences much better
+        # than DPR cosine similarity.  PPR's graph-based ranking remains
+        # the final authority.  DPR still runs as a fallback.
         # ------------------------------------------------------------------
         t0 = time.perf_counter()
 
@@ -338,7 +338,7 @@ class HippoRAG2Handler(BaseRouteHandler):
         )
 
         # 2b. Semantic search via sentence_embeddings_v2 vector index
-        semantic_search_top_k = int(os.getenv("ROUTE7_SEMANTIC_SEARCH_TOP_K", "100"))
+        semantic_search_top_k = int(os.getenv("ROUTE7_SEMANTIC_SEARCH_TOP_K", "30"))
         semantic_task = asyncio.create_task(
             self._semantic_search_passages(query, top_k=semantic_search_top_k)
         )
@@ -497,39 +497,8 @@ class HippoRAG2Handler(BaseRouteHandler):
             "ROUTE7_ENTITY_DOC_MAP", "1"
         ).strip().lower() in {"1", "true", "yes"}
 
-        # Merge PPR + semantic search scores (weighted combination).
-        # PPR provides graph-based diversity across documents;
-        # semantic search provides relevance boosting for the query.
-        if semantic_search_results:
-            sem_weight = float(os.getenv("ROUTE7_SEMANTIC_WEIGHT", "0.5"))
-            ppr_weight = 1.0 - sem_weight
-
-            # Normalize PPR scores to [0,1]
-            ppr_map: Dict[str, float] = {}
-            if passage_scores:
-                max_ppr = max(s for _, s in passage_scores) or 1.0
-                ppr_map = {cid: s / max_ppr for cid, s in passage_scores}
-
-            # Semantic search scores (already cosine sim in [0,1])
-            sem_map = {cid: score for cid, score in semantic_search_results}
-
-            # Union of all passage IDs from both sources
-            all_ids = set(ppr_map.keys()) | set(sem_map.keys())
-            merged: List[Tuple[str, float]] = []
-            for cid in all_ids:
-                combined = ppr_weight * ppr_map.get(cid, 0.0) + sem_weight * sem_map.get(cid, 0.0)
-                merged.append((cid, combined))
-            merged.sort(key=lambda x: x[1], reverse=True)
-            passage_scores = merged
-
-            logger.info(
-                "step_4.7_semantic_ppr_merged",
-                source="step_2_parallel",
-                ppr_passages=len(ppr_map),
-                sem_passages=len(sem_map),
-                merged_passages=len(merged),
-                sem_weight=sem_weight,
-            )
+        # Semantic search is used only for passage seeding (step 3).
+        # PPR's graph-based ranking is the final authority — do NOT override.
 
         # Determine top passage IDs for chunk fetch
         passage_limit = ppr_passage_top_k
