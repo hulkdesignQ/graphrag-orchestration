@@ -278,7 +278,7 @@ class HippoRAG2Handler(BaseRouteHandler):
         )
         # Semantic search replaces cross-encoder reranker (better for short
         # metadata sentences due to contextual embeddings).
-        semantic_search_top_k_cfg = int(os.getenv("ROUTE7_SEMANTIC_SEARCH_TOP_K", "30"))
+        semantic_search_top_k_cfg = int(os.getenv("ROUTE7_SEMANTIC_SEARCH_TOP_K", "100"))
 
         # Preset can override prompt_variant (only if caller didn't explicitly set one)
         if prompt_variant is None and preset.get("prompt_variant"):
@@ -338,7 +338,7 @@ class HippoRAG2Handler(BaseRouteHandler):
         )
 
         # 2b. Semantic search via sentence_embeddings_v2 vector index
-        semantic_search_top_k = int(os.getenv("ROUTE7_SEMANTIC_SEARCH_TOP_K", "30"))
+        semantic_search_top_k = int(os.getenv("ROUTE7_SEMANTIC_SEARCH_TOP_K", "100"))
         semantic_task = asyncio.create_task(
             self._semantic_search_passages(query, top_k=semantic_search_top_k)
         )
