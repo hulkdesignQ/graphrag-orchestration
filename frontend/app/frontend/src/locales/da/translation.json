@@ -1,6 +1,6 @@
 {
-    "pageTitle": "Azure OpenAI + AI Search",
-    "headerTitle": "Azure OpenAI + AI Search",
+    "pageTitle": "GraphRAG Document Intelligence",
+    "headerTitle": "GraphRAG Document Intelligence",
     "chat": "Chat",
     "login": "Log ind",
     "logout": "Log ud",
@@ -32,20 +32,20 @@
         "fileDeleted": "Fil slettet"
     },
     "developerSettings": "Udviklerindstillinger",
-    "chatEmptyStateTitle": "Chat med dine data",
-    "chatEmptyStateSubtitle": "Spørg om hvad som helst eller prøv et eksempel",
+    "chatEmptyStateTitle": "Ask your documents. Trust every answer.",
+    "chatEmptyStateSubtitle": "Every answer is traced to the exact sentence — click to verify on the original PDF. Try with our sample documents or upload your own.",
     "defaultExamples": {
-        "1": "Hvad er inkluderet i min Northwind Health Plus plan, som ikke er i standardplanen?",
-        "2": "Hvordan foregår en medarbejderevaluering?",
-        "3": "Hvad laver en produktchef?",
-        "placeholder": "Skriv et nyt spørgsmål (f.eks. dækker min plan årlige øjenundersøgelser?)"
+        "1": "Do the purchase contract total price and the invoice total match?",
+        "2": "Compare the termination and cancellation rules across all agreements.",
+        "3": "What is the Agent's fee for short-term rentals under 180 days?",
+        "placeholder": "Ask a question across your documents (e.g., does this invoice match the contract terms?)"
     },
-    "askTitle": "Spørg til dine data",
+    "askTitle": "Ask your documents",
     "multimodalExamples": {
-        "1": "Sammenlign effekten af renter og BNP på finansmarkederne.",
-        "2": "Hvad er den forventede tendens for S&P 500 indekset over de næste fem år? Sammenlign det med tidligere S&P 500 præstation.",
-        "3": "Kan du identificere nogen korrelation mellem oliepriser og aktiemarkedets tendenser?",
-        "placeholder": "Eksempel: Dækker min plan årlige øjenundersøgelser?"
+        "1": "Do the purchase contract total price and the invoice total match?",
+        "2": "Compare the termination and cancellation rules across all agreements.",
+        "3": "What is the Agent's fee for short-term rentals under 180 days?",
+        "placeholder": "Ask a question across your documents (e.g., does this invoice match the contract terms?)"
     },
     "generatingAnswer": "Genererer svar",
     "citationWithColon": "Kilder:",
@@ -146,8 +146,8 @@
         "suggestFollowupQuestions": "Beder LLM'en om at foreslå opfølgende spørgsmål baseret på brugerens forespørgsel.",
         "textEmbeddings": "Når valgt, vil søgningen bruge indlejringer fra tekst-kun indlejringsmodellen af udtrukne tekstbidder.",
         "imageEmbeddings": "Når valgt, vil søgningen bruge indlejringer fra den multimodale indlejringsmodel af udtrukne billeder.",
-    "llmTextInputs": "Når valgt, sendes tekstindhold fra søgeresultaterne til LLM'en som kontekst.",
-    "llmImageInputs": "Når valgt, sendes billeder fra søgeresultaterne til LLM'en som kontekst.",
+        "llmTextInputs": "Når valgt, sendes tekstindhold fra søgeresultaterne til LLM'en som kontekst.",
+        "llmImageInputs": "Når valgt, sendes billeder fra søgeresultaterne til LLM'en som kontekst.",
         "llmInputs": "Indstiller hvad der sendes til visionsmodellen. 'Billeder og tekst' sender både billeder og tekst til modellen, 'Billeder' sender kun billeder og 'Tekst' sender kun tekst.",
         "retrievalMode": "Indstiller søgemodus for forespørgslen i Azure AI Search. `Vektorer + Tekst (Hybrid)` bruger en kombination af vektorsøgning og fuldtekstsøgning, `Vektorer` bruger kun vektorsøgning, og `Tekst` bruger kun fuldtekstsøgning. Hybrid er generelt optimalt.",
         "streamChat": "Streamer kontinuerligt svaret til brugergrænsefladen, imens det genereres.",
@@ -160,7 +160,6 @@
     "overallSettings": "Overordnede indstillinger",
     "searchSettings": "Søgeindstillinger",
     "llmSettings": "LLM-indstillinger",
-
     "fileToolbar": {
         "searchPlaceholder": "Søg filer...",
         "fileCount_one": "{{count}} fil",

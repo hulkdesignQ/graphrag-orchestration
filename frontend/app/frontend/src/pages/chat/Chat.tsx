@@ -571,7 +571,7 @@ const Chat = () => {
                         <div className={styles.chatEmptyState}>
                             <img src={appLogo} alt="App logo" width="120" height="120" />
                             <h1 className={styles.chatEmptyStateTitle}>{t("headerTitle")}</h1>
-                            <h2 className={styles.chatEmptyStateSubtitle}>Sign in to start chatting</h2>
+                            <h2 className={styles.chatEmptyStateSubtitle}>Sign in to start asking your documents</h2>
                             <p style={{ color: "var(--text-secondary, #666)", marginTop: "8px" }}>
                                 Click the login button in the top-right corner to get started.
                             </p>
