@@ -8,12 +8,13 @@ FROM node:20-slim AS frontend-builder
 
 WORKDIR /frontend
 
-# Copy package files first for layer caching
+# Copy package files and .npmrc first for layer caching
 COPY frontend/app/frontend/package.json \
      frontend/app/frontend/package-lock.json* \
+     frontend/app/frontend/.npmrc \
      ./
 
-RUN npm ci --no-audit --no-fund --legacy-peer-deps
+RUN npm ci --no-audit --no-fund
 
 # Copy frontend source and build
 COPY frontend/app/frontend/ ./
