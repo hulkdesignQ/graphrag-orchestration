@@ -1751,6 +1751,16 @@ Output:
   {"type": "PARTY_TO", "start_node_id": "1", "end_node_id": "0", "properties": {}},
   {"type": "PARTY_TO", "start_node_id": "2", "end_node_id": "0", "properties": {}}
 ]}
+
+Example 3:
+Text: "QUANTITY: 1 | DESCRIPTION: Savaria V1504 Telecab residential elevator with automatic doors | UNIT PRICE: $11,200.00"
+Output:
+{"nodes": [
+  {"id": "0", "label": "CONCEPT", "properties": {"name": "Savaria V1504 Telecab", "aliases": ["V1504", "Telecab", "Savaria elevator"], "description": "Residential elevator with automatic doors"}},
+  {"id": "1", "label": "CONCEPT", "properties": {"name": "$11,200.00", "aliases": ["11200"], "description": "Unit price for Savaria V1504 Telecab"}}
+], "relationships": [
+  {"type": "RELATED_TO", "start_node_id": "0", "end_node_id": "1", "properties": {"context": "unit price"}}
+]}
 '''
 
 
@@ -2811,7 +2821,7 @@ SUMMARY: <summary>"""
             ),
             SchemaEntity(
                 label="CONCEPT",
-                description="An abstract concept, term, clause, or named section",
+                description="A product, equipment, model, service, specification, monetary amount, abstract concept, term, clause, or named section",
                 properties=[
                     SchemaProperty(name="name", type="STRING", description="Concept or term name"),
                     SchemaProperty(name="aliases", type="LIST", description="Alternative phrasings or abbreviations"),
@@ -2844,6 +2854,8 @@ SUMMARY: <summary>"""
             ("ORGANIZATION", "RELATED_TO", "ORGANIZATION"),
             ("PERSON", "RELATED_TO", "ORGANIZATION"),
             ("CONCEPT", "RELATED_TO", "CONCEPT"),
+            ("CONCEPT", "RELATED_TO", "ORGANIZATION"),
+            ("ORGANIZATION", "RELATED_TO", "CONCEPT"),
         ]
         
         return SchemaConfig(node_types=entities, relationship_types=relations, patterns=potential_schema)
@@ -2861,10 +2873,13 @@ SUMMARY: <summary>"""
             return "noise"
         if len(t) < 40 and t.endswith(':'):
             return "noise"  # "Pumper's Name:"
-        if len(t) < 50 and not any(c in t for c in '.!?,;'):
-            return "metadata"  # "Contract Date: 2024-06-15"
+        # Pure numeric/currency strings
         if re.match(r'^[\d\$,.%\s]+$', t):
             return "metadata"  # "$29,900.00"
+        # Short Key: Value pairs (e.g. "Contract Date: 2024-06-15") — must have
+        # colon followed by a value to distinguish from content phrases.
+        if len(t) < 50 and re.match(r'^[A-Za-z][^:]{0,25}:\s+\S', t) and not any(c in t for c in '.!?;'):
+            return "metadata"
         return "content"
 
     @staticmethod
