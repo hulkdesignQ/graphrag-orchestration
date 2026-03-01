@@ -129,22 +129,40 @@ Mistral OCR is consistently ~1.8× faster.
 
 ### 6. Structural Features Comparison
 
-| Feature                       | Azure DI                         | Mistral OCR                      |
-|-------------------------------|----------------------------------|----------------------------------|
-| Output format                 | Markdown                         | Markdown                         |
-| Headings (`#`, `##`)          | ✅                                | ✅                                |
-| Tables                        | ✅ Inline `<table>` HTML          | ✅ Separate `tables[]` array      |
-| Key-value pairs               | ✅ 7–24 per doc                   | ❌                                |
-| Paragraph bounding boxes      | ✅ Polygon coordinates per para   | ❌                                |
-| Image bounding boxes          | ✅                                | ✅                                |
-| Page dimensions               | ✅ Width/height/unit              | ✅ Width/height/dpi               |
-| Section tree                  | ✅ Hierarchical parent/child      | ❌                                |
-| Confidence scores             | ✅ Per-paragraph                  | ❌                                |
-| Language detection             | ✅ Per-span                       | ❌                                |
-| Barcodes                      | ✅                                | ❌                                |
-| Headers/footers extraction    | ✅ `<!-- PageFooter="..." -->`    | ✅ Separate `header`/`footer`     |
-| List items                    | `·` bullet characters             | `-` standard Markdown lists      |
-| Sentence-level geometry       | ✅ Via word geometry composition  | ❌                                |
+Both engines provide **document content structure** — the difference is in **geometric/semantic metadata**.
+
+#### 6a. Document Content Structure (both engines are strong)
+
+| Feature                       | Azure DI                         | Mistral OCR                      | Winner         |
+|-------------------------------|----------------------------------|----------------------------------|----------------|
+| Output format                 | Markdown                         | Markdown                         | Tie            |
+| Headings (`#`, `##`)          | ✅                                | ✅                                | Tie            |
+| Tables                        | ✅ Inline `<table>` HTML          | ✅ Separate `tables[]` array      | Tie (same data)|
+| Image detection               | ✅                                | ✅ With bounding boxes            | Tie            |
+| Page dimensions               | ✅ Width/height/unit              | ✅ Width/height/dpi               | Tie            |
+| Headers/footers extraction    | ✅ `<!-- PageFooter="..." -->`    | ✅ Separate `header`/`footer`     | Tie            |
+| List items                    | `·` bullet characters             | `-` standard Markdown lists      | **Mistral**    |
+| Paragraph flow / prose quality | Mid-sentence line breaks          | Proper paragraph reconstruction  | **Mistral**    |
+| Signature / form detection    | Via selection marks + KVPs        | `☐` markers + table extraction   | Mistral (visual)|
+
+**Summary:** For pure content extraction — headings, tables, lists, paragraphs — Mistral OCR is **at least as good as Azure DI**, and produces **cleaner prose** with better paragraph reconstruction.
+
+#### 6b. Geometric & Semantic Metadata (Azure DI only)
+
+These features are **not available from Mistral OCR** and are specific to Azure DI's document intelligence platform:
+
+| Feature                       | Azure DI                         | Mistral OCR | Impact on Pipeline              |
+|-------------------------------|----------------------------------|-------------|---------------------------------|
+| Paragraph bounding polygons   | ✅ Polygon coordinates per para   | ❌           | Powers polygon highlighting UI  |
+| Sentence-level geometry       | ✅ Via word geometry composition  | ❌           | Powers sentence-level highlights|
+| Section tree                  | ✅ Hierarchical parent/child      | ❌           | Powers section-aware chunking   |
+| Key-value pairs               | ✅ 7–24 structured KVPs per doc   | ❌           | Powers form field extraction    |
+| Confidence scores             | ✅ Per-paragraph                  | ❌           | OCR quality filtering           |
+| Language detection             | ✅ Per-span                       | ❌           | Multilingual entity handling    |
+| Barcodes                      | ✅                                | ❌           | QR/barcode extraction           |
+| Selection marks (checkboxes)  | ✅ Structured state detection     | ❌           | Form state extraction           |
+
+**Summary:** The gap between the two engines is **not** in content extraction quality — it's in the **sub-page geometric metadata** and **semantic field extraction** that Azure DI provides on top of the text. These metadata features power specific pipeline capabilities (polygon highlighting, section-aware chunking, KVP grounding) that Mistral OCR does not address.
 
 ### 7. Cost
 
@@ -184,14 +202,18 @@ Pricing is comparable. Mistral charges per 1,000 pages at batch rates.
 
 ## Recommendation
 
-**Mistral OCR is the strongest alternative tested so far** (compared to LLMWhisperer which only outputs plain text). For a pure text extraction + Markdown quality perspective, Mistral OCR is **superior to Azure DI**. However, Azure DI provides critical structured metadata that the current pipeline depends on:
+**Mistral OCR is the strongest alternative tested so far** (compared to LLMWhisperer which only outputs plain text). For document content extraction — headings, tables, lists, prose — Mistral OCR is **equal or superior to Azure DI**. The key finding is:
 
-| Must-have for current pipeline | Azure DI | Mistral OCR |
-|-------------------------------|----------|-------------|
-| Paragraph bounding polygons    | ✅       | ❌           |
-| Section tree                   | ✅       | ❌           |
-| KVP extraction                 | ✅       | ❌           |
-| Sentence-level geometry        | ✅       | ❌           |
+> The gap between the two engines is **not** in content/structure quality. Both extract the same headings, tables, and text. The gap is in **sub-page geometric metadata** (bounding polygons, word coordinates) and **semantic field extraction** (KVPs, section tree, confidence scores) that Azure DI provides on top of the extracted content.
+
+### What blocks a full switch to Mistral OCR
+
+| Pipeline feature that needs geometric/semantic metadata | Status with Mistral OCR |
+|---------------------------------------------------------|------------------------|
+| Polygon highlighting in frontend UI                     | ❌ Blocked — no bounding polygons |
+| Section-aware chunking                                  | ⚠️ Workaround — parse `#`/`##` headings to reconstruct hierarchy |
+| KVP-based form field extraction                         | ⚠️ Workaround — use LLM-based extraction from Markdown |
+| Sentence-level geometry for highlights                  | ❌ Blocked — no word coordinates |
 
 ### Possible Hybrid Strategy
 
