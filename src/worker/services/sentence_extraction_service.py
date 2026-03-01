@@ -366,6 +366,9 @@ def _clean_chunk_text_for_spacy(chunk_text: str) -> str:
     # Normalize single newlines to spaces (DI PDF line wrapping) while
     # preserving paragraph breaks (double newlines).
     text = re.sub(r"(?<!\n)\n(?!\n)", " ", text)
+    # Convert remaining paragraph breaks to sentence boundaries so the
+    # sentence splitter treats them as separate sentences.
+    text = re.sub(r"\n\n+", ". ", text)
     return text.strip()
 
 
