@@ -903,6 +903,14 @@ class DocumentIntelligenceService:
             return True
         if re.search(r'Signed\s+this', text, re.IGNORECASE):
             return True
+        if re.search(r'IN\s+WITNESS\s+WHEREOF', text, re.IGNORECASE):
+            return True
+        if re.search(r'executed\s+as\s+of', text, re.IGNORECASE):
+            return True
+        if re.search(r'signature\s+of\s+(?:the\s+)?part', text, re.IGNORECASE):
+            return True
+        if re.search(r'SIGNED\s+in\s+duplicate', text, re.IGNORECASE):
+            return True
         m = cls._SIG_ROLE_RE.search(text)
         if m:
             after = text[m.end():].strip()
@@ -1038,12 +1046,18 @@ class DocumentIntelligenceService:
                         upper_pos = j + 1  # exclusive: start after the heading
                         break
 
-            # Walk downward → stop at first pageFooter or pageNumber.
+            # Walk downward → stop at first pageFooter, pageNumber, or
+            # section boundary (sectionHeading/title) to prevent the
+            # signature window from bleeding into the next section.
             lower_pos = len(indexed)
             for j in range(pos, len(indexed)):
                 _, _, role = indexed[j]
                 if role in ("pageFooter", "pageNumber"):
                     lower_pos = j  # exclusive: stop before the footer
+                    break
+                # Stop at the next section heading (but not the anchor itself)
+                if j > pos and role in ("sectionHeading", "title"):
+                    lower_pos = j  # exclusive: stop before the heading
                     break
 
             # Tag every non-boundary paragraph in the window.
@@ -1733,10 +1747,17 @@ class DocumentIntelligenceService:
                 return None
             return tables[i]
 
-        # Build a conservative root set: if DI provides nested sections but doesn't
-        # provide explicit roots, treat all indices as roots.
-        # (We avoid attempting to infer parent pointers from elements to keep behavior stable.)
-        root_indices = list(range(len(sections)))
+        # Build root set: sections that are NOT referenced as children by any
+        # other section's elements list.  This avoids walking child sections
+        # twice (once as root, once via parent walk), which produced duplicate
+        # DI units with overlapping text.
+        child_set: set = set()
+        for sec in sections:
+            for el in (getattr(sec, "elements", None) or []):
+                parsed = self._parse_di_element_ref(el)
+                if parsed and parsed[0] == "sections":
+                    child_set.add(parsed[1])
+        root_indices = [i for i in range(len(sections)) if i not in child_set]
 
         docs: List[Document] = []
 
@@ -1779,7 +1800,12 @@ class DocumentIntelligenceService:
             has_children = len(child_sections) > 0
 
             def emit_chunk(*, part: str, spans: Any, paras: List[DocumentParagraph], tbls: List[DocumentTable], para_idx: Optional[List[int]] = None) -> None:
-                merged = self._collect_span_union([spans] if spans else [getattr(p, "spans", None) or [] for p in paras])
+                # When spans=None, aggregate from individual paragraph spans
+                # (avoids including excluded letterhead/orphan offset ranges).
+                if spans:
+                    merged = self._collect_span_union([spans])
+                else:
+                    merged = self._collect_span_union([getattr(p, "spans", None) or [] for p in paras])
                 text = ""
                 if content and merged:
                     text = self._slice_content_by_spans(content, merged)
@@ -1797,13 +1823,27 @@ class DocumentIntelligenceService:
                     section_kvps = section_kvps + orphan_kvps
 
                 # Extract page number from first paragraph's bounding regions
+                # AND build per-paragraph page map for cross-page sections.
                 page_number = None
+                paragraph_pages: List[Dict[str, int]] = []
                 for para in paras:
                     bounding_regions = getattr(para, "bounding_regions", None) or []
+                    para_page = None
                     if bounding_regions:
-                        page_number = getattr(bounding_regions[0], "page_number", None)
-                        if page_number:
-                            break
+                        para_page = getattr(bounding_regions[0], "page_number", None)
+                    if para_page and page_number is None:
+                        page_number = para_page
+                    # Record paragraph span→page mapping for sentence attribution
+                    para_spans = getattr(para, "spans", None) or []
+                    if para_spans and para_page:
+                        ps = para_spans[0]
+                        p_off = getattr(ps, "offset", None)
+                        p_len = getattr(ps, "length", None)
+                        if p_off is None and isinstance(ps, dict):
+                            p_off = ps.get("offset")
+                            p_len = ps.get("length")
+                        if p_off is not None and p_len is not None:
+                            paragraph_pages.append({"offset": int(p_off), "length": int(p_len), "page": int(para_page)})
                 # Fallback: try tables if no paragraph has bounding region
                 if page_number is None:
                     for tbl in tbls:
@@ -1887,6 +1927,7 @@ class DocumentIntelligenceService:
                             **({"role": chunk_role} if chunk_role else {}),
                             # Location metadata for citation tracking
                             **({"page_number": page_number} if page_number is not None else {}),
+                            **({"paragraph_pages": paragraph_pages} if paragraph_pages else {}),
                             **({"start_offset": start_offset} if start_offset is not None else {}),
                             **({"end_offset": end_offset} if end_offset is not None else {}),
                             # Word geometry for pixel-accurate highlighting
@@ -1902,8 +1943,20 @@ class DocumentIntelligenceService:
                 )
 
             # Emit direct content chunk (intro/body) if present.
+            # Use paragraph-level spans (spans=None) instead of section-level
+            # spans when: (a) section has children (avoid overlap with child
+            # walks), or (b) letterhead paragraphs were excluded from this
+            # section (avoid including letterhead text via section span range).
             if direct_paras or direct_tables:
-                emit_chunk(part="direct", spans=section_spans, paras=direct_paras, tbls=direct_tables, para_idx=para_indices)
+                # Check if any element in this section was a letterhead paragraph
+                lh_in_elements = bool(letterhead_para_indices) and bool(
+                    {idx for el in elements
+                     for parsed in [self._parse_di_element_ref(el)]
+                     if parsed and parsed[0] == "paragraphs" and parsed[1] in letterhead_para_indices}
+                )
+                use_para_spans = has_children or lh_in_elements
+                direct_spans = None if use_para_spans else section_spans
+                emit_chunk(part="direct", spans=direct_spans, paras=direct_paras, tbls=direct_tables, para_idx=para_indices)
 
             # Recurse into child sections.
             for child_idx in child_sections:
@@ -1916,21 +1969,21 @@ class DocumentIntelligenceService:
         for idx in root_indices:
             walk(idx, [], [])
 
-        # Emit DI units for orphaned role-tagged paragraphs (pageHeader,
-        # pageFooter) not referenced by any section's elements list.
+        # Emit DI units for orphaned paragraphs not referenced by any
+        # section's elements list.  This rescues ALL unvisited paragraphs
+        # (not just pageHeader/pageFooter) so no content is silently dropped.
         visited_para_indices: set = set()
         for sec in sections:
             for el in (getattr(sec, "elements", None) or []):
                 parsed = self._parse_di_element_ref(el)
                 if parsed and parsed[0] == "paragraphs":
                     visited_para_indices.add(parsed[1])
-        _ORPHAN_ROLES = {"pageHeader", "pageFooter"}
+        # Also exclude letterhead paragraphs (they get their own DI unit below)
+        visited_para_indices.update(letterhead_para_indices)
         for i, para in enumerate(paragraphs):
             if i in visited_para_indices:
                 continue
             role = getattr(para, "role", None) or ""
-            if role not in _ORPHAN_ROLES:
-                continue
             para_content = (getattr(para, "content", "") or "").strip()
             if not para_content or len(para_content) < 3:
                 continue
@@ -1938,17 +1991,19 @@ class DocumentIntelligenceService:
             regions = getattr(para, "bounding_regions", None) or []
             if regions:
                 page_number = getattr(regions[0], "page_number", None)
+            # Determine chunk_type based on role
+            chunk_type = "role" if role in ("pageHeader", "pageFooter") else "orphan"
             docs.append(Document(
                 text=para_content,
                 metadata={
                     "group_id": group_id,
                     "source": "document-intelligence",
                     "url": url,
-                    "chunk_type": "role",
+                    "chunk_type": chunk_type,
                     "section_path": [],
                     "di_section_path": [],
-                    "di_section_part": "role",
-                    "role": role,
+                    "di_section_part": "role" if role else "orphan",
+                    **({"role": role} if role else {}),
                     "tables": [],
                     "table_count": 0,
                     "paragraph_count": 1,

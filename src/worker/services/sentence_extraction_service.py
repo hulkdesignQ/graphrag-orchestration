@@ -129,6 +129,86 @@ _SIG_FIELD_LABEL_RE = re.compile(
 )
 
 
+def _page_for_sentence(sent_text: str, unit_text: str,
+                       paragraph_pages: List[Dict],
+                       default_page) -> Any:
+    """Look up the page number for a sentence using paragraph_pages map.
+
+    Finds the sentence's position in the unit text, then locates which
+    paragraph span contains that position to inherit its page number.
+    Falls back to *default_page* if no match is found.
+    """
+    if not paragraph_pages or not sent_text or not unit_text:
+        return default_page
+    # Find sentence position in unit text
+    pos = unit_text.find(sent_text)
+    if pos < 0:
+        return default_page
+    for pp in paragraph_pages:
+        pp_start = pp["offset"]
+        pp_end = pp_start + pp["length"]
+        if pp_start <= pos < pp_end:
+            return pp["page"]
+    return default_page
+
+
+# Pattern: short "Key: Value" spec-list items (e.g. "Hall Call: 1")
+_SPEC_LIST_RE = re.compile(r'^[A-Za-z][^:]{0,30}:\s*.{1,40}$')
+_LIST_JOIN_MAX_TOKENS = 15
+_LIST_JOIN_GROUP_MAX_TOKENS = 120
+
+
+def _join_spec_list_sentences(sentences: List[Dict]) -> List[Dict]:
+    """Join consecutive short spec-list sentences into grouped sentences.
+
+    Spec-list items like "Hall Call: 1", "Door Height: 7 ft" are too short
+    for meaningful retrieval individually.  Group consecutive short items
+    sharing a Key:Value pattern into a single joined sentence.
+    """
+    if not sentences:
+        return sentences
+
+    result: List[Dict] = []
+    group: List[Dict] = []
+    group_tokens = 0
+
+    def flush_group():
+        nonlocal group, group_tokens
+        if not group:
+            return
+        if len(group) == 1:
+            result.append(group[0])
+        else:
+            joined_text = " | ".join(s["text"] for s in group)
+            merged = dict(group[0])
+            merged["text"] = joined_text
+            merged["tokens"] = len(joined_text.split())
+            result.append(merged)
+        group = []
+        group_tokens = 0
+
+    for sent in sentences:
+        tokens = sent.get("tokens", len(sent.get("text", "").split()))
+        text = sent.get("text", "")
+        is_spec = (
+            tokens <= _LIST_JOIN_MAX_TOKENS
+            and _SPEC_LIST_RE.match(text)
+            and sent.get("source") == "paragraph"
+        )
+        if is_spec and group_tokens + tokens <= _LIST_JOIN_GROUP_MAX_TOKENS:
+            group.append(sent)
+            group_tokens += tokens
+        else:
+            flush_group()
+            if is_spec:
+                group = [sent]
+                group_tokens = tokens
+            else:
+                result.append(sent)
+    flush_group()
+    return result
+
+
 def _detect_letterhead_indices(di_units: List[Any]) -> List[int]:
     """Identify letterhead paragraphs: page 1, before first heading, no role.
 
@@ -283,6 +363,9 @@ def _clean_chunk_text_for_spacy(chunk_text: str) -> str:
     text = re.sub(r"^\d+\.\s+", "", text, flags=re.MULTILINE)
     text = re.sub(r"^[·•\-\*]\s+", "", text, flags=re.MULTILINE)
     text = re.sub(r"\n{3,}", "\n\n", text)
+    # Normalize single newlines to spaces (DI PDF line wrapping) while
+    # preserving paragraph breaks (double newlines).
+    text = re.sub(r"(?<!\n)\n(?!\n)", " ", text)
     return text.strip()
 
 
@@ -605,6 +688,8 @@ def extract_sentences_from_di_units(
             section_path = ""
 
         page = meta.get("page_number")
+        # Per-paragraph page map for cross-page sections (Fix A2)
+        paragraph_pages = meta.get("paragraph_pages") or []
 
         # ─── Source E: First-occurrence page header / footer ─────
         # DI tags repeated header/footer paragraphs on every page.
@@ -724,7 +809,7 @@ def extract_sentences_from_di_units(
                     "index_in_chunk": 0,
                     "index_in_doc": global_idx,
                     "section_path": section_path,
-                    "page": page,
+                    "page": _page_for_sentence(sent_text, unit_text, paragraph_pages, page),
                     "confidence": 1.0,
                     "tokens": len(sent_text.split()),
                     "parent_text": clean_text[:500] if clean_text else "",
@@ -869,6 +954,9 @@ def extract_sentences_from_di_units(
                         "metadata": sig_meta,
                     })
                     global_idx += 1
+
+    # Join consecutive short spec-list sentences (Fix A7)
+    all_sentences = _join_spec_list_sentences(all_sentences)
 
     # Backfill total_in_section from section_counters
     for sent in all_sentences:
