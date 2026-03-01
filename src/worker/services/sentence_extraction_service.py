@@ -153,7 +153,7 @@ def _page_for_sentence(sent_text: str, unit_text: str,
 
 
 # Pattern: short "Key: Value" spec-list items (e.g. "Hall Call: 1")
-_SPEC_LIST_RE = re.compile(r'^[A-Za-z][^:]{0,30}:\s*.{1,40}$')
+_SPEC_LIST_RE = re.compile(r'^[A-Za-z0-9][^:]{0,30}:\s*.{1,40}$')
 _LIST_JOIN_MAX_TOKENS = 15
 _LIST_JOIN_GROUP_MAX_TOKENS = 120
 

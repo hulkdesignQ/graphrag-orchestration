@@ -1045,6 +1045,17 @@ class DocumentIntelligenceService:
                     if role in ("sectionHeading", "title"):
                         upper_pos = j + 1  # exclusive: start after the heading
                         break
+                    # Treat short ALL-CAPS paragraphs as implicit headings
+                    # (DI sometimes misses heading roles, e.g. "AGENT'S FEES")
+                    ptext = paragraphs[indexed[j][0]].content or ""
+                    if (
+                        j < pos
+                        and 3 <= len(ptext) <= 60
+                        and ptext == ptext.upper()
+                        and any(c.isalpha() for c in ptext)
+                    ):
+                        upper_pos = j + 1
+                        break
 
             # Walk downward → stop at first pageFooter, pageNumber, or
             # section boundary (sectionHeading/title) to prevent the
