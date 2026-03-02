@@ -11232,19 +11232,23 @@ Q-D3's "3 business days cancel window" sentence (7 words) ranked #35 in the cros
 
 ### 39.3. Final Architecture: Step 4.6
 
+**Important clarification:** Step 4.6 is **NOT** for PPR seeding. It runs AFTER PPR completes and acts as a **parallel retrieval channel** that catches passages the graph missed:
+
 ```
 Step 1:   Embed query (Voyage voyage-context-3)
 Step 2:   Triple search → recognition memory → entity seeds
 Step 3:   DPR passage search → passage seeds (top-20)
-Step 4:   PPR random walk → ranked passages
-Step 4.5: Rerank PPR top-K (optional, reorders existing candidates)
-Step 4.6: Corpus-wide cross-encoder rerank (NEW)
-           → Voyage rerank-2.5 scores ALL sentences
+Step 4:   PPR random walk → ranked passages (uses seeds from steps 2-3)
+Step 4.5: Rerank PPR top-K (optional, reorders existing PPR candidates)
+Step 4.6: Corpus-wide cross-encoder rerank (NEW — runs AFTER PPR, not before)
+           → Voyage rerank-2.5 scores ALL sentences independently
            → Top-50 merged into PPR output (dedup against PPR top-K)
            → passage_limit expanded by injection count
-Step 5:   Fetch chunk text for combined pool
+Step 5:   Fetch chunk text for combined pool (~55 passages)
 Step 6:   LLM synthesis
 ```
+
+Step 4.6 is a **safety net** — PPR is excellent at graph-connected passages, but if a passage has no entity overlap with the query (like a 7-word "3 business days cancel window" sentence), PPR's random walk can never reach it. The cross-encoder sees every sentence directly and catches these structural gaps.
 
 **Environment variables:**
 - `ROUTE7_RERANK_ALL` — Enable/disable (default: `1`)
@@ -11252,6 +11256,31 @@ Step 6:   LLM synthesis
 - `ROUTE7_RERANK_MODEL` — Model name (default: `rerank-2.5`)
 
 **Implementation:** `src/worker/hybrid_v2/routes/route_7_hipporag2.py` lines ~534-570 (step 4.6 logic), lines ~1691-1785 (`_rerank_all_passages()` method).
+
+### 39.3.1. Voyage rerank-2.5 Instruction Parameter
+
+Voyage rerank-2.5 supports an `instruction` parameter that modifies how the model interprets the query. Currently we pass just the raw query:
+
+```python
+vc.rerank(query=query, documents=documents, model="rerank-2.5", top_k=50)
+```
+
+A task-specific instruction could improve reranking quality for general use:
+
+```python
+vc.rerank(
+    query=query, documents=documents, model="rerank-2.5", top_k=50,
+    instruction="Find passages containing specific facts, numbers, dates, "
+                "or contractual terms that directly answer the question."
+)
+```
+
+**Potential benefits for generalization:**
+- Exhaustive queries ("list ALL timeframes") — instruct to prioritize passages with numbers/dates
+- Negation queries — instruct to only rank passages that actually discuss the topic
+- Precision-focused queries — instruct to penalize tangentially related passages
+
+Since we're already at 57/57 on the current benchmark, the benefit would be for **new corpora and unseen query types** rather than the current test set. Configurable via `ROUTE7_RERANK_INSTRUCTION` env var (not yet implemented).
 
 ### 39.4. Origin: Custom Innovation, Not Upstream
 
@@ -11304,15 +11333,32 @@ LLM synthesis          ✓ enumerates all     ✓ focused answer
 
 ### 39.6. Performance Metrics
 
-| Metric | Before (no rerank-all) | After (top_k=50) |
-|--------|------------------------|-------------------|
-| **Q-D Score** | 53/57 (93.0%) | **57/57 (100%)** |
-| **Q-N Score** | 27/27 (100%) | 27/27 (100%) |
-| **Mean latency** | 5,315ms | 4,753ms |
-| **Median latency** | 4,684ms | 4,146ms |
-| **Response length** | 960 chars | 1,201 chars (+25%) |
-| **Rerank step** | — | 407ms median |
-| **Injected passages** | — | 35 median |
+| Metric | Before (no rerank-all) | After (top_k=50) | Delta |
+|--------|------------------------|-------------------|-------|
+| **Q-D Score** | 53/57 (93.0%) | **57/57 (100%)** | +4 |
+| **Q-N Score** | 27/27 (100%) | 27/27 (100%) | — |
+| **Mean latency** | 5,315ms | 4,753ms | **-562ms** |
+| **Median latency** | 4,684ms | 4,146ms | -538ms |
+| **Latency range** | 1,884–15,338ms | 2,948–9,760ms | Tighter |
+| **Mean response length** | 960 chars | 1,201 chars | +241 chars (+25%) |
+| **Median response length** | 797 chars | 981 chars | +184 chars |
+| **Rerank-all step** | — | 407ms median | — |
+| **Injected passages** | — | 35 median (range: 30–43) | — |
+
+#### Per-Question Breakdown (top_k=50, run 1)
+
+| Question | Latency | Length | Injected | Notes |
+|----------|---------|--------|----------|-------|
+| Q-D1 | 5,246ms | 1,392 chars | 37 | Emergency defect notification |
+| Q-D2 | 3,972ms | 1,175 chars | — | PMA reservations |
+| Q-D3 | 9,760ms | 3,116 chars | — | Exhaustive timeframes — **key improvement** |
+| Q-D4 | 5,224ms | 1,512 chars | — | Insurance limits |
+| Q-D5 | 4,582ms | 1,352 chars | — | Warranty coverage start |
+| Q-D6 | 3,974ms | 981 chars | — | Price matching |
+| Q-D7 | 3,888ms | 839 chars | — | Latest date |
+| Q-D8 | 5,196ms | 1,228 chars | — | Entity document count |
+| Q-D9 | 7,115ms | 2,239 chars | — | Fees comparison |
+| Q-D10 | 5,448ms | 1,769 chars | — | Risk allocation |
 
 Latency is counter-intuitively *lower* with rerank-all enabled — the broader context leads to more focused LLM synthesis with less retry/hallucination overhead.
 
@@ -11350,3 +11396,27 @@ Route 7 was tested on Q-G (global/thematic) questions to assess its range beyond
 ### 39.9. Git Commits
 
 - `203b3e9b` — feat(route7): add corpus-wide cross-encoder reranking (step 4.6)
+
+### 39.10. Proposed: Step 4.7 LLM Relevance Filter
+
+The Q-G benchmark (§39.7) revealed that rerank-all causes **over-inclusion** for thematic queries — the LLM sees ~55 passages and extracts too many facts beyond the question's scope. An LLM relevance filter between retrieval and synthesis could fix this:
+
+```
+Current (Q-G4 fails):
+  55 passages → LLM synthesis → over-inclusive answer (inspections, tax IDs, etc.)
+
+With LLM filter (proposed):
+  55 passages → LLM filter ("is this about reporting/record-keeping?") → ~15 passages → LLM synthesis → scoped answer
+```
+
+**Upstream parallel:** HippoRAG 2 uses `DSPyFilter` (LLM-based triple reranker) on PPR candidates. Our version would filter passages, not triples, and operate on the full rerank-all output.
+
+**Why the cross-encoder can't do this:** The cross-encoder ranks "inspections" and "insurance obligations" highly for a query about "reporting obligations" because they're semantically close. But an LLM can distinguish that inspections are NOT reporting/record-keeping — it understands the categorical boundary.
+
+**Expected impact:**
+- Q-G score: 24/30 → likely 27-29/30 (fixes over-inclusion without hurting recall)
+- Q-D score: 57/57 → 57/57 (filter passes through all relevant passages for focused queries)
+- Latency: +500ms–1.5s (using gpt-4.1-mini on ~55 passages in batch)
+- Net effect: Route 7 becomes competitive on BOTH Q-D and Q-G, potentially simplifying routing
+
+**Implementation plan:** Add as step 4.7 between rerank-all merge and chunk fetch, controlled by `ROUTE7_LLM_FILTER` env var (default: disabled until validated).
