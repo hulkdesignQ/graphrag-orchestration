@@ -10815,3 +10815,344 @@ extract_sentences_from_di_units()
 **Key files modified:**
 - `src/worker/services/document_intelligence_service.py` — Fixes A1, A2, A3, A3b, A4, A5, A6
 - `src/worker/services/sentence_extraction_service.py` — Fixes A2 (consumer), A7, A8
+
+---
+
+## 38. Frontend Test Infrastructure & Coverage (March 2, 2026)
+
+### Motivation
+
+The frontend codebase (~80 source files across pages, components, API layer, auth, and history providers) had **zero test infrastructure** — no test framework, no test files, no CI gating. This section documents the 4-phase testing initiative that added comprehensive test coverage.
+
+### Technology Stack
+
+| Tool | Purpose |
+|------|---------|
+| **Vitest 4.x** | Test runner (fast, Vite-native, ESM-first) |
+| **@testing-library/react** | Component testing (user-centric DOM queries) |
+| **@testing-library/jest-dom** | Custom DOM matchers (`toBeInTheDocument`, etc.) |
+| **@testing-library/user-event** | Realistic user interaction simulation |
+| **jsdom** | Browser-like DOM environment for unit tests |
+| **MSW** (mock service worker) | API mocking (installed, available for future use) |
+| **Playwright** | E2E browser testing (chromium) |
+
+### Configuration Files
+
+| File | Purpose |
+|------|---------|
+| `frontend/app/frontend/vitest.config.ts` | Vitest config: jsdom environment, setup file, coverage |
+| `frontend/app/frontend/src/test/setup.ts` | Global setup: jest-dom matchers, `authConfig` mock, `scrollIntoView` polyfill |
+| `frontend/app/frontend/src/test/testUtils.tsx` | `renderWithProviders()` — wraps components with FluentProvider + I18nextProvider |
+| `frontend/app/frontend/playwright.config.ts` | Playwright config: chromium project, dev server auto-start |
+| `frontend/app/frontend/package.json` | Scripts: `test`, `test:watch`, `test:unit`, `test:coverage`, `test:e2e` |
+
+### Critical Test Setup Detail: authConfig Mock
+
+`src/authConfig.ts` performs **top-level `await fetch("/auth_setup")`** (line 64) and **`await getAppServicesToken()`** (line 167) that execute on import. In jsdom there is no base URL, so relative fetch fails. The mock in `setup.ts` replaces all exports with safe defaults. Any test file importing a component that transitively imports `authConfig` benefits from this global mock.
+
+### CI Pipeline Integration
+
+Added `frontend-test` job to `.github/workflows/deploy.yml`:
+
+```yaml
+frontend-test:
+  runs-on: ubuntu-latest
+  steps:
+    - checkout
+    - setup Node 20
+    - npm ci (frontend/app/frontend)
+    - npm run test:unit
+    - npm run build
+```
+
+The `deploy` job now has `needs: [frontend-test, build]`, blocking deployment on test failure. The `push.paths` trigger includes `frontend/**`.
+
+### Test Results Summary (March 2, 2026)
+
+```
+ Test Files  22 passed (22)
+      Tests  168 passed (168)
+   Duration  35.68s
+```
+
+### Test Files & Individual Results
+
+#### Phase 1b: Pure Function Unit Tests (51 tests)
+
+**`src/test/answerParser.test.ts`** — 12 tests
+- ✓ returns empty for empty input
+- ✓ parses plain text with no citations
+- ✓ parses numbered citation [doc1]
+- ✓ parses multiple citations
+- ✓ parses web citations (http/https)
+- ✓ handles streaming partial text
+- ✓ parses doc citations from answer
+- ✓ handles SharePoint citations
+- ✓ handles mixed doc and web citations
+- ✓ deduplicates citations
+- ✓ preserves citation order
+- ✓ handles malformed citation brackets
+
+**`src/test/files.test.ts`** — 19 tests
+- ✓ getFileIcon: returns PDF icon for .pdf
+- ✓ getFileIcon: returns Word icon for .docx
+- ✓ getFileIcon: returns Excel icon for .xlsx
+- ✓ getFileIcon: returns image icon for .png/.jpg
+- ✓ getFileIcon: returns default icon for unknown
+- ✓ getFileIcon: is case-insensitive
+- ✓ formatFileSize: returns dash for undefined
+- ✓ formatFileSize: returns '0 B' for 0 bytes
+- ✓ formatFileSize: formats bytes
+- ✓ formatFileSize: formats kilobytes
+- ✓ formatFileSize: formats megabytes
+- ✓ formatFileSize: formats gigabytes
+- ✓ getFileExtension: extracts extension
+- ✓ getFileExtension: lowercases extension
+- ✓ getFileExtension: handles multiple dots
+- ✓ getFileExtension: returns empty for no extension
+- ✓ getFileContentUrl: encodes the path
+- ✓ getFileContentUrl: encodes special characters
+- ✓ getFileContentUrl: handles paths with spaces
+
+**`src/test/supportingContentParser.test.ts`** — 5 tests
+- ✓ returns empty array for empty input
+- ✓ parses text data points
+- ✓ parses title and content
+- ✓ handles data points without separator
+- ✓ handles undefined input
+
+**`src/test/agentPlanUtils.test.ts`** — 4 tests
+- ✓ activityTypeLabels: maps all expected activity types
+- ✓ getStepLabel: prefers step.label when present
+- ✓ getStepLabel: falls back to activityTypeLabels when no label
+- ✓ getStepLabel: falls back to raw type when no label and no mapping
+
+**`src/test/api.test.ts`** — 4 tests
+- ✓ getCitationFilePath: returns content path for simple filename
+- ✓ getCitationFilePath: strips parenthesized suffix
+- ✓ getCitationFilePath: strips all parenthesized content with greedy match
+- ✓ getCitationFilePath: handles citation with no parentheses
+
+**`src/test/groupHistory.test.ts`** — 7 tests (uses `vi.useFakeTimers` pinned to 2026-03-02T12:00:00Z)
+- ✓ returns empty object for empty input
+- ✓ groups today's items
+- ✓ groups yesterday's items
+- ✓ groups last 7 days items
+- ✓ groups last 30 days items
+- ✓ groups older items by month/year
+- ✓ distributes mixed items into correct groups
+
+#### Phase 1c: API Layer Tests (35 tests)
+
+**`src/test/filesApi.test.ts`** — 15 tests (mocks `globalThis.fetch`)
+- ✓ listFilesApi: returns file list on success
+- ✓ listFilesApi: throws on HTTP error
+- ✓ uploadFilesApi: sends FormData and returns result
+- ✓ uploadFilesApi: calls progress callback
+- ✓ uploadFilesApi: throws on HTTP error
+- ✓ deleteFileApi: sends DELETE request
+- ✓ deleteFileApi: throws on HTTP error
+- ✓ bulkDeleteFilesApi: sends POST with filenames
+- ✓ bulkDeleteFilesApi: throws on HTTP error
+- ✓ renameFileApi: sends POST with old and new name
+- ✓ renameFileApi: throws on HTTP error
+- ✓ getFileContentUrl: builds correct URL
+- ✓ getFileIcon: maps known extensions
+- ✓ getFileExtension: extracts and lowercases
+- ✓ formatFileSize: formats all size ranges
+
+**`src/test/apiEndpoints.test.ts`** — 14 tests (mocks `globalThis.fetch`)
+- ✓ chatApi: sends POST with correct body (streaming)
+- ✓ chatApi: sends POST with correct body (non-streaming)
+- ✓ configApi: returns parsed config
+- ✓ configApi: throws on HTTP error
+- ✓ getSpeechApi: returns speech URL
+- ✓ getSpeechApi: returns null on 400
+- ✓ uploadApi: sends file in FormData
+- ✓ deleteUploadedFileApi: sends DELETE request
+- ✓ listUploadedFilesApi: returns file list
+- ✓ historyGenerate: sends POST
+- ✓ historyRead: sends POST with id
+- ✓ historyList: sends POST with count
+- ✓ historyDelete: sends DELETE
+- ✓ historyEnsure: sends GET
+
+**`src/test/dashboardApi.test.ts`** — 6 tests (mocks `globalThis.fetch`)
+- ✓ fetchDashboardData: returns parsed JSON
+- ✓ fetchDashboardData: includes auth header when token provided
+- ✓ fetchDashboardData: throws on HTTP error
+- ✓ fetchUsageSummary: returns usage data
+- ✓ fetchPlanDetails: returns plan info
+- ✓ fetchDailyBreakdown: returns daily data
+
+#### Phase 2a: Simple Component Tests (15 tests)
+
+**`src/test/answerComponents.test.tsx`** — 4 tests
+- ✓ AnswerIcon: renders sparkle icon
+- ✓ AnswerLoading: renders loading text
+- ✓ AnswerError: renders error message and retry button
+- ✓ AnswerError: calls onRetry when button clicked
+
+**`src/test/buttons.test.tsx`** — 7 tests
+- ✓ ClearChatButton: renders with label
+- ✓ ClearChatButton: calls onClick when clicked
+- ✓ ClearChatButton: can be disabled
+- ✓ SettingsButton: renders with label
+- ✓ SettingsButton: calls onClick when clicked
+- ✓ HistoryButton: renders with label
+- ✓ HistoryButton: can be disabled
+
+**`src/test/example.test.tsx`** — 2 tests
+- ✓ Example: renders the example text
+- ✓ Example: calls onClick with value when clicked
+
+**`src/test/userChatMessage.test.tsx`** — 2 tests
+- ✓ renders user message text
+- ✓ renders message in container
+
+#### Phase 2b: Form/Input Component Tests (22 tests)
+
+**`src/test/questionInput.test.tsx`** — 10 tests
+- ✓ renders a textarea
+- ✓ renders with placeholder text
+- ✓ calls onSend when send button is clicked
+- ✓ calls onSend on Enter key
+- ✓ does not send on Shift+Enter
+- ✓ does not send empty or whitespace-only text
+- ✓ clears input after send when clearOnSend is true
+- ✓ shows stop button when streaming
+- ✓ calls onStop when stop button is clicked
+- ✓ pre-fills text from initQuestion
+
+**`src/test/renameDialog.test.tsx`** — 8 tests
+- ✓ renders with current filename
+- ✓ renders title and buttons
+- ✓ calls onRename with new name on Rename click
+- ✓ calls onRename on Enter key
+- ✓ calls onDismiss on Escape key
+- ✓ calls onDismiss on Cancel click
+- ✓ calls onDismiss when name unchanged on submit
+- ✓ calls onDismiss when overlay is clicked
+
+**`src/test/toast.test.tsx`** — 4 tests
+- ✓ renders success toast with text
+- ✓ renders error toast with icon
+- ✓ renders info toast with icon
+- ✓ calls onDismiss when dismiss button is clicked
+
+#### Phase 2c: Complex Component Tests (33 tests)
+
+**`src/test/answer.test.tsx`** — 10 tests
+- ✓ renders answer text via markdown
+- ✓ disables thought process button when streaming
+- ✓ disables thought process button when no thoughts
+- ✓ calls onThoughtProcessClicked when thought button is clicked
+- ✓ calls onSupportingContentClicked when supporting button is clicked
+- ✓ copies answer text to clipboard on copy button click
+- ✓ renders follow-up questions when provided
+- ✓ calls onFollowupQuestionClicked when a follow-up is clicked
+- ✓ shows SpeechOutputAzure when showSpeechOutputAzure is true
+- ✓ shows SpeechOutputBrowser when showSpeechOutputBrowser is true
+
+**`src/test/analysisPanel.test.tsx`** — 5 tests
+- ✓ renders all three tab roles
+- ✓ renders thought process content when tab is active
+- ✓ enables citation tab when activeCitation is set
+- ✓ calls onActiveTabChanged when a tab is selected
+- ✓ renders citation iframe when citation tab active with URL
+
+**`src/test/agentPlan.test.tsx`** — 9 tests
+- ✓ returns null for empty queryPlan
+- ✓ renders single iteration header for single planning step
+- ✓ renders multiple iteration headers for multiple planning steps
+- ✓ shows step numbers
+- ✓ shows search query in searchIndex detail
+- ✓ shows 'No results found' for search step without results
+- ✓ renders document result links and calls onCitationClicked
+- ✓ calls onEffortExtracted with effort kind from agentic step
+- ✓ shows elapsed_ms in table
+
+**`src/test/fileList.test.tsx`** — 9 tests
+- ✓ renders loading state
+- ✓ renders empty state when no files
+- ✓ renders file names
+- ✓ renders file extensions as type
+- ✓ calls onToggleSelect when row is clicked
+- ✓ shows checked checkbox for selected files
+- ✓ calls onRename when rename button is clicked
+- ✓ calls onDelete when delete button is clicked
+- ✓ does not call onToggleSelect when action buttons are clicked
+
+#### Phase 3: Page Integration Tests (12 tests)
+
+**`src/test/chatPage.test.tsx`** — 6 tests (mocks: authConfig, MSAL, loginContext, chatApi, configApi, HistoryProviders)
+- ✓ renders sign-in prompt when not logged in
+- ✓ renders empty state with examples when logged in
+- ✓ renders settings button
+- ✓ sends a question and shows the answer (non-streaming)
+- ✓ shows error state on API failure
+- ✓ clear chat resets the conversation
+
+**`src/test/filesPage.test.tsx`** — 6 tests (mocks: authConfig, MSAL, loginContext, all file APIs)
+- ✓ loads and displays files on mount
+- ✓ shows loading state while files load
+- ✓ shows empty state when no files
+- ✓ filters files by search query
+- ✓ opens rename dialog when rename is clicked
+- ✓ calls delete API and refreshes file list
+
+#### Phase 4: Playwright E2E Smoke Tests (5 tests, config only — browsers not installed in dev environment)
+
+**`e2e/smoke.spec.ts`** — 5 tests
+- loads the home page (chat)
+- navigates to files page
+- shows 404 for unknown route
+- shows example questions in empty state
+- renders on mobile viewport
+
+### Coverage by Component Category
+
+| Category | Files Tested | Test Count |
+|----------|-------------|------------|
+| Pure utility functions | answerParser, files, supportingContent, agentPlanUtils, api, groupHistory | 51 |
+| API layer (fetch mocking) | filesApi, apiEndpoints, dashboardApi | 35 |
+| Simple components | AnswerIcon, AnswerLoading, AnswerError, ClearChat/Settings/History buttons, Example, UserChatMessage | 15 |
+| Form/input components | QuestionInput, RenameDialog, Toast | 22 |
+| Complex components | Answer, AnalysisPanel, AgentPlan, FileList | 33 |
+| Page integration | Chat (full flow), Files (full flow) | 12 |
+| **Total (unit + integration)** | **22 files** | **168** |
+| E2E (Playwright) | smoke.spec.ts | 5 (pending browser install) |
+
+### Git Commits
+
+| SHA | Description |
+|-----|-------------|
+| `25d95dab` | Phase 1: test infra + 51 pure function unit tests |
+| `0449e779` | Phase 1c + 2a: API layer + simple component tests (50 more, 101 total) |
+| `8e472d14` | CI pipeline: frontend-test job gates deploys |
+| `d985ac7c` | Phase 2b: form/input component tests (22 tests) |
+| `a5768b78` | Phase 2c: complex component tests (33 tests) |
+| `bc32045b` | Phase 3: page integration tests (12 tests) |
+| `c1ba6499` | Phase 4: Playwright E2E config + smoke tests |
+
+### Key Source Modifications
+
+- `frontend/app/frontend/src/components/HistoryPanel/HistoryPanel.tsx` — exported `groupHistory` function for testability (line 115)
+- `.github/workflows/deploy.yml` — added `frontend-test` job; `deploy` depends on `[frontend-test, build]`; `frontend/**` added to push path triggers
+
+### Running Tests
+
+```bash
+# All unit + integration tests
+cd frontend/app/frontend && npm run test:unit
+
+# Watch mode (re-runs on file change)
+npm run test:watch
+
+# Coverage report
+npm run test:coverage
+
+# Playwright E2E (requires browser install first)
+npx playwright install chromium
+npm run test:e2e
+```
