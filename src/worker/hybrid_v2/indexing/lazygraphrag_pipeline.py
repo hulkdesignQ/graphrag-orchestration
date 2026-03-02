@@ -1326,7 +1326,7 @@ class LazyGraphRAGIndexingPipeline:
         content_sentences = []
         classification_counts = {"content": 0, "metadata": 0, "noise": 0}
         for s in raw_sentences:
-            cls = self._classify_sentence(s["text"])
+            cls = self._classify_sentence(s)
             classification_counts[cls] += 1
             if cls == "content":
                 content_sentences.append(s)
@@ -1451,7 +1451,7 @@ Return ONLY valid JSON (no markdown fences):
 
         raw_sentences = self.neo4j_store.get_sentences_by_group(group_id)
         content_sentences = [
-            s for s in raw_sentences if self._classify_sentence(s["text"]) == "content"
+            s for s in raw_sentences if self._classify_sentence(s) == "content"
         ]
         if not content_sentences:
             return [], []
@@ -3166,25 +3166,42 @@ SUMMARY: <summary>"""
         return SchemaConfig(node_types=entities, relationship_types=relations, patterns=potential_schema)
 
     @staticmethod
-    def _classify_sentence(text: str) -> str:
+    def _classify_sentence(sentence) -> str:
         """Classify a sentence as 'content', 'metadata', or 'noise'.
 
         content  — extract entities from this
         metadata — store as structured data, skip entity extraction
         noise    — skip entirely (form labels, empty fields)
+
+        Accepts a sentence dict (with 'text', 'source', 'section_path')
+        or a plain text string.  When DI metadata is available the
+        classifier trusts it: a paragraph placed by DI in a real section
+        is always 'content' regardless of text heuristics.
         """
-        t = text.strip()
+        if isinstance(sentence, dict):
+            t = (sentence.get("text") or "").strip()
+            source = sentence.get("source") or ""
+            section = sentence.get("section_path") or ""
+        else:
+            t = str(sentence).strip()
+            source = ""
+            section = ""
+
+        # ── Absolute noise: too short to contain any entity ──
         if len(t) < 15:
             return "noise"
+
+        # ── DI trust: paragraph or table_row in a real section → content ──
+        has_section = bool(section) and section not in ("[Signature Block]", "[Page Footer]", "[Page Header]")
+        if has_section and source in ("paragraph", "table_row"):
+            return "content"
+
+        # ── Heuristics for items without DI section context ──
         if len(t) < 40 and t.endswith(':'):
-            return "noise"  # "Pumper's Name:"
-        # Pure numeric/currency strings
+            return "noise"  # blank form labels, e.g. "Pumper's Name:"
         if re.match(r'^[\d\$,.%\s]+$', t):
-            return "metadata"  # "$29,900.00"
-        # Short Key: Value pairs (e.g. "Contract Date: 2024-06-15") — must have
-        # colon followed by a value to distinguish from content phrases.
-        if len(t) < 50 and re.match(r'^[A-Za-z][^:]{0,25}:\s+\S', t) and not any(c in t for c in '.!?;'):
-            return "metadata"
+            return "metadata"  # pure numeric/currency, e.g. "$29,900.00"
+
         return "content"
 
     @staticmethod

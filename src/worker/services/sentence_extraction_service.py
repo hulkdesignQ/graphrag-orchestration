@@ -21,6 +21,7 @@ Benchmark results (Strategy A):
   - 8 wins, 0 real losses, 1 tie (1 "loss" was metric artifact)
 """
 
+import os
 import re
 import threading
 from typing import Any, Dict, List, Optional, Tuple
@@ -141,6 +142,59 @@ def _page_for_sentence(sent_text: str, unit_text: str,
 _SPEC_LIST_RE = re.compile(r'^[A-Za-z0-9][^:]{0,30}:\s*.{1,40}$')
 _LIST_JOIN_MAX_TOKENS = 15
 _LIST_JOIN_GROUP_MAX_TOKENS = 120
+
+# Preamble merge: colon-terminated stubs and very short fragments
+_PREAMBLE_RE = re.compile(r"[:\.][\s.]*$")  # ends with : or :. (possibly trailing spaces/dots)
+
+
+def _join_preamble_sentences(sentences: List[Dict]) -> List[Dict]:
+    """Merge stub/preamble sentences with the sentence that follows them.
+
+    Targets two patterns that wtpsplit over-splits:
+      1. List preambles ending with ':' or ':.' (e.g. "Owner agrees to and shall:.")
+      2. Very short fragments (≤ 3 words) that are incomplete on their own
+         (e.g. "(f) Provide Liability" split from "Insurance coverage …")
+
+    Only merges consecutive *paragraph* sources sharing the same section_path
+    to avoid cross-section contamination.
+    """
+    if len(sentences) < 2:
+        return sentences
+
+    result: List[Dict] = []
+    i = 0
+    while i < len(sentences):
+        sent = sentences[i]
+        text = sent.get("text", "").strip()
+        source = sent.get("source", "")
+
+        # Only merge paragraph sentences (not tables, signatures, etc.)
+        if source == "paragraph" and i + 1 < len(sentences):
+            nxt = sentences[i + 1]
+            same_section = (
+                nxt.get("source") == "paragraph"
+                and nxt.get("section_path", "") == sent.get("section_path", "")
+            )
+            is_preamble = (
+                text.endswith(":") or text.endswith(":.") or text.endswith(": .")
+            )
+            # Only merge very short fragments that don't end with a period
+            # (period = likely a complete sentence, e.g. "Manufacturer warranty applies.")
+            is_tiny = len(text.split()) <= 3 and not text.rstrip().endswith(".")
+
+            if same_section and (is_preamble or is_tiny):
+                nxt_text = nxt.get("text", "").strip()
+                joined_text = f"{text} {nxt_text}"
+                merged = dict(sent)
+                merged["text"] = joined_text
+                merged["tokens"] = len(joined_text.split())
+                result.append(merged)
+                i += 2
+                continue
+
+        result.append(sent)
+        i += 1
+    return result
 
 
 def _join_spec_list_sentences(sentences: List[Dict]) -> List[Dict]:
@@ -301,7 +355,7 @@ def _is_noise_sentence(
         return True
 
     # Rule 3: ALL-CAPS leaked headings that DI missed labelling
-    if ALL_CAPS_RE.match(text) and len(text.split()) < 5:
+    if ALL_CAPS_RE.match(text) and len(text.split()) <= 5:
         return True
 
     # Rule 4: Numeric-only content (standalone table cells like "$12,450.00")
@@ -964,6 +1018,9 @@ def extract_sentences_from_di_units(
                     })
                     global_idx += 1
 
+    # Merge preamble stubs (colon-terminated, tiny fragments) with next sentence
+    if not os.getenv("DISABLE_PREAMBLE_MERGE"):
+        all_sentences = _join_preamble_sentences(all_sentences)
     # Join consecutive short spec-list sentences (Fix A7)
     all_sentences = _join_spec_list_sentences(all_sentences)
 

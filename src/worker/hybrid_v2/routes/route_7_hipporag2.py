@@ -23,6 +23,7 @@ Reference: https://arxiv.org/abs/2502.14802
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import re
 import time
@@ -567,6 +568,48 @@ class HippoRAG2Handler(BaseRouteHandler):
         if rerank_all_injected > 0:
             # Re-sort by score so injected passages compete fairly
             passage_scores.sort(key=lambda x: x[1], reverse=True)
+
+        # Step 4.7: LLM relevance filter — reduce over-inclusion for thematic queries
+        # Filters the combined passage pool (PPR + rerank-all) through an LLM
+        # that decides which passages are truly relevant to the specific question.
+        llm_filter_enabled = os.getenv(
+            "ROUTE7_LLM_FILTER", "0"
+        ).strip().lower() in {"1", "true", "yes"}
+        llm_filter_removed = 0
+        if llm_filter_enabled and passage_limit > 0:
+            t0_filt = time.perf_counter()
+            try:
+                candidate_passages = passage_scores[:passage_limit]
+                text_map = self._ppr_engine.get_all_passage_texts()
+                filtered = await self._llm_relevance_filter(
+                    query, candidate_passages, text_map,
+                )
+                if filtered is not None:
+                    llm_filter_removed = len(candidate_passages) - len(filtered)
+                    # Safety: if filter returned zero passages, the query
+                    # likely has no relevant content — keep original set so
+                    # synthesis LLM can say "not found" rather than hallucinate.
+                    if len(filtered) == 0:
+                        logger.info(
+                            "step_4.7_llm_filter_skipped_empty",
+                            original=len(candidate_passages),
+                        )
+                    else:
+                        passage_scores = filtered + passage_scores[passage_limit:]
+                        passage_limit = len(filtered)
+                    logger.info(
+                        "step_4.7_llm_filter",
+                        before=len(candidate_passages),
+                        after=len(filtered),
+                        removed=llm_filter_removed,
+                        applied=len(filtered) >= min_keep,
+                    )
+            except Exception as e:
+                logger.warning("step_4.7_llm_filter_failed", error=str(e))
+            timings_ms["step_4.7_llm_filter_ms"] = int(
+                (time.perf_counter() - t0_filt) * 1000
+            )
+
         top_passage_scores = passage_scores[:passage_limit]
         top_chunk_ids = [cid for cid, _ in top_passage_scores]
         ppr_scores_map = {cid: score for cid, score in top_passage_scores}
@@ -771,6 +814,8 @@ class HippoRAG2Handler(BaseRouteHandler):
             "rerank_enabled": rerank_enabled,
             "rerank_all_enabled": rerank_all_enabled,
             "rerank_all_injected": rerank_all_injected,
+            "llm_filter_enabled": llm_filter_enabled,
+            "llm_filter_removed": llm_filter_removed,
             "query_mode": query_mode,
             "query_mode_preset_applied": query_mode in self.QUERY_MODE_PRESETS if query_mode else False,
         }
@@ -1784,3 +1829,88 @@ class HippoRAG2Handler(BaseRouteHandler):
         )
 
         return results
+
+    # ------------------------------------------------------------------
+    # Step 4.7 helper: LLM relevance filter
+    # ------------------------------------------------------------------
+    async def _llm_relevance_filter(
+        self,
+        query: str,
+        candidate_passages: List[Tuple[str, float]],
+        text_map: Dict[str, str],
+    ) -> Optional[List[Tuple[str, float]]]:
+        """Filter passages through an LLM that judges relevance to the query.
+
+        Sends all candidate passages in a single batch prompt, asking the LLM
+        to return the indices of passages that are directly relevant.
+        Returns filtered list preserving original scores, or None on failure.
+        """
+        if not candidate_passages:
+            return candidate_passages
+
+        # Build numbered passage list for the prompt
+        passage_lines = []
+        id_index = []
+        for i, (cid, score) in enumerate(candidate_passages):
+            text = text_map.get(cid, "").strip()
+            if not text:
+                continue
+            passage_lines.append(f"[{i}] {text}")
+            id_index.append((i, cid, score))
+
+        if not passage_lines:
+            return candidate_passages
+
+        filter_model = os.getenv("ROUTE7_LLM_FILTER_MODEL", "gpt-4.1-mini")
+
+        system_prompt = (
+            "You are a precision relevance filter for a document QA system. "
+            "Given a user question and a numbered list of text passages, "
+            "return ONLY the indices of passages that contain information "
+            "DIRECTLY relevant to answering the specific question asked. "
+            "Exclude passages that are merely tangentially related or from "
+            "the same domain but about a different topic.\n\n"
+            "Return a JSON array of integers, e.g. [0, 3, 7, 12]. "
+            "If no passages are relevant, return []. "
+            "Return ONLY the JSON array, no other text."
+        )
+
+        user_prompt = (
+            f"Question: {query}\n\n"
+            f"Passages:\n" + "\n".join(passage_lines)
+        )
+
+        # Get LLM client
+        from src.worker.services.llm_service import LLMService
+        llm_svc = LLMService()
+        llm_client = llm_svc._create_llm_client(filter_model)
+
+        response = await llm_client.acomplete(
+            system_prompt + "\n\n" + user_prompt
+        )
+        text = response.text.strip()
+
+        # Parse JSON array from response
+        import re as _re
+        match = _re.search(r'\[[\d,\s]*\]', text)
+        if not match:
+            logger.warning("llm_filter_no_json", raw=text[:200])
+            return None
+
+        kept_indices = set(json.loads(match.group()))
+
+        # Map indices back to (cid, score) tuples
+        filtered = [
+            (cid, score) for idx, cid, score in id_index
+            if idx in kept_indices
+        ]
+
+        logger.info(
+            "llm_filter_complete",
+            model=filter_model,
+            input=len(id_index),
+            kept=len(filtered),
+            removed=len(id_index) - len(filtered),
+        )
+
+        return filtered

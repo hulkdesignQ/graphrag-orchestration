@@ -40,7 +40,8 @@ def get_redis_url() -> str:
     if not host or not password:
         raise ValueError("REDIS_HOST and REDIS_PASSWORD environment variables are required")
     
-    return f"rediss://:{password}@{host}:{port}"
+    scheme = "redis" if os.getenv("REDIS_NO_SSL") else "rediss"
+    return f"{scheme}://:{password}@{host}:{port}"
 
 
 # =============================================================================
@@ -616,11 +617,11 @@ class RedisService:
         """Create RedisService with connection."""
         url = redis_url or get_redis_url()
         
-        client = aioredis.from_url(
-            url,
-            decode_responses=True,
-            ssl_cert_reqs=None  # Azure Redis uses managed certs
-        )
+        kwargs = {"decode_responses": True}
+        if url.startswith("rediss://"):
+            kwargs["ssl_cert_reqs"] = None  # Azure Redis uses managed certs
+        
+        client = aioredis.from_url(url, **kwargs)
         
         # Test connection
         await client.ping()

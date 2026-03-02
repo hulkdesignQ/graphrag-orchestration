@@ -189,3 +189,4 @@ test_5pdfs_results_*.json
 test_5pdfs_comprehensive.py
 test_5pdfs_simple.py
 test_pos_neg_questions_existing_data.py
+dump.rdb

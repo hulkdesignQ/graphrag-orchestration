@@ -147,22 +147,61 @@ Both engines provide **document content structure** — the difference is in **g
 
 **Summary:** For pure content extraction — headings, tables, lists, paragraphs — Mistral OCR is **at least as good as Azure DI**, and produces **cleaner prose** with better paragraph reconstruction.
 
-#### 6b. Geometric & Semantic Metadata (Azure DI only)
+#### 6b. Geometric & Semantic Metadata
 
-These features are **not available from Mistral OCR** and are specific to Azure DI's document intelligence platform:
+> **CORRECTION (2026-03-02):** Initial analysis incorrectly stated Mistral OCR provides NO structured layout data. Verified against SDK v1.12.4 `OCRImageObject`, `OCRTableObject`, and `OCRPageObject` class definitions.
 
-| Feature                       | Azure DI                         | Mistral OCR | Impact on Pipeline              |
-|-------------------------------|----------------------------------|-------------|---------------------------------|
-| Paragraph bounding polygons   | ✅ Polygon coordinates per para   | ❌           | Powers polygon highlighting UI  |
-| Sentence-level geometry       | ✅ Via word geometry composition  | ❌           | Powers sentence-level highlights|
-| Section tree                  | ✅ Hierarchical parent/child      | ❌           | Powers section-aware chunking   |
-| Key-value pairs               | ✅ 7–24 structured KVPs per doc   | ❌           | Powers form field extraction    |
-| Confidence scores             | ✅ Per-paragraph                  | ❌           | OCR quality filtering           |
-| Language detection             | ✅ Per-span                       | ❌           | Multilingual entity handling    |
-| Barcodes                      | ✅                                | ❌           | QR/barcode extraction           |
-| Selection marks (checkboxes)  | ✅ Structured state detection     | ❌           | Form state extraction           |
+| Feature                       | Azure DI                         | Mistral OCR                              | Impact on Pipeline              |
+|-------------------------------|----------------------------------|------------------------------------------|---------------------------------|
+| **Image bounding boxes**      | ✅ Polygon coordinates            | ✅ `top_left_x/y`, `bottom_right_x/y`    | Image region detection          |
+| **Table content (structured)**| ✅ Cells with row/col/polygons    | ✅ `OCRTableObject.content` (HTML/markdown) | Table extraction              |
+| **Table bounding box**        | ✅ Polygon per table              | ❌ Not in basic OCR (only via BBox Annotation) | Table region location    |
+| **Per-cell bounding boxes**   | ✅ Polygon per cell               | ❌ Not available                          | Cell-level highlighting         |
+| Paragraph bounding polygons   | ✅ Polygon coordinates per para   | ❌                                        | Powers polygon highlighting UI  |
+| Sentence-level geometry       | ✅ Via word geometry composition  | ❌                                        | Powers sentence-level highlights|
+| Section tree                  | ✅ Hierarchical parent/child      | ❌ (but `#`/`##` headings can reconstruct)| Powers section-aware chunking   |
+| Key-value pairs               | ✅ 7–24 structured KVPs per doc   | ❌                                        | Powers form field extraction    |
+| Confidence scores             | ✅ Per-paragraph                  | ❌                                        | OCR quality filtering           |
+| Language detection             | ✅ Per-span                       | ❌                                        | Multilingual entity handling    |
+| Barcodes                      | ✅                                | ❌                                        | QR/barcode extraction           |
+| Selection marks (checkboxes)  | ✅ Structured state detection     | ❌ (renders as `☐` in text)               | Form state extraction           |
+| **Page dimensions**           | ✅ Width/height/unit              | ✅ Width/height/dpi                       | Coordinate normalization        |
+| **Headers/footers**           | ✅ HTML comments                  | ✅ Separate `header`/`footer` fields      | Header/footer extraction        |
+| **BBox Annotation** (LLM)     | N/A                              | ✅ Custom schema → bboxes via vision model | Structured extraction w/ coords |
+| **Document Annotation** (LLM) | N/A                              | ✅ Custom schema → structured JSON         | Document-level extraction       |
 
-**Summary:** The gap between the two engines is **not** in content extraction quality — it's in the **sub-page geometric metadata** and **semantic field extraction** that Azure DI provides on top of the text. These metadata features power specific pipeline capabilities (polygon highlighting, section-aware chunking, KVP grounding) that Mistral OCR does not address.
+**Mistral OCR SDK types (verified 2026-03-02):**
+```python
+# OCRTableObject — table content only, NO coordinates
+class OCRTableObject:
+    id: str          # e.g. "tbl-0.html"
+    content: str     # HTML or markdown table content
+    format_: Format  # "markdown" | "html"
+
+# OCRImageObject — HAS bounding box coordinates
+class OCRImageObject:
+    id: str
+    top_left_x: int   # pixel coordinates
+    top_left_y: int
+    bottom_right_x: int
+    bottom_right_y: int
+    image_base64: Optional[str]
+    image_annotation: Optional[str]
+
+# OCRPageObject — per-page structure
+class OCRPageObject:
+    index: int
+    markdown: str
+    images: List[OCRImageObject]      # with bboxes
+    tables: Optional[List[OCRTableObject]]  # content only, NO bboxes
+    dimensions: OCRPageDimensions     # dpi, height, width
+    header: Optional[str]
+    footer: Optional[str]
+```
+
+**Note on BBox Annotation:** Mistral offers `bbox_annotation_format` as an OCR request parameter. This is an LLM-powered feature (uses the vision model) that can extract structured data WITH bounding boxes from document images. It's NOT part of basic OCR output — it's an additional inference step at extra cost. Useful for targeted extraction (e.g., "find all dates and their locations") but not a general layout engine.
+
+**Summary:** Mistral OCR provides structured table content (HTML/markdown) and image bounding boxes, but lacks per-paragraph polygons, per-cell coordinates, section tree, KVPs, and confidence scores. The BBox Annotation feature can extract arbitrary fields with coordinates but requires LLM inference. For the DI+ hybrid approach (see ARCHITECTURE_DI_PLUS_MISTRAL_TABLE_FIX.md), the key insight is that Mistral's table *detection* (which text belongs to a table) is superior, even though its table *coordinates* are absent — we use DI's paragraph polygons as the coordinate source.
 
 ### 7. Cost
 
