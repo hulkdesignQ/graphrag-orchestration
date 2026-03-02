@@ -281,6 +281,11 @@ class HippoRAG2Handler(BaseRouteHandler):
             "ROUTE7_RERANK", "0"
         ).strip().lower() in {"1", "true", "yes"}
         rerank_top_k = int(os.getenv("ROUTE7_RERANK_TOP_K", "30"))
+        # Corpus-wide reranker: cross-encoder on ALL passages as parallel retrieval channel
+        rerank_all_enabled = os.getenv(
+            "ROUTE7_RERANK_ALL", "1"
+        ).strip().lower() in {"1", "true", "yes"}
+        rerank_all_top_k = int(os.getenv("ROUTE7_RERANK_ALL_TOP_K", "50"))
 
         # Preset can override prompt_variant (only if caller didn't explicitly set one)
         if prompt_variant is None and preset.get("prompt_variant"):
@@ -526,8 +531,42 @@ class HippoRAG2Handler(BaseRouteHandler):
                 (time.perf_counter() - t0_rerank) * 1000
             )
 
+        # Step 4.6: Corpus-wide cross-encoder reranking (parallel retrieval channel)
+        # Unlike step 4.5 which only reranks PPR top-K, this reranks ALL passages
+        # in the corpus and merges top results into PPR output. This catches
+        # passages that PPR missed due to graph structure gaps.
+        rerank_all_injected = 0
+        if rerank_all_enabled:
+            t0_ra = time.perf_counter()
+            try:
+                rerank_all_results = await self._rerank_all_passages(
+                    query, top_k=rerank_all_top_k,
+                )
+                if rerank_all_results:
+                    # Only dedup against PPR TOP-K (not all PPR passages,
+                    # since PPR assigns non-zero scores to every passage)
+                    ppr_top_set = {cid for cid, _ in passage_scores[:ppr_passage_top_k]}
+                    for cid, score in rerank_all_results:
+                        if cid not in ppr_top_set:
+                            passage_scores.append((cid, score))
+                            rerank_all_injected += 1
+                    logger.info(
+                        "step_4.6_rerank_all_merge",
+                        rerank_all_returned=len(rerank_all_results),
+                        injected=rerank_all_injected,
+                        already_in_top_k=len(rerank_all_results) - rerank_all_injected,
+                    )
+            except Exception as e:
+                logger.warning("step_4.6_rerank_all_failed", error=str(e))
+            timings_ms["step_4.6_rerank_all_ms"] = int(
+                (time.perf_counter() - t0_ra) * 1000
+            )
+
         # Determine top passage IDs for chunk fetch
-        passage_limit = ppr_passage_top_k
+        passage_limit = ppr_passage_top_k + rerank_all_injected
+        if rerank_all_injected > 0:
+            # Re-sort by score so injected passages compete fairly
+            passage_scores.sort(key=lambda x: x[1], reverse=True)
         top_passage_scores = passage_scores[:passage_limit]
         top_chunk_ids = [cid for cid, _ in top_passage_scores]
         ppr_scores_map = {cid: score for cid, score in top_passage_scores}
@@ -730,6 +769,8 @@ class HippoRAG2Handler(BaseRouteHandler):
             "route_description": "True HippoRAG 2 with passage-node PPR (v7)",
             "version": "v7.4",
             "rerank_enabled": rerank_enabled,
+            "rerank_all_enabled": rerank_all_enabled,
+            "rerank_all_injected": rerank_all_injected,
             "query_mode": query_mode,
             "query_mode_preset_applied": query_mode in self.QUERY_MODE_PRESETS if query_mode else False,
         }
