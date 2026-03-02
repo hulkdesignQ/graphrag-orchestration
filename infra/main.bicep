@@ -67,6 +67,13 @@ param b2cClientId string = ''
 @description('External ID app client secret')
 param b2cClientSecret string = ''
 
+// Custom domain parameters
+@description('Custom domain for B2B app (e.g., evidoc-enterprise.hulkdesign.com). Empty = no custom domain.')
+param b2bCustomDomain string = ''
+
+@description('Custom domain for B2C app (e.g., evidoc.hulkdesign.com). Empty = no custom domain.')
+param b2cCustomDomain string = ''
+
 @description('Skip role assignments if they already exist')
 param skipRoleAssignments bool = false
 
@@ -139,6 +146,36 @@ module redis './core/cache/redis.bicep' = {
   }
 }
 
+// ============================================================================
+// Custom Domain Managed Certificates (Optional)
+// Prerequisites: CNAME DNS records must be configured BEFORE deploying with
+// custom domains. See DNS setup instructions in docs/.
+// ============================================================================
+
+// B2B managed certificate (e.g., evidoc-enterprise.hulkdesign.com)
+module b2bManagedCert './core/host/managed-certificate.bicep' = if (!empty(b2bCustomDomain)) {
+  name: 'b2b-managed-cert'
+  scope: rg
+  params: {
+    environmentName: 'graphrag-env'
+    location: location
+    domainName: b2bCustomDomain
+  }
+  dependsOn: [containerAppsEnvironment]
+}
+
+// B2C managed certificate (e.g., evidoc.hulkdesign.com)
+module b2cManagedCert './core/host/managed-certificate.bicep' = if (!empty(b2cCustomDomain)) {
+  name: 'b2c-managed-cert'
+  scope: rg
+  params: {
+    environmentName: 'graphrag-env'
+    location: location
+    domainName: b2cCustomDomain
+  }
+  dependsOn: [containerAppsEnvironment]
+}
+
 // GraphRAG API Gateway Container App
 module graphragApi './core/host/container-app.bicep' = {
   name: 'graphrag-api'
@@ -157,6 +194,9 @@ module graphragApi './core/host/container-app.bicep' = {
     // API Gateway image - handles HTTP requests
     containerImage: apiImageName
     targetPort: 8000
+    // Custom domain configuration
+    customDomainName: b2bCustomDomain
+    customDomainCertificateId: !empty(b2bCustomDomain) ? b2bManagedCert.outputs.certificateId : ''
     // Easy Auth configuration
     enableAuth: enableAuth
     authClientId: authClientId
@@ -543,6 +583,9 @@ module graphragApiB2C './core/host/container-app.bicep' = if (enableB2C && !empt
     containerName: 'graphrag-api-b2c'
     containerImage: apiImageName
     targetPort: 8000
+    // Custom domain configuration
+    customDomainName: b2cCustomDomain
+    customDomainCertificateId: !empty(b2cCustomDomain) ? b2cManagedCert.outputs.certificateId : ''
     // External ID (B2C) auth configuration
     enableAuth: true
     authClientId: b2cClientId
@@ -728,3 +771,5 @@ output REDIS_HOST string = redis.outputs.redisHostName
 output REDIS_PORT int = redis.outputs.redisSslPort
 output APIM_GATEWAY_URL string = enableApim ? apim.outputs.apimGatewayUrl : ''
 output APIM_NAME string = enableApim ? apim.outputs.apimName : ''
+output GRAPHRAG_API_CUSTOM_DOMAIN string = !empty(b2bCustomDomain) ? 'https://${b2bCustomDomain}' : ''
+output GRAPHRAG_API_B2C_CUSTOM_DOMAIN string = !empty(b2cCustomDomain) ? 'https://${b2cCustomDomain}' : ''

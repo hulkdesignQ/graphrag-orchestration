@@ -12,6 +12,13 @@ param targetPort int = 8000
 param env array = []
 param secrets array = []
 
+// Custom domain parameters
+@description('Custom domain name (e.g., evidoc.hulkdesign.com). Empty = no custom domain.')
+param customDomainName string = ''
+
+@description('Managed certificate ID for custom domain TLS. Required if customDomainName is set.')
+param customDomainCertificateId string = ''
+
 // Easy Auth parameters
 @description('Enable Easy Auth (Microsoft Entra ID authentication)')
 param enableAuth bool = false
@@ -49,6 +56,13 @@ resource containerApp 'Microsoft.App/containerApps@2024-10-02-preview' = {
         external: true  // API must be externally reachable; protected by Easy Auth + JWT middleware
         targetPort: targetPort
         transport: 'http'
+        customDomains: !empty(customDomainName) && !empty(customDomainCertificateId) ? [
+          {
+            name: customDomainName
+            certificateId: customDomainCertificateId
+            bindingType: 'SniEnabled'
+          }
+        ] : []
       }
       registries: [
         !empty(registryUsername) ? {
