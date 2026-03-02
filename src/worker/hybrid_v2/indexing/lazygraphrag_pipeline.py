@@ -2599,7 +2599,8 @@ Output:
                             WHERE id(n1) = e.node1 AND id(n2) = e.node2
                               AND n1.group_id = $group_id AND n2.group_id = $group_id
                             MERGE (n1)-[r:SEMANTICALLY_SIMILAR {knn_config: $knn_config}]->(n2)
-                            SET r.score = e.similarity, r.method = 'gds_knn', r.group_id = $group_id,
+                            SET r.score = e.similarity, r.similarity = e.similarity,
+                                r.method = 'gds_knn', r.group_id = $group_id,
                                 r.knn_k = $knn_k, r.knn_cutoff = $knn_cutoff, r.created_at = datetime()
                             RETURN count(r) AS cnt
                         """, edges=edge_batch, knn_config=knn_config, group_id=group_id,
@@ -2611,7 +2612,8 @@ Output:
                             WHERE id(n1) = e.node1 AND id(n2) = e.node2
                               AND n1.group_id = $group_id AND n2.group_id = $group_id
                             MERGE (n1)-[r:SEMANTICALLY_SIMILAR]->(n2)
-                            SET r.score = e.similarity, r.method = 'gds_knn', r.group_id = $group_id,
+                            SET r.score = e.similarity, r.similarity = e.similarity,
+                                r.method = 'gds_knn', r.group_id = $group_id,
                                 r.knn_k = $knn_k, r.knn_cutoff = $knn_cutoff, r.created_at = datetime()
                             RETURN count(r) AS cnt
                         """, edges=edge_batch, group_id=group_id,

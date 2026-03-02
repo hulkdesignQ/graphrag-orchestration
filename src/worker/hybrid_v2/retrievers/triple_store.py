@@ -246,7 +246,7 @@ async def recognition_memory_filter(
     fact_list = []
     triple_text_to_item: Dict[str, Tuple[Triple, float]] = {}
     for triple, score in candidate_triples:
-        parts = [triple.subject.lower(), triple.predicate.lower(), triple.object.lower()]
+        parts = [triple.subject_name.lower(), triple.predicate.lower(), triple.object_name.lower()]
         fact_list.append(parts)
         triple_text_to_item[str(parts)] = (triple, score)
 
