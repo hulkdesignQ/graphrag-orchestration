@@ -1121,7 +1121,8 @@ async def frontend_chat_stream(
 
     return StreamingResponse(
         _frontend_stream_response(query, approach, group_id, body.session_state, overrides, force_route_str),
-        media_type="application/x-ndjson",
+        media_type="text/event-stream",
+        headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
     )
 
 
