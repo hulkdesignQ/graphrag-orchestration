@@ -101,7 +101,7 @@ const { default: Chat } = await import("../pages/chat/Chat");
 
 function renderChat(loggedIn = true) {
     return renderWithProviders(
-        <LoginContext.Provider value={{ loggedIn }}>
+        <LoginContext.Provider value={{ loggedIn, setLoggedIn: () => {} }}>
             <Chat />
         </LoginContext.Provider>
     );

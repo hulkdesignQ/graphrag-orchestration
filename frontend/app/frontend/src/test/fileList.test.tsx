@@ -5,9 +5,9 @@ import { renderWithProviders } from "./testUtils";
 
 describe("FileList", () => {
     const files = ["report.pdf", "data.xlsx", "notes.md"];
-    let onToggle: ReturnType<typeof vi.fn>;
-    let onDelete: ReturnType<typeof vi.fn>;
-    let onRename: ReturnType<typeof vi.fn>;
+    let onToggle: (filename: string) => void;
+    let onDelete: (filename: string) => void;
+    let onRename: (filename: string) => void;
 
     function setup(overrides: Partial<Parameters<typeof FileList>[0]> = {}) {
         onToggle = vi.fn();

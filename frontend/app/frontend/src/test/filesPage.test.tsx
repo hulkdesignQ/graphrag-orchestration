@@ -50,7 +50,7 @@ const { default: Files } = await import("../pages/files/Files");
 
 function renderFiles() {
     return renderWithProviders(
-        <LoginContext.Provider value={{ loggedIn: true }}>
+        <LoginContext.Provider value={{ loggedIn: true, setLoggedIn: () => {} }}>
             <Files />
         </LoginContext.Provider>
     );

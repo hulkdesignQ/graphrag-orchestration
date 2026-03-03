@@ -37,9 +37,9 @@ function makeResponse(overrides: Partial<ChatAppResponse> = {}): ChatAppResponse
 }
 
 describe("Answer component", () => {
-    let onCitation: ReturnType<typeof vi.fn>;
-    let onThought: ReturnType<typeof vi.fn>;
-    let onSupporting: ReturnType<typeof vi.fn>;
+    let onCitation: (filePath: string) => void;
+    let onThought: () => void;
+    let onSupporting: () => void;
 
     beforeEach(() => {
         onCitation = vi.fn();

@@ -31,7 +31,7 @@ function makeResponse(overrides: Partial<ChatAppResponse["context"]> = {}): Chat
 }
 
 describe("AnalysisPanel", () => {
-    let onTabChanged: ReturnType<typeof vi.fn>;
+    let onTabChanged: (tab: AnalysisPanelTabs) => void;
 
     beforeEach(() => {
         onTabChanged = vi.fn();
