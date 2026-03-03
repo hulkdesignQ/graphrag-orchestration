@@ -18,7 +18,7 @@
       "value": true
     },
     "enableAuth": {
-      "value": false
+      "value": "${ENABLE_AUTH=false}"
     },
     "authClientId": {
       "value": "b68b6881-80ba-4cec-b9dd-bd2232ec8817"
@@ -37,6 +37,12 @@
     },
     "b2cClientSecret": {
       "value": "${B2C_CLIENT_SECRET}"
+    },
+    "b2bCustomDomain": {
+      "value": "${B2B_CUSTOM_DOMAIN}"
+    },
+    "b2cCustomDomain": {
+      "value": "${B2C_CUSTOM_DOMAIN}"
     },
     "serviceGraphragImageName": {
       "value": "${SERVICE_GRAPHRAG_IMAGE_NAME}"
