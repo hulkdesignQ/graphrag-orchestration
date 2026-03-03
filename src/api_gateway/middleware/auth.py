@@ -151,7 +151,11 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
                             detail="No user identifier found in token"
                         )
                     request.state.user_id = user_id
-                    request.state.group_id = user_id  # Use user_id as group_id for consistency
+                    # GROUP_ID_OVERRIDE takes precedence (for testing)
+                    if settings.GROUP_ID_OVERRIDE:
+                        request.state.group_id = settings.GROUP_ID_OVERRIDE
+                    else:
+                        request.state.group_id = user_id
                     
                 else:
                     raise ValueError(f"Unknown auth_type: {self.auth_type}")
