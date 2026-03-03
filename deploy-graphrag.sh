@@ -279,13 +279,15 @@ VOYAGE_API_KEY=$(get_env_value_or_default "VOYAGE_API_KEY" "" false)
 NEO4J_PASSWORD=$(get_env_value_or_default "NEO4J_PASSWORD" "" false)
 MISTRAL_API_KEY=$(get_env_value_or_default "MISTRAL_API_KEY" "" false)
 LLMWHISPERER_API_KEY=$(get_env_value_or_default "LLMWHISPERER_API_KEY" "" false)
+AURA_DS_CLIENT_SECRET=$(get_env_value_or_default "AURA_DS_CLIENT_SECRET" "" false)
 
 # Build a space-separated list of secrets to update (only those with values)
 _SECRETS_TO_SET=""
-[ -n "$VOYAGE_API_KEY" ]       && _SECRETS_TO_SET="$_SECRETS_TO_SET voyage-api-key=$VOYAGE_API_KEY"
-[ -n "$NEO4J_PASSWORD" ]       && _SECRETS_TO_SET="$_SECRETS_TO_SET neo4j-password=$NEO4J_PASSWORD"
-[ -n "$MISTRAL_API_KEY" ]      && _SECRETS_TO_SET="$_SECRETS_TO_SET mistral-api-key=$MISTRAL_API_KEY"
-[ -n "$LLMWHISPERER_API_KEY" ] && _SECRETS_TO_SET="$_SECRETS_TO_SET llmwhisperer-api-key=$LLMWHISPERER_API_KEY"
+[ -n "$VOYAGE_API_KEY" ]        && _SECRETS_TO_SET="$_SECRETS_TO_SET voyage-api-key=$VOYAGE_API_KEY"
+[ -n "$NEO4J_PASSWORD" ]        && _SECRETS_TO_SET="$_SECRETS_TO_SET neo4j-password=$NEO4J_PASSWORD"
+[ -n "$MISTRAL_API_KEY" ]       && _SECRETS_TO_SET="$_SECRETS_TO_SET mistral-api-key=$MISTRAL_API_KEY"
+[ -n "$LLMWHISPERER_API_KEY" ]  && _SECRETS_TO_SET="$_SECRETS_TO_SET llmwhisperer-api-key=$LLMWHISPERER_API_KEY"
+[ -n "$AURA_DS_CLIENT_SECRET" ] && _SECRETS_TO_SET="$_SECRETS_TO_SET aura-ds-client-secret=$AURA_DS_CLIENT_SECRET"
 
 if [ -n "$_SECRETS_TO_SET" ]; then
     echo "🔑 Updating Container App secrets..."
@@ -349,7 +351,7 @@ ENV_VARS=(
     MISTRAL_API_KEY="secretref:mistral-api-key"
     LLMWHISPERER_API_KEY="secretref:llmwhisperer-api-key"
     AURA_DS_CLIENT_ID="$AURA_DS_CLIENT_ID"
-    AURA_DS_CLIENT_SECRET="$AURA_DS_CLIENT_SECRET"
+    AURA_DS_CLIENT_SECRET="secretref:aura-ds-client-secret"
     SKELETON_ENRICHMENT_ENABLED="$SKELETON_ENRICHMENT_ENABLED"
     SKELETON_GRAPH_TRAVERSAL_ENABLED="$SKELETON_GRAPH_TRAVERSAL_ENABLED"
     SKELETON_SYNTHESIS_MODEL="$SKELETON_SYNTHESIS_MODEL"
