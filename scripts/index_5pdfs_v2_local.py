@@ -52,7 +52,6 @@ Post-indexing workflow:
 
 import asyncio
 import os
-import subprocess
 import sys
 import time
 import argparse
@@ -63,33 +62,6 @@ project_root = os.path.dirname(script_dir)  # /graphrag-orchestration
 app_root = os.path.join(project_root, "graphrag-orchestration")  # /graphrag-orchestration/graphrag-orchestration
 sys.path.insert(0, project_root)  # src/ is at project_root level
 
-
-def _resolve_azd_secrets():
-    """Auto-resolve secrets from `azd env` when not set in .env.
-
-    Container Apps inject secrets as env vars automatically. For local runs,
-    we bridge the gap by pulling from `azd env` (the deployment state store).
-    """
-    secrets_to_resolve = [
-        ("AURA_DS_CLIENT_SECRET", "Aura GDS API secret — needed for KNN, Louvain, PageRank"),
-    ]
-    for var_name, description in secrets_to_resolve:
-        if os.environ.get(var_name):
-            continue
-        try:
-            result = subprocess.run(
-                ["azd", "env", "get-value", var_name],
-                capture_output=True, text=True, timeout=10,
-            )
-            value = result.stdout.strip()
-            if value and result.returncode == 0:
-                os.environ[var_name] = value
-                print(f"  🔑 {var_name}: resolved from azd env ({description})")
-        except Exception:
-            pass  # azd not available — will warn later in config check
-
-
-_resolve_azd_secrets()
 
 from src.core.config import settings
 
