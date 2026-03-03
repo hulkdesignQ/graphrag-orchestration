@@ -464,6 +464,7 @@ class LazyGraphRAGIndexingPipeline:
             try:
                 openie_entities, openie_rels = await self._extract_openie_triples(
                     group_id=group_id,
+                    existing_entities=entities,
                 )
                 if openie_entities or openie_rels:
                     entities.extend(openie_entities)
@@ -1435,6 +1436,7 @@ Return ONLY valid JSON (no markdown fences):
         self,
         *,
         group_id: str,
+        existing_entities: Optional[List[Entity]] = None,
     ) -> Tuple[List[Entity], List[Relationship]]:
         """Step 5b: Per-sentence open-domain triple extraction.
 
@@ -1497,61 +1499,41 @@ Return ONLY valid JSON (no markdown fences):
         if not all_raw_triples:
             return [], []
 
-        # Build sentence lookup for attribution
-        sentence_map = {s["id"]: s for s in content_sentences}
-
-        # Convert raw triples to Entity + Relationship objects
-        entities_by_key: Dict[str, Entity] = {}
+        # Convert raw triples to Relationship objects (no new entities)
         openie_rels: List[Relationship] = []
+        skipped_unresolved = 0
+
+        # Build ID lookup from step-5 entities for resolving triple endpoints
+        existing_id_map: Dict[str, str] = {}
+        for e in (existing_entities or []):
+            key = self._canonical_entity_key(e.name)
+            if key:
+                existing_id_map[key] = e.id
 
         for t in all_raw_triples:
             subj = (t.get("s") or "").strip()
             pred = (t.get("p") or "").strip()
             obj = (t.get("o") or "").strip()
-            sid = (t.get("sid") or "").strip()
 
             if not subj or not pred or not obj:
                 continue
 
-            # Resolve or create entities
             subj_key = self._canonical_entity_key(subj)
             obj_key = self._canonical_entity_key(obj)
             if not subj_key or not obj_key or subj_key == obj_key:
                 continue
 
-            if subj_key not in entities_by_key:
-                entities_by_key[subj_key] = Entity(
-                    id=self._stable_entity_id(group_id, subj_key),
-                    name=subj,
-                    type="CONCEPT",  # open-domain default
-                    text_unit_ids=[sid] if sid in sentence_map else [],
-                    metadata={"source": "openie"},
-                )
-            elif sid and sid in sentence_map:
-                ent = entities_by_key[subj_key]
-                if sid not in ent.text_unit_ids:
-                    ent.text_unit_ids.append(sid)
+            # Both endpoints must resolve to existing step-5 entities
+            subj_id = existing_id_map.get(subj_key)
+            obj_id = existing_id_map.get(obj_key)
+            if not subj_id or not obj_id:
+                skipped_unresolved += 1
+                continue
 
-            if obj_key not in entities_by_key:
-                entities_by_key[obj_key] = Entity(
-                    id=self._stable_entity_id(group_id, obj_key),
-                    name=obj,
-                    type="CONCEPT",
-                    text_unit_ids=[sid] if sid in sentence_map else [],
-                    metadata={"source": "openie"},
-                )
-            elif sid and sid in sentence_map:
-                ent = entities_by_key[obj_key]
-                if sid not in ent.text_unit_ids:
-                    ent.text_unit_ids.append(sid)
-
-            # Create relationship with open predicate as description
-            subj_ent = entities_by_key[subj_key]
-            obj_ent = entities_by_key[obj_key]
             openie_rels.append(
                 Relationship(
-                    source_id=subj_ent.id,
-                    target_id=obj_ent.id,
+                    source_id=subj_id,
+                    target_id=obj_id,
                     type="RELATED_TO",
                     description=pred,
                     weight=1.0,
@@ -1564,11 +1546,11 @@ Return ONLY valid JSON (no markdown fences):
                 "group_id": group_id,
                 "sentences_processed": len(content_sentences),
                 "raw_triples": len(all_raw_triples),
-                "new_entities": len(entities_by_key),
+                "skipped_unresolved": skipped_unresolved,
                 "new_relationships": len(openie_rels),
             },
         )
-        return list(entities_by_key.values()), openie_rels
+        return [], openie_rels
 
 
     async def _extract_with_native_extractor_sentences(
