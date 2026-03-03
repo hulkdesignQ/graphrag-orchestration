@@ -419,16 +419,16 @@ class HybridPipeline:
                 # Snapshot already set but missing credit info
                 result.usage.update({"credits_used": accumulator.compute_credits()})
 
-            # Post-query credit deduction (fire-and-forget)
+            # Post-query credit deduction (fire-and-forget, 5s timeout)
             credits = accumulator.compute_credits()
             if credits > 0:
                 try:
                     from src.core.services.quota_enforcer import get_quota_enforcer
-                    enforcer = await get_quota_enforcer()
+                    enforcer = await asyncio.wait_for(get_quota_enforcer(), timeout=5)
                     user_id = getattr(self, "user_id", None) or self.group_id
-                    await enforcer.record_credits(user_id, credits)
+                    await asyncio.wait_for(enforcer.record_credits(user_id, credits), timeout=5)
                     if result.usage is not None:
-                        credit_info = await enforcer.check_credit_limits(user_id)
+                        credit_info = await asyncio.wait_for(enforcer.check_credit_limits(user_id), timeout=5)
                         result.usage["credits_remaining"] = credit_info.get("credits_remaining")
                         result.usage["credits_limit"] = credit_info.get("credits_limit")
                 except Exception as _ce:
