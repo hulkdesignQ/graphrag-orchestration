@@ -1486,18 +1486,37 @@ Return ONLY valid JSON (no markdown fences):
         # ── Build entities from triple surface forms ──────────────────
         # Each unique subject/object becomes an Entity node (untyped).
         # Track which sentences mention each entity (for MENTIONS edges).
+        #
+        # Upstream HippoRAG 2 applies text_processing() to all entity text:
+        #   re.sub('[^A-Za-z0-9 ]', ' ', text.lower()).strip()
+        # and filters entities where alphanumeric length ≤ 2.
+        import re as _re
+
+        def _text_processing(text: str) -> str:
+            """Upstream HippoRAG 2 text normalization."""
+            return _re.sub(r'[^A-Za-z0-9 ]', ' ', text.lower()).strip()
+
+        def _is_valid_entity(name: str) -> bool:
+            """Filter garbage entities (upstream: len(alphanumeric) > 2)."""
+            return len(_re.sub(r'[^A-Za-z0-9]', '', name)) > 2
+
         entity_map: Dict[str, Entity] = {}       # canonical_key → Entity
         entity_sids: Dict[str, set] = {}          # canonical_key → set of sentence IDs
 
         openie_rels: List[Relationship] = []
+        skipped_garbage = 0
 
         for t in all_raw_triples:
-            subj = (t.get("s") or "").strip()
+            subj = _text_processing((t.get("s") or "").strip())
             pred = (t.get("p") or "").strip()
-            obj = (t.get("o") or "").strip()
+            obj = _text_processing((t.get("o") or "").strip())
             sid = (t.get("sid") or "").strip()
 
             if not subj or not pred or not obj:
+                continue
+            # Filter garbage entities (≤2 alphanumeric chars)
+            if not _is_valid_entity(subj) or not _is_valid_entity(obj):
+                skipped_garbage += 1
                 continue
 
             subj_key = self._canonical_entity_key(subj)
@@ -1542,7 +1561,9 @@ Return ONLY valid JSON (no markdown fences):
                 )
             )
 
-        # Assign sentence IDs to entities for MENTIONS edges
+        # Assign sentence IDs to entities for MENTIONS edges.
+        # Upstream HippoRAG 2 add_passage_edges() links each passage ONLY to
+        # entities from its OWN triples — no cross-passage text matching.
         for key, ent in entity_map.items():
             ent.text_unit_ids = list(entity_sids.get(key, set()))
 
@@ -1556,6 +1577,8 @@ Return ONLY valid JSON (no markdown fences):
                 "raw_triples": len(all_raw_triples),
                 "entities_created": len(entities),
                 "relationships_created": len(openie_rels),
+                "mentions_from_triples": sum(len(entity_sids.get(k, set())) for k in entity_map),
+                "skipped_garbage_entities": skipped_garbage,
             },
         )
         return entities, openie_rels
