@@ -156,6 +156,9 @@ const getAppServicesToken = (): Promise<AppServicesToken | null> => {
                 if (r.ok) {
                     return getAppServicesTokenFromMe();
                 }
+                // Refresh failed (e.g. CIAM doesn't support EasyAuth refresh).
+                // Redirect to fresh login instead of showing a broken error page.
+                window.location.href = ".auth/login/aad?post_login_redirect_uri=" + encodeURIComponent(window.location.pathname + window.location.search);
                 return null;
             });
         }
