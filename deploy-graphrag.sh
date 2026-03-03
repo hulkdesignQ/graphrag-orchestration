@@ -78,7 +78,6 @@ AZURE_CONTENT_UNDERSTANDING_API_KEY=$(get_env_value_or_default "AZURE_CONTENT_UN
 # Neo4j Configuration
 NEO4J_CONTAINER_NAME="neo4j-graphrag"
 STORAGE_ACCOUNT=$(get_env_value_or_default "STORAGE_ACCOUNT_NAME" "neo4jstorage21224" false)
-NEO4J_PASSWORD=$(get_env_value_or_default "NEO4J_PASSWORD" "" false)
 
 # Docker cleanup control (default: enabled for deployment)
 DOCKER_CLEANUP_ENABLED=${DOCKER_CLEANUP_ENABLED:-true}
@@ -271,18 +270,30 @@ SEMANTIC_DEDUP_THRESHOLD=${SEMANTIC_DEDUP_THRESHOLD:-0.92}
 DENOISE_VECTOR_FALLBACK=${DENOISE_VECTOR_FALLBACK:-0}
 VECTOR_FALLBACK_TOP_K=${VECTOR_FALLBACK_TOP_K:-3}
 
-# Voyage V2 Embedding API key (required for V2 vector search).
-# The key is stored as a Container App secret named "voyage-api-key" and
-# referenced via secretref in the env var (see ENV_VARS array below).
-# If VOYAGE_API_KEY is provided in the environment, update the secret.
+# ── Secrets ──────────────────────────────────────────────────────────────
+# Secrets are stored as Container App secrets and injected via secretref.
+# If a value is provided in the environment / azd, the secret is updated.
+# Otherwise, the existing Container App secret is kept unchanged.
+
 VOYAGE_API_KEY=$(get_env_value_or_default "VOYAGE_API_KEY" "" false)
-if [ -n "$VOYAGE_API_KEY" ]; then
-    echo "🔑 Updating voyage-api-key secret in container apps..."
+NEO4J_PASSWORD=$(get_env_value_or_default "NEO4J_PASSWORD" "" false)
+MISTRAL_API_KEY=$(get_env_value_or_default "MISTRAL_API_KEY" "" false)
+LLMWHISPERER_API_KEY=$(get_env_value_or_default "LLMWHISPERER_API_KEY" "" false)
+
+# Build a space-separated list of secrets to update (only those with values)
+_SECRETS_TO_SET=""
+[ -n "$VOYAGE_API_KEY" ]       && _SECRETS_TO_SET="$_SECRETS_TO_SET voyage-api-key=$VOYAGE_API_KEY"
+[ -n "$NEO4J_PASSWORD" ]       && _SECRETS_TO_SET="$_SECRETS_TO_SET neo4j-password=$NEO4J_PASSWORD"
+[ -n "$MISTRAL_API_KEY" ]      && _SECRETS_TO_SET="$_SECRETS_TO_SET mistral-api-key=$MISTRAL_API_KEY"
+[ -n "$LLMWHISPERER_API_KEY" ] && _SECRETS_TO_SET="$_SECRETS_TO_SET llmwhisperer-api-key=$LLMWHISPERER_API_KEY"
+
+if [ -n "$_SECRETS_TO_SET" ]; then
+    echo "🔑 Updating Container App secrets..."
     for CA_NAME in "$CONTAINER_APP_API" "$CONTAINER_APP_WORKER"; do
         az containerapp secret set \
             --name "$CA_NAME" \
             --resource-group "$AZURE_RESOURCE_GROUP" \
-            --secrets "voyage-api-key=$VOYAGE_API_KEY" \
+            --secrets $_SECRETS_TO_SET \
             --only-show-errors 2>/dev/null || true
     done
 fi
@@ -334,6 +345,9 @@ ENV_VARS=(
     DENOISE_VECTOR_FALLBACK="$DENOISE_VECTOR_FALLBACK"
     VECTOR_FALLBACK_TOP_K="$VECTOR_FALLBACK_TOP_K"
     VOYAGE_API_KEY="secretref:voyage-api-key"
+    NEO4J_PASSWORD="secretref:neo4j-password"
+    MISTRAL_API_KEY="secretref:mistral-api-key"
+    LLMWHISPERER_API_KEY="secretref:llmwhisperer-api-key"
     AURA_DS_CLIENT_ID="$AURA_DS_CLIENT_ID"
     AURA_DS_CLIENT_SECRET="$AURA_DS_CLIENT_SECRET"
     SKELETON_ENRICHMENT_ENABLED="$SKELETON_ENRICHMENT_ENABLED"

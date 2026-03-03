@@ -197,7 +197,7 @@ jobs:
             --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
             --image "$IMAGE" \
             --revision-suffix "$REVISION_SUFFIX" \
-            --set-env-vars "VOYAGE_API_KEY=secretref:voyage-api-key"
+            --set-env-vars "VOYAGE_API_KEY=secretref:voyage-api-key" "NEO4J_PASSWORD=secretref:neo4j-password" "MISTRAL_API_KEY=secretref:mistral-api-key" "LLMWHISPERER_API_KEY=secretref:llmwhisperer-api-key"
 
           echo "API deployed (single-revision mode auto-routes traffic)"
       
@@ -212,7 +212,7 @@ jobs:
             --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
             --image "$IMAGE" \
             --revision-suffix "r${{ github.run_id }}" \
-            --set-env-vars "DEFAULT_ALGORITHM_VERSION=$ALGO" "VOYAGE_API_KEY=secretref:voyage-api-key"
+            --set-env-vars "DEFAULT_ALGORITHM_VERSION=$ALGO" "VOYAGE_API_KEY=secretref:voyage-api-key" "NEO4J_PASSWORD=secretref:neo4j-password" "MISTRAL_API_KEY=secretref:mistral-api-key" "LLMWHISPERER_API_KEY=secretref:llmwhisperer-api-key"
       
       - name: Wait for startup
         run: sleep 60
