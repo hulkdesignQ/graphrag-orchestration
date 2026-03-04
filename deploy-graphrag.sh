@@ -327,6 +327,9 @@ SKELETON_LLM_SENTENCE_REVIEW=${SKELETON_LLM_SENTENCE_REVIEW:-true}
 # Route 5 flat-pool seed mode (flat = equal-weight seed union, weighted = legacy 3-tier)
 ROUTE5_SEED_MODE=${ROUTE5_SEED_MODE:-weighted}
 
+# Route 7 rerank: rerank all PPR results (not just top-k)
+ROUTE7_RERANK_ALL=${ROUTE7_RERANK_ALL:-1}
+
 # Chunking strategy: "section_aware" (default) or "sliding_3sentence" (3-sentence window)
 CHUNK_STRATEGY=${CHUNK_STRATEGY:-section_aware}
 
@@ -368,6 +371,7 @@ ENV_VARS=(
     SKELETON_SYNTHESIS_MODEL="$SKELETON_SYNTHESIS_MODEL"
     SKELETON_LLM_SENTENCE_REVIEW="$SKELETON_LLM_SENTENCE_REVIEW"
     ROUTE5_SEED_MODE="$ROUTE5_SEED_MODE"
+    ROUTE7_RERANK_ALL="$ROUTE7_RERANK_ALL"
     CHUNK_STRATEGY="$CHUNK_STRATEGY"
 )
 
