@@ -359,10 +359,13 @@ def get_user_id(
     if hasattr(request.state, "user_id") and request.state.user_id:
         return request.state.user_id
     
-    # Fallback to X-User-ID header (legacy)
+    # Fallback to X-User-ID header (dev/testing only)
     if x_user_id:
-        logger.warning(f"Using legacy X-User-ID header: {x_user_id}")
-        return x_user_id
+        if settings.REQUIRE_AUTH:
+            logger.warning("X-User-ID header rejected in production auth mode", x_user_id=x_user_id)
+        else:
+            logger.warning(f"Using legacy X-User-ID header: {x_user_id}")
+            return x_user_id
     
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
