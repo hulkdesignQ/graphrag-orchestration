@@ -867,15 +867,15 @@ Sub-questions:"""
             
             # 1. Build set of documents already covered by evidence
             covered_docs: set = set()
-            existing_chunk_ids: set = set()
+            existing_evidence_ids: set = set()
             
             for ev in complete_evidence:
                 doc_key = self._extract_doc_key(ev)
                 if doc_key:
                     covered_docs.add(doc_key)
-                chunk_id = self._extract_evidence_id(ev)
-                if chunk_id:
-                    existing_chunk_ids.add(chunk_id)
+                evidence_id = self._extract_evidence_id(ev)
+                if evidence_id:
+                    existing_evidence_ids.add(evidence_id)
             
             # 2. Get all documents in the corpus
             all_documents = await self.pipeline.enhanced_retriever.get_all_documents()
@@ -1086,13 +1086,13 @@ Sub-questions:"""
                 # Support both 'section_based' and 'section_based_exhaustive' naming
                 if coverage_strategy.startswith("section_based"):
                     # Section-based: Skip only if chunk already exists
-                    skip_chunk = chunk.chunk_id in existing_chunk_ids
+                    skip_chunk = chunk.chunk_id in existing_evidence_ids
                 else:
                     # Semantic/early-chunk: Skip if document already covered
                     skip_chunk = doc_key and doc_key in covered_docs
                 
                 # Skip if chunk already exists
-                if chunk.chunk_id in existing_chunk_ids:
+                if chunk.chunk_id in existing_evidence_ids:
                     skip_chunk = True
                 
                 if not skip_chunk:
@@ -1113,7 +1113,7 @@ Sub-questions:"""
                     if doc_key:
                         covered_docs.add(doc_key)
                         new_docs.add(doc_key)
-                    existing_chunk_ids.add(chunk.chunk_id)
+                    existing_evidence_ids.add(chunk.chunk_id)
                     added_count += 1
             
             coverage_metadata = {
@@ -1145,7 +1145,7 @@ Sub-questions:"""
     # ==========================================================================
     
     def _extract_evidence_id(self, ev) -> Optional[str]:
-        """Extract chunk ID from evidence node."""
+        """Extract unique ID from an evidence node (sentence, chunk, or entity)."""
         if isinstance(ev, dict):
             return ev.get("chunk_id") or ev.get("id") or ev.get("name")
         elif isinstance(ev, tuple) and len(ev) >= 1:
