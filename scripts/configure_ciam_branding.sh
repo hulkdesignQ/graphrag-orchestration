@@ -43,17 +43,19 @@ echo "Organisation: $ORG_ID"
 echo ""
 
 # ── 4. Ensure default branding locale exists ─────────────────────────────────
+TOKEN=$(az account get-access-token --tenant "$B2C_TENANT_ID" --resource https://graph.microsoft.com --query accessToken -o tsv)
 echo "Ensuring default branding locale exists…"
-BRANDING_EXISTS=$(az rest --method GET \
-    --url "https://graph.microsoft.com/v1.0/organization/${ORG_ID}/branding" \
-    --query "id" -o tsv 2>/dev/null || true)
+BRANDING_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+    -H "Authorization: Bearer $TOKEN" \
+    "https://graph.microsoft.com/v1.0/organization/${ORG_ID}/branding")
 
-if [ -z "$BRANDING_EXISTS" ]; then
+if [ "$BRANDING_STATUS" != "200" ]; then
     echo "Creating default branding…"
-    az rest --method PATCH \
-        --url "https://graph.microsoft.com/v1.0/organization/${ORG_ID}/branding" \
-        --headers "Content-Type=application/json" \
-        --body '{"signInPageText": ""}'
+    curl -sf -X PATCH \
+        -H "Authorization: Bearer $TOKEN" \
+        -H "Content-Type: application/json" \
+        -d '{"signInPageText":""}' \
+        "https://graph.microsoft.com/v1.0/organization/${ORG_ID}/branding"
     echo "✅ Default branding locale created"
 else
     echo "✅ Default branding locale already exists"
@@ -67,31 +69,30 @@ if [ ! -f "$LOGO_PATH" ]; then
 fi
 
 echo "Uploading square logo (${LOGO_PATH})…"
-az rest --method PUT \
-    --url "https://graph.microsoft.com/v1.0/organization/${ORG_ID}/branding/squareLogo" \
-    --headers "Content-Type=image/png" \
-    --body @"$LOGO_PATH"
+curl -sf -X PUT \
+    -H "Authorization: Bearer $TOKEN" \
+    -H "Content-Type: image/png" \
+    --data-binary @"$LOGO_PATH" \
+    "https://graph.microsoft.com/v1.0/organization/${ORG_ID}/branding/localizations/0/squareLogo"
 echo "✅ Square logo uploaded"
 echo ""
 
 echo "Uploading square logo (dark theme)…"
-az rest --method PUT \
-    --url "https://graph.microsoft.com/v1.0/organization/${ORG_ID}/branding/squareLogoDark" \
-    --headers "Content-Type=image/png" \
-    --body @"$LOGO_PATH"
+curl -sf -X PUT \
+    -H "Authorization: Bearer $TOKEN" \
+    -H "Content-Type: image/png" \
+    --data-binary @"$LOGO_PATH" \
+    "https://graph.microsoft.com/v1.0/organization/${ORG_ID}/branding/localizations/0/squareLogoDark"
 echo "✅ Square logo (dark) uploaded"
 echo ""
 
 # ── 6. Set sign-in page text & background ────────────────────────────────────
 echo "Setting sign-in page properties…"
-az rest --method PATCH \
-    --url "https://graph.microsoft.com/v1.0/organization/${ORG_ID}/branding" \
-    --headers "Content-Type=application/json" \
-    --body '{
-        "signInPageText": "Hulkdesign AI · KnowledgeMap",
-        "usernameHintText": "Enter your email address",
-        "backgroundColor": "#f3f4f6"
-    }'
+curl -sf -X PATCH \
+    -H "Authorization: Bearer $TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '{"signInPageText":"Hulkdesign AI · KnowledgeMap","usernameHintText":"Enter your email address","backgroundColor":"#f3f4f6"}' \
+    "https://graph.microsoft.com/v1.0/organization/${ORG_ID}/branding"
 echo "✅ Sign-in page properties updated"
 echo ""
 
