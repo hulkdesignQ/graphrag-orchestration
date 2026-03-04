@@ -129,13 +129,14 @@ async def upload_files(
         try:
             _validate_upload(f)
             safe_filename = _sanitize_filename(f.filename)
-            file_url = await blob_manager.upload_blob(f, safe_filename, user_id)
+            # Use group_id as blob directory so B2B group members share files
+            file_url = await blob_manager.upload_blob(f, safe_filename, group_id)
             if ingester:
                 from prepdocslib.listfilestrategy import File as IngesterFile
 
                 await ingester.add_file(
                     IngesterFile(content=f, url=file_url, acls={"oids": [user_id]}),
-                    user_oid=user_id,
+                    user_oid=group_id,
                 )
             results.append({"filename": safe_filename, "status": "success", "url": file_url})
         except Exception as e:
@@ -177,9 +178,9 @@ async def delete_uploaded(
     blob_manager = _get_blob_manager(request)
     ingester = _get_ingester(request)
 
-    await blob_manager.remove_blob(body.filename, user_id)
+    await blob_manager.remove_blob(body.filename, group_id)
     if ingester:
-        await ingester.remove_file(body.filename, user_id)
+        await ingester.remove_file(body.filename, group_id)
 
     # Delete graph data in background
     doc_sync = _get_doc_sync(request)
@@ -208,9 +209,9 @@ async def delete_uploaded_bulk(
     successful_filenames = []
     for filename in body.filenames:
         try:
-            await blob_manager.remove_blob(filename, user_id)
+            await blob_manager.remove_blob(filename, group_id)
             if ingester:
-                await ingester.remove_file(filename, user_id)
+                await ingester.remove_file(filename, group_id)
             results.append({"filename": filename, "status": "success"})
             successful_filenames.append(filename)
         except Exception as e:
@@ -245,12 +246,12 @@ async def list_uploaded(
     group_id: str = Depends(get_group_id),
     user_id: str = Depends(get_user_id),
 ):
-    """List the uploaded documents for the current user."""
+    """List the uploaded documents for the current group."""
     blob_manager = _get_blob_manager(request)
     try:
-        files = await blob_manager.list_blobs(user_id)
+        files = await blob_manager.list_blobs(group_id)
     except Exception as e:
-        logger.exception("Failed to list files for user %s: %s", user_id, e)
+        logger.exception("Failed to list files for group %s: %s", group_id, e)
         raise HTTPException(status_code=502, detail=f"Storage error: {type(e).__name__}: {e}")
     return files
 
@@ -272,11 +273,11 @@ async def rename_uploaded(
 
     try:
         # Step 1: Rename in ADLS
-        new_url = await blob_manager.rename_blob(body.old_filename, body.new_filename, user_id)
+        new_url = await blob_manager.rename_blob(body.old_filename, body.new_filename, group_id)
 
         # Step 2: Update search index (if available)
         if ingester:
-            await ingester.remove_file(body.old_filename, user_id)
+            await ingester.remove_file(body.old_filename, group_id)
 
         # Step 3: Update Neo4j directly via DocumentSyncService
         rename_result = None
@@ -309,7 +310,7 @@ async def move_uploaded(
     blob_manager = _get_blob_manager(request)
 
     try:
-        new_url = await blob_manager.move_blob(body.filename, body.source_folder, body.dest_folder, user_id)
+        new_url = await blob_manager.move_blob(body.filename, body.source_folder, body.dest_folder, group_id)
 
         # Update Document.source in Neo4j in background
         doc_sync = _get_doc_sync(request)
@@ -338,14 +339,14 @@ async def copy_uploaded(
     group_id: str = Depends(get_group_id),
     user_id: str = Depends(get_user_id),
 ):
-    """Copy a file within the user's directory."""
+    """Copy a file within the group's directory."""
     if body.filename == body.dest_filename:
         raise HTTPException(status_code=400, detail="Source and destination filenames are the same")
 
     blob_manager = _get_blob_manager(request)
 
     try:
-        new_url = await blob_manager.copy_blob(body.filename, body.dest_filename, user_id)
+        new_url = await blob_manager.copy_blob(body.filename, body.dest_filename, group_id)
 
         # Trigger indexing for the copied file in background
         doc_sync = _get_doc_sync(request)
@@ -384,7 +385,7 @@ async def content_file(
         if manager is None:
             continue
         try:
-            blob_data = await manager.download_blob(path, user_id)
+            blob_data = await manager.download_blob(path, group_id)
             if blob_data:
                 content_type, _ = mimetypes.guess_type(path)
                 return StreamingResponse(
