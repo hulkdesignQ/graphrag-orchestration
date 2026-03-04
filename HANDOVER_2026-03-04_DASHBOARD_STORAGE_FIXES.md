@@ -4,7 +4,7 @@
 
 Enabled ADLS Gen2 for frontend file management, fixed multiple deployment issues (storage auth, Redis connectivity, Cosmos RBAC, credential selection), and wired usage tracking from the `/chat` endpoint into Cosmos DB so the dashboard can display live query data.
 
-**Dashboard still shows zeros** — root cause identified as Cosmos RBAC only granted to the B2B app's managed identity, not the B2C app.
+**Dashboard still shows zeros** — Cosmos RBAC now granted to both B2B and B2C apps, but data still not appearing. Root cause likely deeper than RBAC (see end-of-day update below).
 
 ---
 
@@ -48,7 +48,7 @@ Enabled ADLS Gen2 for frontend file management, fixed multiple deployment issues
 | Cosmos DB init at startup | ✅ Working | `cosmos_usage_tracking_initialized` in logs |
 | Frontend auth retry | ✅ Working | 401s handled with refresh/redirect |
 | Dashboard loads fast | ✅ Working | Redis timeouts prevent blocking |
-| **Dashboard data** | ❌ **Zeros** | **Cosmos RBAC missing for B2C app** |
+| **Dashboard data** | ❌ **Zeros** | **RBAC granted, deeper investigation needed** |
 
 ---
 
@@ -61,7 +61,7 @@ The user accesses the app via `evidoc.hulkdesign.com` → `graphrag-api-b2c` con
 | Container App | Managed Identity (principalId) | Cosmos RBAC Granted? |
 |---|---|---|
 | `graphrag-api` (B2B) | `82d924eb-a960-4fc0-8b2e-3fd314788311` | ✅ Yes |
-| `graphrag-api-b2c` | `d00678ee-9258-4e8e-841c-801d8edf8fbf` | ❌ **No** |
+| `graphrag-api-b2c` | `d00678ee-9258-4e8e-841c-801d8edf8fbf` | ✅ Yes (granted end of session) |
 | `graphrag-worker` | (check with `az containerapp show`) | ❌ Unknown |
 
 **Error from logs:**
@@ -152,11 +152,34 @@ Dashboard /me/usage endpoint
 
 ---
 
+## End-of-Day Update (23:30 UTC)
+
+### Cosmos RBAC Granted to B2C App — Dashboard Still Shows Zeros
+
+The Cosmos RBAC grant to B2C app (`d00678ee`) **completed successfully**:
+```
+id: .../sqlRoleAssignments/04f17f38-deca-4fca-80eb-6b3dc786e43c
+principalId: d00678ee-9258-4e8e-841c-801d8edf8fbf
+roleDefinitionId: .../sqlRoleDefinitions/00000000-0000-0000-0000-000000000002
+```
+
+However, **dashboard still shows no data**. This means the issue is NOT just RBAC. Possible remaining causes:
+
+1. **No UsageRecords exist in Cosmos yet** — the `_write_cosmos_usage` code was deployed in commit `c77b11f2` but may not have been exercised by any real queries since deployment. Need to make a test query and check Cosmos directly.
+2. **Cosmos container/database mismatch** — `CosmosDBClient` may be writing to a different database/container than what dashboard reads.
+3. **`_write_cosmos_usage` silently failing** — the fire-and-forget pattern (`asyncio.create_task`) swallows exceptions. Need to check container app logs for Cosmos write errors.
+4. **`partition_id` mismatch** — dashboard queries Cosmos with `user_oid` but `_write_cosmos_usage` may be writing a different partition key.
+5. **Redis `get_usage()` returning zeros** — even though `enforce_plan_limits` increments counters, the `get_usage()` query path may use different keys.
+
+---
+
 ## Tomorrow's TODO
 
-1. **Grant Cosmos RBAC to B2C app** (see fix command above) — should immediately fix dashboard
-2. **Also grant to Worker app** if it needs Cosmos access
-3. **Verify dashboard shows data** — make a chat query, check `/dashboard/me` returns non-zero `queries_today`
-4. **Verify `recent_queries`** populates in `/dashboard/me/usage` after a query
-5. **Consider adding Cosmos RBAC grants to `deploy-graphrag.sh`** for reproducibility
-6. **Consider adding all managed identity grants to Bicep** so `azd up` handles them automatically
+1. ~~**Grant Cosmos RBAC to B2C app**~~ ✅ Done
+2. **Debug why dashboard still shows zeros** despite RBAC being granted:
+   - Check Cosmos Data Explorer for any `UsageRecord` documents
+   - Check container app logs for Cosmos write errors after a test query
+   - Verify `_write_cosmos_usage` partition key matches dashboard query
+   - Verify Redis key format: `enforce_plan_limits` writes vs `get_usage()` reads
+3. **Grant Cosmos RBAC to Worker app** if it needs Cosmos access
+4. **Consider adding Cosmos RBAC grants to `deploy-graphrag.sh`** or Bicep for reproducibility
