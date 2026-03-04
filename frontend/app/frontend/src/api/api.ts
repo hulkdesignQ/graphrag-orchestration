@@ -109,9 +109,9 @@ export async function getSpeechApi(text: string): Promise<string | null> {
 }
 
 export function getCitationFilePath(citation: string): string {
-    // If there are parentheses at end of citation, remove part in parentheses
-    const cleanedCitation = citation.replace(/\s*\(.*?\)\s*$/, "").trim();
-    return `${BACKEND_URI}/content/${cleanedCitation}`;
+    // Remove only the last parenthesized suffix (e.g., "(page 3)")
+    const cleanedCitation = citation.replace(/\s*\([^)]*\)\s*$/, "").trim();
+    return `${BACKEND_URI}/content/${encodeURIComponent(cleanedCitation)}`;
 }
 
 export async function uploadFileApi(request: FormData, idToken: string): Promise<SimpleAPIResponse> {

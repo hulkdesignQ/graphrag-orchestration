@@ -158,7 +158,7 @@ const collectCitations = (answer: ChatAppResponse, isStreaming: boolean): { frag
     return { fragments, citations: citationList };
 };
 
-const renderCitation = (detail: CitationDetail, onCitationClicked: (citationFilePath: string) => void) => {
+const renderCitation = (detail: CitationDetail) => {
     const stepBadgeLabel = detail.stepSource ?? detail.stepLabel;
     const stepBadgeTitle =
         detail.stepNumber !== undefined
@@ -177,7 +177,6 @@ const renderCitation = (detail: CitationDetail, onCitationClicked: (citationFile
                     href={detail.reference}
                     target="_blank"
                     rel="noopener noreferrer"
-                    onClick={e => e.stopPropagation()}
                 >
                     {supElement}
                 </a>
@@ -188,15 +187,7 @@ const renderCitation = (detail: CitationDetail, onCitationClicked: (citationFile
     const path = getCitationFilePath(detail.reference);
     return renderToStaticMarkup(
         <span className="citationBadgeContainer">
-            <a
-                className="supContainer"
-                title={detail.reference}
-                onClick={e => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    onCitationClicked(path);
-                }}
-            >
+            <a className="supContainer" title={detail.reference} href="#" data-citation-path={path}>
                 {supElement}
             </a>
         </span>
@@ -205,7 +196,7 @@ const renderCitation = (detail: CitationDetail, onCitationClicked: (citationFile
 
 export function parseAnswerToHtml(answer: ChatAppResponse, isStreaming: boolean, onCitationClicked: (citationFilePath: string) => void): HtmlParsedAnswer {
     const { fragments, citations } = collectCitations(answer, isStreaming);
-    const answerHtml = fragments.map(fragment => (fragment.type === "text" ? fragment.value : renderCitation(fragment.detail, onCitationClicked))).join("");
+    const answerHtml = fragments.map(fragment => (fragment.type === "text" ? fragment.value : renderCitation(fragment.detail))).join("");
 
     return {
         answerHtml,

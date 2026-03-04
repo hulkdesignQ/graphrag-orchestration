@@ -87,16 +87,19 @@ h2 {
     cursor: pointer;
 }
 
-.supContainer {
+.supContainer,
+:global(.supContainer) {
     text-decoration: none;
     cursor: pointer;
 }
 
-.supContainer:hover {
+.supContainer:hover,
+:global(.supContainer):hover {
     text-decoration: underline;
 }
 
-.citationBadgeContainer {
+.citationBadgeContainer,
+:global(.citationBadgeContainer) {
     display: inline-flex;
     align-items: center;
     gap: 0.25em;

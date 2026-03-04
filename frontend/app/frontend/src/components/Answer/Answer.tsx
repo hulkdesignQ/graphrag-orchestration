@@ -109,7 +109,17 @@ export const Answer = ({
             </div>
 
             <div style={{ flexGrow: 1 }}>
-                <div className={styles.answerText}>
+                <div
+                    className={styles.answerText}
+                    onClick={e => {
+                        const target = (e.target as HTMLElement).closest<HTMLElement>("[data-citation-path]");
+                        if (target) {
+                            e.preventDefault();
+                            const path = target.getAttribute("data-citation-path");
+                            if (path) onCitationClicked(path);
+                        }
+                    }}
+                >
                     <ReactMarkdown children={sanitizedAnswerHtml} rehypePlugins={[rehypeRaw]} remarkPlugins={[remarkGfm]} />
                 </div>
             </div>
