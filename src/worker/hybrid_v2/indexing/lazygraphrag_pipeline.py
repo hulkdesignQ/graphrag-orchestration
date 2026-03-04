@@ -210,6 +210,8 @@ class LazyGraphRAGIndexingPipeline:
         self._openie_batching = os.getenv("OPENIE_BATCHING", "section")
         # Structured extraction: "deterministic" (rules for sig/letterhead) or "llm" (send to OpenIE)
         self._structured_extraction = os.getenv("STRUCTURED_EXTRACTION", "deterministic")
+        # Two-step NER→Triple extraction (upstream HippoRAG 2 alignment)
+        self._openie_two_step = os.getenv("OPENIE_TWO_STEP", "true").strip().lower() in {"1", "true", "yes"}
 
     async def index_documents(
         self,
@@ -1457,6 +1459,7 @@ class LazyGraphRAGIndexingPipeline:
     # Step 5b: Open-domain triple extraction (HippoRAG 2 alignment)
     # ────────────────────────────────────────────────────────────────────
 
+    # Single-step prompt (fallback when OPENIE_TWO_STEP=false)
     _OPENIE_PROMPT = """Extract knowledge graph triples from the sentences below.
 
 Rules:
@@ -1466,6 +1469,38 @@ Rules:
 4. Subjects and objects are named entities, key concepts, legal terms, dates, or amounts.
 5. Include abstract concepts as entities when present: warranties, liabilities, rights, obligations, limitations, conditions.
 6. Extract ALL factual relationships from each sentence, not just the most obvious one.
+
+{sentences}
+
+Return ONLY valid JSON (no markdown fences):
+{{"triples": [
+  {{"sid": "<sentence_id>", "s": "<subject>", "p": "<predicate>", "o": "<object>"}},
+  ...
+]}}"""
+
+    # ── Two-step prompts (upstream HippoRAG 2 alignment) ────────────
+    # Step 1: NER — enhanced from upstream to also capture abstract concepts
+    _NER_PROMPT = """Your task is to extract named entities from the given sentences.
+Extract: proper nouns, organizations, people, dates, amounts, legal terms, AND abstract concepts (warranties, liabilities, rights, obligations, limitations, conditions, terms).
+Respond with a JSON list of entities.
+
+{sentences}
+
+Return ONLY valid JSON (no markdown fences):
+{{"named_entities": [...]}}"""
+
+    # Step 2: NER-conditioned triple extraction — upstream constraint + our proven rules
+    _TRIPLE_PROMPT = """Construct an RDF knowledge graph from the sentences below using the provided named entities.
+
+Rules:
+1. Process EACH sentence [ID] independently — extract 2-5 triples per sentence.
+2. Each triple MUST contain at least one, preferably two, of the named entities.
+3. Predicates MUST be short verb phrases (1-5 words). Examples: "warrants for", "is not transferable", "holds risk until", "disclaims", "shall indemnify".
+4. Do NOT use the full sentence as a predicate.
+5. Clearly resolve pronouns to their specific names to maintain clarity.
+6. Extract ALL factual relationships from each sentence, not just the most obvious one.
+
+Named entities: {named_entities}
 
 {sentences}
 
@@ -1701,6 +1736,7 @@ Return ONLY valid JSON (no markdown fences):
                 "group_id": group_id,
                 "mode": self._openie_batching,
                 "structured_mode": self._structured_extraction,
+                "two_step": self._openie_two_step,
                 "llm_sentences": len(llm_sentences),
                 "batches": len(batches),
                 "deterministic_triples": deterministic_count,
@@ -1709,7 +1745,19 @@ Return ONLY valid JSON (no markdown fences):
 
         sem = asyncio.Semaphore(4)  # max 4 concurrent LLM calls
 
+        def _strip_json_fences(text: str) -> str:
+            """Remove markdown code fences from LLM JSON response."""
+            text = text.strip()
+            if text.startswith("```"):
+                text = text.split("\n", 1)[1] if "\n" in text else text[3:]
+            if text.endswith("```"):
+                text = text[: -3].rstrip()
+            if text.startswith("json"):
+                text = text[4:].lstrip()
+            return text
+
         async def _extract_batch(batch: List[Dict[str, Any]], context: str) -> List[Dict[str, str]]:
+            """Single-step OpenIE extraction (fallback)."""
             sentence_block = context + "\n".join(
                 f"[{s['id']}]: {s['text']}" for s in batch
             )
@@ -1719,22 +1767,63 @@ Return ONLY valid JSON (no markdown fences):
                     response = await self.llm.achat(
                         [ChatMessage(role="user", content=prompt)]
                     )
-                    text = response.message.content.strip()
-                    # Strip markdown code fences if present
-                    if text.startswith("```"):
-                        text = text.split("\n", 1)[1] if "\n" in text else text[3:]
-                    if text.endswith("```"):
-                        text = text[: -3].rstrip()
-                    if text.startswith("json"):
-                        text = text[4:].lstrip()
+                    text = _strip_json_fences(response.message.content)
                     parsed = json_mod.loads(text)
                     return parsed.get("triples", [])
                 except Exception as e:
                     logger.debug(f"OpenIE batch failed: {e}")
                     return []
 
+        async def _extract_batch_two_step(batch: List[Dict[str, Any]], context: str) -> List[Dict[str, str]]:
+            """Two-step NER→Triple extraction (upstream HippoRAG 2 alignment).
+
+            Step 1: NER — extract named entities from the sentence batch.
+            Step 2: Triple extraction — conditioned on the NER entity list.
+            """
+            sentence_block = context + "\n".join(
+                f"[{s['id']}]: {s['text']}" for s in batch
+            )
+
+            # Step 1: NER
+            ner_prompt = self._NER_PROMPT.format(sentences=sentence_block)
+            async with sem:
+                try:
+                    ner_response = await self.llm.achat(
+                        [ChatMessage(role="user", content=ner_prompt)]
+                    )
+                    ner_text = _strip_json_fences(ner_response.message.content)
+                    ner_parsed = json_mod.loads(ner_text)
+                    named_entities = ner_parsed.get("named_entities", [])
+                except Exception as e:
+                    logger.debug(f"NER step failed: {e}, falling back to single-step")
+                    named_entities = []
+
+            if not named_entities:
+                # Fallback to single-step if NER produces nothing
+                return await _extract_batch(batch, context)
+
+            # Step 2: NER-conditioned triple extraction
+            entities_str = json_mod.dumps(named_entities)
+            triple_prompt = self._TRIPLE_PROMPT.format(
+                named_entities=entities_str, sentences=sentence_block
+            )
+            async with sem:
+                try:
+                    triple_response = await self.llm.achat(
+                        [ChatMessage(role="user", content=triple_prompt)]
+                    )
+                    triple_text = _strip_json_fences(triple_response.message.content)
+                    parsed = json_mod.loads(triple_text)
+                    return parsed.get("triples", [])
+                except Exception as e:
+                    logger.debug(f"Triple extraction step failed: {e}")
+                    return []
+
+        # Choose extraction function based on two-step flag
+        extract_fn = _extract_batch_two_step if self._openie_two_step else _extract_batch
+
         if batches:
-            results = await asyncio.gather(*[_extract_batch(b, ctx) for b, ctx in batches])
+            results = await asyncio.gather(*[extract_fn(b, ctx) for b, ctx in batches])
             for batch_triples in results:
                 all_raw_triples.extend(batch_triples)
 
@@ -1841,6 +1930,7 @@ Return ONLY valid JSON (no markdown fences):
                 "skipped_garbage_entities": skipped_garbage,
                 "batching_mode": self._openie_batching,
                 "structured_mode": self._structured_extraction,
+                "two_step": self._openie_two_step,
             },
         )
         return entities, openie_rels
