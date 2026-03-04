@@ -34,8 +34,16 @@
 .headerTitleContainer {
     display: flex;
     align-items: center;
+    gap: 0.5rem;
     color: #f2f2f2;
     text-decoration: none;
+}
+
+.headerLogo {
+    width: 28px;
+    height: 28px;
+    border-radius: 4px;
+    object-fit: contain;
 }
 
 .headerTitle {

@@ -6,6 +6,7 @@ import styles from "./Layout.module.css";
 import { useLogin } from "../../authConfig";
 import { LoginButton } from "../../components/LoginButton";
 import { LoginContext } from "../../loginContext";
+import appLogo from "../../assets/applogo.png";
 
 const Layout = () => {
     const { t } = useTranslation();
@@ -32,6 +33,7 @@ const Layout = () => {
                             </button>
                         )}
                         <NavLink to="/" className={styles.headerTitleContainer} onClick={closeSidebar}>
+                            <img src={appLogo} alt="Hulkdesign AI" className={styles.headerLogo} />
                             <h3 className={styles.headerTitle}>{t("headerTitle")}</h3>
                         </NavLink>
                     </div>
