@@ -94,15 +94,12 @@ param adminApiKey string = ''
 
 // User upload / ADLS Gen2 storage parameters
 @description('Enable user file upload with ADLS Gen2 (hierarchical namespace)')
-param useUserUpload bool = false
-
-@description('Name for the user storage account (leave empty for auto-generated)')
-param userStorageAccountName string = ''
+param useUserUpload bool = true
 
 @description('Container name for user uploads')
 param userStorageContainerName string = 'user-content'
 
-@description('Name of the general-purpose storage account for global content')
+@description('Name of the storage account (ADLS Gen2 / HNS-enabled)')
 param storageAccountName string = 'neo4jstorage21224'
 
 // Tags for all resources
@@ -574,7 +571,7 @@ var sharedEnvVars = concat([
   }
   {
     name: 'AZURE_USERSTORAGE_ACCOUNT'
-    value: userStorage.outputs.name
+    value: storageAccountName
   }
   {
     name: 'AZURE_USERSTORAGE_CONTAINER'
@@ -767,34 +764,6 @@ module openAiModels './core/ai/openai-models.bicep' = {
   }
 }
 
-// ============================================================================
-// ADLS Gen2 User Storage (Optional)
-// Provides hierarchical namespace storage for per-user file uploads.
-// The frontend's AdlsBlobManager uses the DFS endpoint (*.dfs.core.windows.net).
-// ============================================================================
-module userStorage './core/storage/storage-account.bicep' = if (useUserUpload) {
-  name: 'user-storage'
-  scope: rg
-  params: {
-    name: !empty(userStorageAccountName) ? userStorageAccountName : 'usrst${uniqueString(rg.id)}'
-    location: location
-    tags: tags
-    publicNetworkAccess: 'Enabled'
-    allowBlobPublicAccess: false
-    allowSharedKeyAccess: false
-    isHnsEnabled: true
-    sku: {
-      name: 'Standard_LRS'
-    }
-    containers: [
-      {
-        name: userStorageContainerName
-        publicAccess: 'None'
-      }
-    ]
-  }
-}
-
 // Role Assignments for Container App Managed Identities (API + Worker)
 module roleAssignments './core/security/role-assignments.bicep' = if (!skipRoleAssignments) {
   name: 'role-assignments'
@@ -809,7 +778,7 @@ module roleAssignments './core/security/role-assignments.bicep' = if (!skipRoleA
     ]
     azureOpenAiName: 'graphrag-openai-8476'
     cosmosAccountName: cosmosDb.outputs.cosmosAccountName
-    userStorageAccountName: useUserUpload ? userStorage.outputs.name : ''
+    userStorageAccountName: useUserUpload ? storageAccountName : ''
   }
   dependsOn: [openAiModels, cosmosDb, graphragApi, graphragWorker] // Ensure resources exist before assigning permissions
 }
@@ -850,5 +819,5 @@ output APIM_GATEWAY_URL string = enableApim ? apim.outputs.apimGatewayUrl : ''
 output APIM_NAME string = enableApim ? apim.outputs.apimName : ''
 output GRAPHRAG_API_CUSTOM_DOMAIN string = !empty(b2bCustomDomain) ? 'https://${b2bCustomDomain}' : ''
 output GRAPHRAG_API_B2C_CUSTOM_DOMAIN string = !empty(b2cCustomDomain) ? 'https://${b2cCustomDomain}' : ''
-output AZURE_USERSTORAGE_ACCOUNT string = useUserUpload ? userStorage.outputs.name : ''
+output AZURE_USERSTORAGE_ACCOUNT string = useUserUpload ? storageAccountName : ''
 output AZURE_USERSTORAGE_CONTAINER string = useUserUpload ? userStorageContainerName : ''
