@@ -11693,3 +11693,54 @@ if original_route == RouteType.LOCAL_SEARCH:
 
 - `benchmarks/route2_local_r2questions_20260304T124249Z.json` — Route 2 baseline (19/19)
 - `benchmarks/route7_hipporag2_qm-local_search_r2questions_20260304T124446Z.json` — Route 7 local_search (19/19)
+
+## §44. Two-Step NER→Triple Extraction Experiment (2026-03-04)
+
+### Motivation
+
+Upstream HippoRAG 2 uses a two-step extraction pipeline: (1) NER extracts named entities, (2) triple extraction is conditioned on those entities. Our implementation collapsed both into a single OpenIE prompt. We implemented and benchmarked the two-step approach to evaluate whether it improves entity completeness and retrieval quality.
+
+### Implementation
+
+- **`OPENIE_TWO_STEP` feature flag** (env var, default `false`)
+- **Step 1 — `_NER_PROMPT`**: Enhanced from upstream to also extract abstract concepts (warranties, liabilities, obligations) alongside named entities. Returns `{"named_entities": [...]}`.
+- **Step 2 — `_TRIPLE_PROMPT`**: Upstream's NER-conditioning ("each triple MUST contain at least one named entity") combined with our proven rules (per-sentence processing, short predicates, abstract concepts). Returns `{"triples": [...]}`.
+- **Fallback**: If NER returns no entities, falls back to single-step `_OPENIE_PROMPT`.
+- Section batching and deterministic extraction (§41) remain orthogonal and active for both modes.
+
+### Benchmark Results
+
+| Config | Entities | MENTIONS | Communities | Score | Δ |
+|--------|----------|----------|-------------|-------|---|
+| Single-step (prompt fix) | 189 | 481 | 10 | **55/57** | baseline |
+| Two-step NER→Triple | 284 | 544 | 14 | **52/57** | -3 |
+| Single-step (reindex) | 198 | 453 | 9 | **54/57** | -1 (noise) |
+
+### Root Cause of Regression
+
+The NER step finds many fine-grained entities that appear in only one sentence (singletons):
+
+- **284 entities total**, of which **213 (75%) have only 1 MENTIONS edge**
+- Average mentions per entity: **1.9** (vs 2.5 for single-step)
+- Singleton entities are dead-end nodes in the PPR graph — they cannot bridge sentences
+- The denser but less-connected graph dilutes PPR signal, especially for cross-document queries (Q-D8: 3→1)
+
+### Decision
+
+**Keep single-step as default.** The improved single-step prompt (§41) already captures abstract concepts and enforces entity quality. The two-step code is retained behind `OPENIE_TWO_STEP=true` for future experiments (e.g., singleton filtering, NER prompt tuning).
+
+### Key Insight
+
+For small corpora (5 PDFs, ~200 sentences), entity **connectivity** matters more than entity **count**. PPR traversal needs multi-hop paths between sentences. Fewer, well-connected entities (single-step: 2.5 mentions/entity) outperform many loosely-connected entities (two-step: 1.9 mentions/entity).
+
+### Commits
+
+| SHA | Description |
+|-----|-------------|
+| `f326d962` | feat: two-step NER→Triple extraction (upstream HippoRAG 2 alignment) |
+| `ed578585` | feat: default OPENIE_TWO_STEP=false — single-step scores 55/57 vs two-step 52/57 |
+
+### Benchmark Artifacts
+
+- `benchmarks/route7_hipporag2_r4questions_20260304T122203Z.json` — Two-step (52/57)
+- `benchmarks/route7_hipporag2_r4questions_20260304T125842Z.json` — Single-step reindex (54/57)
