@@ -148,10 +148,9 @@ describe("Chat page integration", () => {
         });
     });
 
-    it("renders settings button", async () => {
+    it("does not render settings button (removed from UI)", async () => {
         renderChat(true);
-        const settingsBtn = screen.getByRole("button", { name: /developer settings/i });
-        expect(settingsBtn).toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: /developer settings/i })).not.toBeInTheDocument();
     });
 
     it("sends a question and shows the answer (non-streaming)", async () => {

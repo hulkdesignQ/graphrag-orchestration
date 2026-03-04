@@ -4,7 +4,6 @@ import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "./testUtils";
 
 import { ClearChatButton } from "../components/ClearChatButton";
-import { SettingsButton } from "../components/SettingsButton";
 import { HistoryButton } from "../components/HistoryButton";
 
 describe("ClearChatButton", () => {
@@ -24,21 +23,6 @@ describe("ClearChatButton", () => {
     it("can be disabled", () => {
         renderWithProviders(<ClearChatButton onClick={vi.fn()} disabled />);
         expect(screen.getByRole("button")).toBeDisabled();
-    });
-});
-
-describe("SettingsButton", () => {
-    it("renders with label", () => {
-        renderWithProviders(<SettingsButton onClick={vi.fn()} />);
-        expect(screen.getByText("Developer settings")).toBeInTheDocument();
-    });
-
-    it("calls onClick when clicked", async () => {
-        const user = userEvent.setup();
-        const onClick = vi.fn();
-        renderWithProviders(<SettingsButton onClick={onClick} />);
-        await user.click(screen.getByRole("button"));
-        expect(onClick).toHaveBeenCalledOnce();
     });
 });
 

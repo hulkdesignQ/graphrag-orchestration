@@ -1,16 +1,6 @@
 import { useRef, useState, useEffect, useContext } from "react";
 import { useTranslation } from "react-i18next";
 import { Helmet } from "react-helmet-async";
-import {
-    OverlayDrawer,
-    DrawerHeader,
-    DrawerHeaderTitle,
-    DrawerBody,
-    Button,
-    type DialogOpenChangeEvent,
-    type DialogOpenChangeData
-} from "@fluentui/react-components";
-import { Dismiss24Regular } from "@fluentui/react-icons";
 import readNDJSONStream from "ndjson-readablestream";
 
 import appLogo from "../../assets/applogo.png";
@@ -26,18 +16,13 @@ import { AnalysisPanel, AnalysisPanelTabs } from "../../components/AnalysisPanel
 import { HistoryPanel } from "../../components/HistoryPanel";
 import { HistoryProviderOptions, useHistoryManager } from "../../components/HistoryProviders";
 import { HistoryButton } from "../../components/HistoryButton";
-import { SettingsButton } from "../../components/SettingsButton";
 import { ClearChatButton } from "../../components/ClearChatButton";
-import { UploadFile } from "../../components/UploadFile";
 import { useLogin, getToken, requireAccessControl } from "../../authConfig";
 import { useMsal } from "@azure/msal-react";
-import { TokenClaimsDisplay } from "../../components/TokenClaimsDisplay";
 import { LoginContext } from "../../loginContext";
 import { LanguagePicker } from "../../i18n/LanguagePicker";
-import { Settings } from "../../components/Settings/Settings";
 
 const Chat = () => {
-    const [isConfigPanelOpen, setIsConfigPanelOpen] = useState(false);
     const [isHistoryPanelOpen, setIsHistoryPanelOpen] = useState(false);
     const [promptTemplate, setPromptTemplate] = useState<string>("");
     const [temperature, setTemperature] = useState<number>(0.3);
@@ -86,7 +71,6 @@ const Chat = () => {
     const [showQueryRewritingOption, setShowQueryRewritingOption] = useState<boolean>(false);
     const [showReasoningEffortOption, setShowReasoningEffortOption] = useState<boolean>(false);
     const [showVectorOption, setShowVectorOption] = useState<boolean>(false);
-    const [showUserUpload, setShowUserUpload] = useState<boolean>(false);
     const [showLanguagePicker, setshowLanguagePicker] = useState<boolean>(false);
     const [showSpeechInput, setShowSpeechInput] = useState<boolean>(false);
     const [showSpeechOutputBrowser, setShowSpeechOutputBrowser] = useState<boolean>(false);
@@ -136,7 +120,6 @@ const Chat = () => {
             if (!config.showVectorOption) {
                 setRetrievalMode(RetrievalMode.Text);
             }
-            setShowUserUpload(config.showUserUpload);
             setshowLanguagePicker(config.showLanguagePicker);
             setShowSpeechInput(config.showSpeechInput);
             setShowSpeechOutputBrowser(config.showSpeechOutputBrowser);
@@ -390,121 +373,6 @@ const Chat = () => {
         updateStreamingPreference(streamingEnabled, streamingDisabledByOverrides);
     }, [streamingDisabledByOverrides, streamingEnabled]);
 
-    const handleSettingsChange = (field: string, value: any) => {
-        switch (field) {
-            case "promptTemplate":
-                setPromptTemplate(value);
-                break;
-            case "temperature":
-                setTemperature(value);
-                break;
-            case "seed":
-                setSeed(value);
-                break;
-            case "minimumRerankerScore":
-                setMinimumRerankerScore(value);
-                break;
-            case "minimumSearchScore":
-                setMinimumSearchScore(value);
-                break;
-            case "retrieveCount":
-                setRetrieveCount(value);
-                break;
-            case "agenticReasoningEffort": {
-                setRetrievalReasoningEffort(value);
-                // If selecting minimal while web source is enabled, disable web source
-                if (value === "minimal" && webSourceEnabled) {
-                    setWebSourceEnabled(false);
-                    setHideMinimalRetrievalReasoningOption(false);
-                    // Web source was disabled, so restore streaming
-                    updateStreamingPreference(streamingEnabled, false);
-                }
-                break;
-            }
-            case "useSemanticRanker":
-                setUseSemanticRanker(value);
-                break;
-            case "useQueryRewriting":
-                setUseQueryRewriting(value);
-                break;
-            case "reasoningEffort":
-                setReasoningEffort(value);
-                break;
-            case "useSemanticCaptions":
-                setUseSemanticCaptions(value);
-                break;
-            case "excludeCategory":
-                setExcludeCategory(value);
-                break;
-            case "includeCategory":
-                setIncludeCategory(value);
-                break;
-            case "shouldStream":
-                {
-                    const normalizedShouldStream = !!value;
-                    forcedStreamingRef.current = false;
-                    previousShouldStreamRef.current = normalizedShouldStream;
-                    setShouldStream(normalizedShouldStream);
-                }
-                break;
-            case "useSuggestFollowupQuestions":
-                setUseSuggestFollowupQuestions(value);
-                break;
-            case "llmInputs":
-                break;
-            case "sendTextSources":
-                setSendTextSources(value);
-                break;
-            case "sendImageSources":
-                setSendImageSources(value);
-                break;
-            case "searchTextEmbeddings":
-                setSearchTextEmbeddings(value);
-                break;
-            case "searchImageEmbeddings":
-                setSearchImageEmbeddings(value);
-                break;
-            case "retrievalMode":
-                setRetrievalMode(value);
-                break;
-            case "useAgenticKnowledgeBase": {
-                setUseAgenticRetrieval(value);
-                let effectiveWebSource = webSourceEnabled;
-                if (!value && webSourceEnabled) {
-                    effectiveWebSource = false;
-                    setWebSourceEnabled(false);
-                    setHideMinimalRetrievalReasoningOption(false);
-                }
-                // Only web source disables streaming
-                const shouldDisableStreaming = !!value && effectiveWebSource;
-                updateStreamingPreference(streamingEnabled, shouldDisableStreaming);
-                break;
-            }
-            case "useWebSource":
-                if (!webSourceSupported) {
-                    setWebSourceEnabled(false);
-                    return;
-                }
-                const normalizedWebSource = !!value;
-                setWebSourceEnabled(normalizedWebSource);
-                setHideMinimalRetrievalReasoningOption(normalizedWebSource);
-                // When enabling web source, disable follow-up questions and streaming
-                if (normalizedWebSource) {
-                    setUseSuggestFollowupQuestions(false);
-                }
-                const shouldDisableStreaming = useAgenticKnowledgeBase && normalizedWebSource;
-                updateStreamingPreference(streamingEnabled, shouldDisableStreaming);
-                break;
-            case "useSharePointSource":
-                if (!sharePointSourceSupported) {
-                    setSharePointSourceEnabled(false);
-                    return;
-                }
-                setSharePointSourceEnabled(!!value);
-                break;
-        }
-    };
-
     const onExampleClicked = (example: string) => {
         makeApiRequest(example);
     };
@@ -596,8 +464,6 @@ const Chat = () => {
                 </div>
                 <div className={styles.commandsContainer}>
                     <ClearChatButton className={styles.commandButton} onClick={clearChat} disabled={!lastQuestionRef.current || isLoading} />
-                    {showUserUpload && <UploadFile className={styles.commandButton} disabled={!loggedIn} />}
-                    <SettingsButton className={styles.commandButton} onClick={() => setIsConfigPanelOpen(!isConfigPanelOpen)} />
                 </div>
             </div>
             <div className={styles.chatRoot} style={{ marginLeft: isHistoryPanelOpen ? "300px" : "0" }}>
@@ -722,75 +588,6 @@ const Chat = () => {
                     />
                 )}
 
-                <OverlayDrawer
-                    position="end"
-                    open={isConfigPanelOpen}
-                    modalType="non-modal"
-                    style={{ width: "400px" }}
-                    onOpenChange={(_ev: DialogOpenChangeEvent, { open }: DialogOpenChangeData) => {
-                        if (!open) setIsConfigPanelOpen(false);
-                    }}
-                >
-                    <DrawerHeader>
-                        <DrawerHeaderTitle
-                            action={
-                                <Button
-                                    appearance="subtle"
-                                    aria-label={t("labels.closeButton")}
-                                    icon={<Dismiss24Regular />}
-                                    onClick={() => setIsConfigPanelOpen(false)}
-                                />
-                            }
-                        >
-                            {t("labels.headerText")}
-                        </DrawerHeaderTitle>
-                    </DrawerHeader>
-                    <DrawerBody>
-                        <Settings
-                            promptTemplate={promptTemplate}
-                            temperature={temperature}
-                            retrieveCount={retrieveCount}
-                            agenticReasoningEffort={agenticReasoningEffort}
-                            seed={seed}
-                            minimumSearchScore={minimumSearchScore}
-                            minimumRerankerScore={minimumRerankerScore}
-                            useSemanticRanker={useSemanticRanker}
-                            useSemanticCaptions={useSemanticCaptions}
-                            useQueryRewriting={useQueryRewriting}
-                            reasoningEffort={reasoningEffort}
-                            excludeCategory={excludeCategory}
-                            includeCategory={includeCategory}
-                            retrievalMode={retrievalMode}
-                            showMultimodalOptions={showMultimodalOptions}
-                            sendTextSources={sendTextSources}
-                            sendImageSources={sendImageSources}
-                            searchTextEmbeddings={searchTextEmbeddings}
-                            searchImageEmbeddings={searchImageEmbeddings}
-                            showSemanticRankerOption={showSemanticRankerOption}
-                            showQueryRewritingOption={showQueryRewritingOption}
-                            showReasoningEffortOption={showReasoningEffortOption}
-                            showVectorOption={showVectorOption}
-                            useLogin={!!useLogin}
-                            loggedIn={loggedIn}
-                            requireAccessControl={requireAccessControl}
-                            shouldStream={shouldStream}
-                            streamingEnabled={streamingEnabled}
-                            useSuggestFollowupQuestions={useSuggestFollowupQuestions}
-                            showAgenticRetrievalOption={showAgenticRetrievalOption}
-                            useAgenticKnowledgeBase={useAgenticKnowledgeBase}
-                            useWebSource={webSourceEnabled}
-                            showWebSourceOption={webSourceSupported}
-                            useSharePointSource={sharePointSourceEnabled}
-                            showSharePointSourceOption={sharePointSourceSupported}
-                            hideMinimalRetrievalReasoningOption={hideMinimalRetrievalReasoningOption}
-                            onChange={handleSettingsChange}
-                        />
-                        {useLogin && <TokenClaimsDisplay />}
-                        <div style={{ marginTop: "auto", padding: "16px 0" }}>
-                            <Button onClick={() => setIsConfigPanelOpen(false)}>{t("labels.closeButton")}</Button>
-                        </div>
-                    </DrawerBody>
-                </OverlayDrawer>
             </div>
         </div>
     );
