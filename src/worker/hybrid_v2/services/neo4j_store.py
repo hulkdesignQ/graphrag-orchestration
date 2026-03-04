@@ -1245,46 +1245,6 @@ class Neo4jStoreV3:
             with self.get_retry_session() as session:
                 session.run(query_section, pairs=next_in_section_pairs, group_id=group_id)
     
-    def link_sentences_to_extra_chunks(
-        self,
-        group_id: str,
-        extra_chunk_map: Dict[str, List[str]],
-    ) -> int:
-        """Create additional PART_OF edges for sentences in duplicate chunks.
-
-        When section-aware chunking produces overlapping chunks, the same
-        sentence text exists in multiple chunks.  Sentence dedup keeps one
-        node per unique text, but we need PART_OF edges to *every* parent
-        chunk so that ``_focused_text()`` denoising works on all chunks.
-
-        Args:
-            group_id: Group identifier.
-            extra_chunk_map: sentence_id → list of additional chunk_ids.
-
-        Returns:
-            Number of PART_OF edges created.
-        """
-        if not extra_chunk_map:
-            return 0
-
-        pairs = []
-        for sent_id, chunk_ids in extra_chunk_map.items():
-            for cid in chunk_ids:
-                pairs.append({"sent_id": sent_id, "chunk_id": cid})
-
-        query = """
-        UNWIND $pairs AS p
-        MATCH (sent:Sentence {id: p.sent_id, group_id: $group_id})
-        MATCH (chunk:TextChunk {id: p.chunk_id, group_id: $group_id})
-        MERGE (sent)-[:PART_OF]->(chunk)
-        RETURN count(*) AS cnt
-        """
-
-        with self.get_retry_session() as session:
-            result = session.run(query, pairs=pairs, group_id=group_id)
-            record = result.single()
-            return cast(int, record["cnt"]) if record else 0
-
     def create_sentence_related_to_edges(
         self,
         group_id: str,
