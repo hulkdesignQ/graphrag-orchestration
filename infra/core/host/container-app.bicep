@@ -43,11 +43,8 @@ param externalIdTenantName string = ''
 @description('Name of the Container App secret holding the Azure AD client secret (required for token refresh)')
 param clientSecretSettingName string = ''
 
-@description('Blob container URI for EasyAuth token store (e.g., https://storageaccount.blob.core.windows.net/tokens)')
-param tokenStoreBlobUri string = ''
-
-@description('Managed identity resource ID for accessing the token store blob container')
-param tokenStoreIdentityResourceId string = ''
+@description('Name of the Container App secret holding the SAS URL for the EasyAuth token store blob container')
+param tokenStoreSasSecretName string = ''
 
 // Calculate the OpenID issuer URL based on auth type
 var openIdIssuerUrl = useExternalIdIssuer && !empty(externalIdTenantName) 
@@ -155,9 +152,8 @@ resource authConfig 'Microsoft.App/containerApps/authConfigs@2024-10-02-preview'
       tokenStore: {
         enabled: true
         tokenRefreshExtensionHours: 72
-        azureBlobStorage: !empty(tokenStoreBlobUri) ? {
-          blobContainerUri: tokenStoreBlobUri
-          managedIdentityResourceId: tokenStoreIdentityResourceId
+        azureBlobStorage: !empty(tokenStoreSasSecretName) ? {
+          sasUrlSettingName: tokenStoreSasSecretName
         } : null
       }
       preserveUrlFragmentsForLogins: true

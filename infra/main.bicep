@@ -71,12 +71,6 @@ param b2cClientSecret string = ''
 @description('Azure AD client secret for EasyAuth token refresh (B2B)')
 param authClientSecret string = ''
 
-@description('Storage account name for EasyAuth token store blob container')
-param tokenStoreStorageAccount string = ''
-
-@description('Blob container name for EasyAuth token store')
-param tokenStoreContainerName string = 'easyauth-tokens'
-
 // Custom domain parameters
 @description('Custom domain for B2B app (e.g., evidoc-enterprise.hulkdesign.com). Empty = no custom domain.')
 param b2bCustomDomain string = ''
@@ -213,8 +207,7 @@ module graphragApi './core/host/container-app.bicep' = {
     authTenantId: subscription().tenantId
     authType: authType
     clientSecretSettingName: !empty(authClientSecret) ? 'aad-client-secret' : ''
-    tokenStoreBlobUri: !empty(tokenStoreStorageAccount) ? 'https://${tokenStoreStorageAccount}.blob.${environment().suffixes.storage}/${tokenStoreContainerName}' : ''
-    tokenStoreIdentityResourceId: ''
+    tokenStoreSasSecretName: !empty(authClientSecret) ? 'token-store-sas' : ''
     env: concat([
       {
         name: 'SERVICE_ROLE'
@@ -612,8 +605,7 @@ module graphragApiB2C './core/host/container-app.bicep' = if (enableB2C && !empt
     useExternalIdIssuer: true
     externalIdTenantName: b2cTenantName
     clientSecretSettingName: !empty(b2cClientSecret) ? 'b2c-client-secret' : ''
-    tokenStoreBlobUri: !empty(tokenStoreStorageAccount) ? 'https://${tokenStoreStorageAccount}.blob.${environment().suffixes.storage}/${tokenStoreContainerName}' : ''
-    tokenStoreIdentityResourceId: ''
+    tokenStoreSasSecretName: !empty(b2cClientSecret) ? 'token-store-sas' : ''
     env: concat([
       {
         name: 'SERVICE_ROLE'

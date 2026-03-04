@@ -46,6 +46,9 @@
     },
     "serviceGraphragImageName": {
       "value": "${SERVICE_GRAPHRAG_IMAGE_NAME}"
+    },
+    "authClientSecret": {
+      "value": "${authClientSecret}"
     }
   }
 }
