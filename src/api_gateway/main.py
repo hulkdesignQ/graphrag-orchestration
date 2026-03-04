@@ -218,6 +218,16 @@ async def lifespan(app: FastAPI):
                 image_container=os.getenv("AZURE_IMAGESTORAGE_CONTAINER"),
             )
 
+        # Usage tracking (Cosmos DB) — initialize the singleton so dashboard works
+        if os.getenv("COSMOS_DB_ENDPOINT"):
+            try:
+                from src.core.services.cosmos_client import get_cosmos_client
+                cosmos_usage = get_cosmos_client()
+                await cosmos_usage.initialize()
+                logger.info("cosmos_usage_tracking_initialized")
+            except Exception as e:
+                logger.warning("cosmos_usage_tracking_init_failed", error=str(e))
+
     except Exception as e:
         logger.error("frontend_services_init_failed", error=str(e))
 
