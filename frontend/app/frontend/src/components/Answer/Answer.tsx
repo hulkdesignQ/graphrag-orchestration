@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Button } from "@fluentui/react-components";
-import { Copy24Regular, Checkmark24Regular, LightbulbFilament24Regular, ClipboardTextLtr24Regular } from "@fluentui/react-icons";
+import { Copy24Regular, Checkmark24Regular } from "@fluentui/react-icons";
 import { useTranslation } from "react-i18next";
 import DOMPurify from "dompurify";
 import ReactMarkdown from "react-markdown";
@@ -82,24 +82,7 @@ export const Answer = ({
                             aria-label={copied ? t("tooltips.copied") : t("tooltips.copy")}
                             onClick={handleCopy}
                         />
-                        <Button
-                            appearance="transparent"
-                            style={{ color: "black" }}
-                            icon={<LightbulbFilament24Regular />}
-                            title={t("tooltips.showThoughtProcess")}
-                            aria-label={t("tooltips.showThoughtProcess")}
-                            onClick={() => onThoughtProcessClicked()}
-                            disabled={!answer.context.thoughts?.length || isStreaming}
-                        />
-                        <Button
-                            appearance="transparent"
-                            style={{ color: "black" }}
-                            icon={<ClipboardTextLtr24Regular />}
-                            title={t("tooltips.showSupportingContent")}
-                            aria-label={t("tooltips.showSupportingContent")}
-                            onClick={() => onSupportingContentClicked()}
-                            disabled={!answer.context.data_points || isStreaming}
-                        />
+{/* Thought process and supporting content buttons hidden — not useful for end users */}
                         {showSpeechOutputAzure && (
                             <SpeechOutputAzure answer={sanitizedAnswerHtml} index={index} speechConfig={speechConfig} isStreaming={isStreaming} />
                         )}
