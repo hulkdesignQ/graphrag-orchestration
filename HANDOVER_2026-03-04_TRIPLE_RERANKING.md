@@ -1,8 +1,8 @@
 # HANDOVER: Route 7 Triple Reranking — 2026-03-04
 
-## Status: DEPLOYED AND VALIDATED ✅
+## Status: DEPLOYED — Further Investigation Needed
 
-## Current Score: 56/57 (98.2%) — New All-Time High
+## Current Score: 56/57 (98.2%) — New All-Time High (but depends on RERANK_ALL)
 
 ---
 
@@ -128,9 +128,14 @@ ROUTE7_TRIPLE_CANDIDATES_K=30
 | 211229Z | Triple rerank (instruction rejected by API) | — | Q-D3 only: containment=0.75 — fell back to cosine |
 | 213212Z | Triple rerank with query-prepend instruction | — | Q-D3 only: containment=0.40 with top_k=5 |
 | 213526Z | Triple rerank, top_k=10, entity_seed=10 | — | Q-D3 only: containment=0.44 |
-| **214155Z** | **Triple rerank, top_k=15, candidates=50, entity_seed=15** | **56/57** | **Q-D3 3/3 ✅, only Q-D5 2/3 remains** |
+| **214155Z** | **Triple rerank, top_k=15, candidates=50, entity_seed=15** | **56/57** | **Q-D3 3/3 ✅, only Q-D5 2/3 — RERANK_ALL=1 was on (implicit)** |
+| 220304Z | + passage reranker top_k=20, RERANK_ALL=1 | 56/57 | Same score, context ~9,400 chars (RERANK_ALL injects ~18 extra) |
+| 221615Z | + passage reranker top_k=10, RERANK_ALL=1 | 35/39 | Regression — reranker reorders badly, not trimming |
+| 225244Z | Trim fix + RERANK_ALL=1 (accidental) | 54/57 | Q-D3 1/3, Q-D5 2/3 — trim cut RERANK_ALL's extra passages |
+| 230631Z | Trim fix + RERANK_ALL=0 + RERANK=1 | — | Q-D3 only: 2,808 chars (same as no reranker) |
+| 230851Z | Trim fix + RERANK_ALL=0 + RERANK=0 | 52/57 | Q-D3 1/3, Q-D5 2/3, Q-D8 1/3 — confirms RERANK_ALL=0 baseline |
 
-### Best Config (Current — 56/57)
+### Best Config (Current — 56/57, requires RERANK_ALL)
 
 ```
 ROUTE7_TRIPLE_RERANK=1
@@ -138,38 +143,81 @@ ROUTE7_TRIPLE_CANDIDATES_K=50
 ROUTE7_TRIPLE_TOP_K=15
 ROUTE7_ENTITY_SEED_TOP_K=15
 ROUTE7_DPR_TOP_K=50
-ROUTE7_RERANK_ALL=0
+ROUTE7_RERANK_ALL=1            ← required for 56/57; without it, drops to 52/57
+ROUTE7_RERANK_ALL_TOP_K=50
 ROUTE7_PPR_PASSAGE_TOP_K=20
+ROUTE7_RERANK=0                ← passage reranker adds no value at current config
 ```
 
 ---
 
-## TODO List
+## Critical Finding: RERANK_ALL Dependency
 
-### Immediate (Remaining 1 Point)
+### The 56/57 result depends on RERANK_ALL=1
 
-- [ ] **Investigate Q-D5 (2/3)** — "coverage start" definition. This is the sole remaining failure. Check if it's a retrieval or synthesis issue.
+| Config | Score | Q-D3 | Notes |
+|--------|-------|------|-------|
+| RERANK_ALL=1 (implicit default) + triple rerank | **56/57** | 3/3 ✅ | Best result, but uses brute-force rerank-all |
+| RERANK_ALL=0 + triple rerank | 52/57 | 1/3 ❌ | Missing "10 business days", "180 days" |
+| RERANK_ALL=0 + passage reranker top_k=20 | 52/57 | 1/3 ❌ | Reranker just reorders same 20 PPR passages |
 
-- [ ] **Re-run full benchmark for stability** — Run 2-3 times to confirm 56/57 is stable (not a lucky run).
+### Why RERANK_ALL matters
 
-- [ ] **Update deploy-graphrag.sh** — Bake the new env vars into the deploy script so they survive future deploys:
+Without RERANK_ALL, only 20 PPR passages go to synthesis (~2,800 chars). With RERANK_ALL, ~38 chunks go to synthesis (~9,400 chars) because step 4.6 injects ~18 additional cross-encoder-selected passages that PPR missed.
+
+Q-D3 needs sentences that are **completely graph-isolated** — they share zero entities with any PPR seed:
+- `sent_23` ("3 business days cancel") — no shared entities
+- `sent_17` ("10 business days holding tank") — no shared entities
+
+PPR can never reach these regardless of entity/triple tuning. Only RERANK_ALL (corpus-wide cross-encoder) catches them.
+
+### Why the deploy script forces RERANK_ALL=1
+
+Two places force it on:
+1. **`deploy-graphrag.sh` line 335:** `ROUTE7_RERANK_ALL=${ROUTE7_RERANK_ALL:-1}` — defaults to `1` on every deploy
+2. **Code default line 288:** `os.getenv("ROUTE7_RERANK_ALL", "1")` — even without deploy script, code defaults to `1`
+
+Any `az containerapp update --set-env-vars ROUTE7_RERANK_ALL=0` is **overwritten** on next deploy.
+
+### Passage Reranker (Step 4.5) Finding
+
+The passage reranker trim fix (commit `4ab42506`) is correct but has **no practical effect** when `RERANK_TOP_K = PPR_PASSAGE_TOP_K = 20` — same 20 passages in, same 20 out. It would only matter if RERANK_TOP_K < total passages sent to synthesis.
+
+When RERANK_ALL=1 injects extra passages (total ~38), the passage reranker with top_k=20 would then **cut** 18 of those — which is counterproductive since RERANK_ALL added them to cover graph gaps.
+
+---
+
+## TODO List (for next session)
+
+### Path A: Temporary — Keep RERANK_ALL, use passage reranker to control context size
+
+If we accept RERANK_ALL as a temporary crutch:
+
+- [ ] **Keep RERANK_ALL=1** as the deployed default (already is)
+- [ ] **Enable passage reranker (step 4.5)** after rerank-all injection to reorder and optionally trim the combined pool
+- [ ] **Tune RERANK_TOP_K** — find the sweet spot where enough context is kept for Q-D3 but not so much that Q-D10/Q-N8 regress from context bloat
+- [ ] **Test with RERANK_TOP_K=30** (keep all ~38 but reorder for quality) vs **RERANK_TOP_K=25** (mild trim)
+
+### Path B: Permanent — Fix the underlying graph isolation problem
+
+The real fix is to make graph-isolated sentences reachable by PPR:
+
+- [ ] **Add sentence-to-sentence MENTIONS edges** — if sent_23 mentions "cancel" and other sentences also mention "cancel", add edges so PPR can reach sent_23 through entity overlap
+- [ ] **Add DPR-based passage seeding boost** — increase `ROUTE7_PASSAGE_NODE_WEIGHT` so DPR seeds carry more PPR mass to graph-isolated passages
+- [ ] **Add section-level graph edges** — sentences in the same section should have structural edges, allowing PPR to traverse from one sentence to its section neighbors
+- [ ] **Entity extraction improvement** — ensure "3 business days" and "10 business days" produce entities that overlap with "time windows" or "timeframe" entities from the query
+
+### Housekeeping
+
+- [ ] **Update deploy-graphrag.sh** — Bake the best config env vars so they survive deploys:
   ```
   ROUTE7_TRIPLE_RERANK=1
   ROUTE7_TRIPLE_CANDIDATES_K=50
   ROUTE7_TRIPLE_TOP_K=15
   ROUTE7_ENTITY_SEED_TOP_K=15
+  ROUTE7_DPR_TOP_K=50
   ```
-
-### If Q-D5 Is Fixable
-
-- [ ] **Check Q-D5 context** — Run with `--include-context --filter-qid Q-D5` to see if the answer is in the context but synthesis misses it
-- [ ] **Tune synthesis prompt** — If it's a synthesis issue, tighten the prompt for coverage completeness
-
-### Longer-Term Improvements
-
-- [ ] **IDF weighting on entity seeds** — Weight entities by inverse document frequency so rare entities get higher PPR mass
-- [ ] **Consider making triple_top_k dynamic** — Wider for exhaustive queries (Q-D3 "list all"), narrower for targeted queries (Q-D1 "specific defect")
-- [ ] **Investigate Voyage SDK update** — When voyageai SDK adds native `instruction` support, switch from query-prepend to proper API param
+- [ ] **Decide on ROUTE7_RERANK_ALL default** — currently `1` in both deploy script and code; change to `0` only after Path B fixes graph isolation
 
 ---
 
