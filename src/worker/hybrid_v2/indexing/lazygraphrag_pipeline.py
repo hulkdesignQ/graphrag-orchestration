@@ -1457,12 +1457,15 @@ class LazyGraphRAGIndexingPipeline:
     # Step 5b: Open-domain triple extraction (HippoRAG 2 alignment)
     # ────────────────────────────────────────────────────────────────────
 
-    _OPENIE_PROMPT = """Extract knowledge graph triples from each sentence below.
-For each sentence, identify (subject, predicate, object) triples where:
-- subject and object are named entities, key concepts, dates, or amounts
-- predicate is the exact relationship phrase from the text
-- Extract ALL factual relationships, not just the most obvious one
-- Use the entity names exactly as they appear in the text
+    _OPENIE_PROMPT = """Extract knowledge graph triples from the sentences below.
+
+Rules:
+1. Process EACH sentence [ID] independently — extract 2-5 triples per sentence.
+2. Predicates MUST be short verb phrases (1-5 words). Examples: "warrants for", "is not transferable", "holds risk until", "disclaims", "shall indemnify".
+3. Do NOT use the full sentence as a predicate.
+4. Subjects and objects are named entities, key concepts, legal terms, dates, or amounts.
+5. Include abstract concepts as entities when present: warranties, liabilities, rights, obligations, limitations, conditions.
+6. Extract ALL factual relationships from each sentence, not just the most obvious one.
 
 {sentences}
 
