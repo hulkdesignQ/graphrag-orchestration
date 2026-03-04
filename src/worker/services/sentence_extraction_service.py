@@ -857,7 +857,7 @@ def extract_sentences_from_di_units(
     handles them.
 
     Returns a deduplicated list of sentence dicts with:
-        id, text, chunk_id (empty), document_id, source, index_in_chunk (0),
+        id, text, document_id, source, index_in_chunk (0),
         index_in_doc, section_path, page, confidence, tokens, parent_text.
     """
     all_sentences: List[Dict[str, Any]] = []
@@ -893,7 +893,6 @@ def extract_sentences_from_di_units(
                 all_sentences.append({
                     "id": sent_id,
                     "text": lh_joined,
-                    "chunk_id": "",
                     "document_id": doc_id,
                     "source": "letterhead",
                     "index_in_chunk": 0,
@@ -952,7 +951,6 @@ def extract_sentences_from_di_units(
                     all_sentences.append({
                         "id": sent_id,
                         "text": hdr_text,
-                        "chunk_id": "",
                         "document_id": doc_id,
                         "source": "page_header",
                         "index_in_chunk": 0,
@@ -980,7 +978,6 @@ def extract_sentences_from_di_units(
                     all_sentences.append({
                         "id": sent_id,
                         "text": ftr_text,
-                        "chunk_id": "",
                         "document_id": doc_id,
                         "source": "page_footer",
                         "index_in_chunk": 0,
@@ -1009,7 +1006,6 @@ def extract_sentences_from_di_units(
                     all_sentences.append({
                         "id": sent_id,
                         "text": lh_text,
-                        "chunk_id": "",
                         "document_id": doc_id,
                         "source": "letterhead",
                         "index_in_chunk": 0,
@@ -1038,7 +1034,6 @@ def extract_sentences_from_di_units(
                     all_sentences.append({
                         "id": sent_id,
                         "text": sig_text,
-                        "chunk_id": "",
                         "document_id": doc_id,
                         "source": "signature_block",
                         "index_in_chunk": 0,
@@ -1078,7 +1073,6 @@ def extract_sentences_from_di_units(
                 all_sentences.append({
                     "id": sent_id,
                     "text": sent_text,
-                    "chunk_id": "",
                     "document_id": doc_id,
                     "source": "paragraph",
                     "index_in_chunk": 0,
@@ -1119,7 +1113,6 @@ def extract_sentences_from_di_units(
                     all_sentences.append({
                         "id": sent_id,
                         "text": row_text,
-                        "chunk_id": "",
                         "document_id": doc_id,
                         "source": "table_row",
                         "index_in_chunk": 0,
@@ -1146,7 +1139,6 @@ def extract_sentences_from_di_units(
                         all_sentences.append({
                             "id": sent_id,
                             "text": caption,
-                            "chunk_id": "",
                             "document_id": doc_id,
                             "source": "table_caption",
                             "index_in_chunk": 0,
@@ -1180,7 +1172,6 @@ def extract_sentences_from_di_units(
                 all_sentences.append({
                     "id": sent_id,
                     "text": caption,
-                    "chunk_id": "",
                     "document_id": doc_id,
                     "source": "figure_caption",
                     "index_in_chunk": 0,
@@ -1215,7 +1206,6 @@ def extract_sentences_from_di_units(
                     all_sentences.append({
                         "id": sent_id,
                         "text": sig_text,
-                        "chunk_id": "",
                         "document_id": doc_id,
                         "source": "signature_party",
                         "index_in_chunk": 0,
@@ -1269,7 +1259,6 @@ def extract_sentences_from_raw_text(
         sentences.append({
             "id": f"{doc_id}_sent_{sent_idx}",
             "text": sent_text,
-            "chunk_id": "",
             "document_id": doc_id,
             "source": "paragraph",
             "index_in_chunk": 0,

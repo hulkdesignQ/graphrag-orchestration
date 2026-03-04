@@ -902,10 +902,8 @@ class LazyGraphRAGIndexingPipeline:
             sentence_objects.append(Sentence(
                 id=raw["id"],
                 text=raw["text"],
-                chunk_id=raw.get("chunk_id") or None,
                 document_id=raw["document_id"],
                 source=raw["source"],
-                index_in_chunk=raw.get("index_in_chunk", 0),
                 index_in_doc=raw.get("index_in_doc", 0),
                 section_path=raw.get("section_path", ""),
                 page=raw.get("page"),
@@ -1199,7 +1197,7 @@ class LazyGraphRAGIndexingPipeline:
             """
                 MATCH (s:Sentence {group_id: $group_id})
                 WHERE s.embedding_v2 IS NOT NULL
-                RETURN s.id AS id, s.chunk_id AS chunk_id,
+                RETURN s.id AS id,
                        s.document_id AS document_id,
                        s.index_in_doc AS index_in_doc,
                        s.embedding_v2 AS embedding
@@ -1210,7 +1208,6 @@ class LazyGraphRAGIndexingPipeline:
         sentences = [
             {
                 "id": record["id"],
-                "chunk_id": record["chunk_id"] or "",
                 "document_id": record["document_id"] or "",
                 "index_in_doc": record["index_in_doc"] or 0,
                 "embedding": record["embedding"],
@@ -1248,17 +1245,11 @@ class LazyGraphRAGIndexingPipeline:
         sim_matrix = normalized @ normalized.T
         
         # Build edge candidates: cross-context, above threshold, max-k per node.
-        # For legacy sentences with chunk_id: skip same-chunk pairs.
-        # For new sentences without chunk_id: skip adjacent sentences in same doc
-        # (already linked via NEXT edges).
+        # Skip adjacent sentences in same doc (already linked via NEXT edges).
         edge_count: Dict[str, int] = defaultdict(int)
         
         def _is_same_context(a: dict, b: dict) -> bool:
             """True when two sentences are too close to need a RELATED_TO edge."""
-            cid_a, cid_b = a["chunk_id"], b["chunk_id"]
-            if cid_a and cid_b:
-                return cid_a == cid_b  # legacy: same chunk
-            # New doc-based sentences: skip immediate neighbours in same doc
             if a["document_id"] == b["document_id"]:
                 return abs(a["index_in_doc"] - b["index_in_doc"]) <= 1
             return False
@@ -1944,7 +1935,7 @@ Return ONLY valid JSON (no markdown fences):
         Ported from the native extractor's section-aware batching pattern
         (see _extract_with_native_extractor_sentences).
 
-        Large sections (>MAX_SECTION_BATCH) are split at chunk_id boundaries.
+        Large sections (>MAX_SECTION_BATCH) are split into sub-batches.
         """
         from itertools import groupby as _groupby
 
@@ -1958,14 +1949,9 @@ Return ONLY valid JSON (no markdown fences):
             section_sents = list(grp)
             context = self._section_context_prefix(_sec_path)
 
-            if len(section_sents) <= MAX_SECTION_BATCH:
-                batches.append((section_sents, context))
-            else:
-                # Split at chunk_id boundaries for very large sections
-                for _, chunk_grp in _groupby(
-                    section_sents, key=lambda s: s.get("chunk_id", "")
-                ):
-                    batches.append((list(chunk_grp), context))
+            # Split into MAX_SECTION_BATCH-sized sub-batches
+            for i in range(0, len(section_sents), MAX_SECTION_BATCH):
+                batches.append((section_sents[i:i + MAX_SECTION_BATCH], context))
 
         return batches
 

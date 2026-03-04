@@ -85,10 +85,8 @@ class Sentence:
     """
     id: str
     text: str
-    chunk_id: Optional[str] = None  # Legacy: parent chunk ID (deprecated)
     document_id: str = ""
     source: str = "paragraph"  # "paragraph" | "table_row" | "table_caption" | "figure_caption" | "signature_party" | "page_header" | "page_footer" | "letterhead"
-    index_in_chunk: int = 0  # Position within parent chunk (legacy)
     index_in_doc: int = 0  # Global ordinal position within document
     section_path: str = ""  # Section hierarchy path
     page: Optional[int] = None
@@ -239,7 +237,7 @@ class Neo4jStoreV3:
             # Sentence nodes (skeleton enrichment Strategy A)
             "CREATE CONSTRAINT sentence_id IF NOT EXISTS FOR (s:Sentence) REQUIRE s.id IS UNIQUE",
             "CREATE INDEX sentence_group IF NOT EXISTS FOR (s:Sentence) ON (s.group_id)",
-            "CREATE INDEX sentence_chunk IF NOT EXISTS FOR (s:Sentence) ON (s.chunk_id)",
+            # chunk_id index removed — chunk_id was legacy (always empty for DI path)
             "CREATE INDEX sentence_doc IF NOT EXISTS FOR (s:Sentence) ON (s.document_id)",
             
             # Regular indexes for filtering
@@ -1075,13 +1073,13 @@ class Neo4jStoreV3:
     def get_sentences_by_group(self, group_id: str) -> List[Dict[str, Any]]:
         """Fetch all Sentence nodes for a group_id.
 
-        Returns list of dicts with keys: id, text, chunk_id, document_id,
+        Returns list of dicts with keys: id, text, document_id,
         source, section_path, index_in_section, total_in_section, page.
         Used by Phase B sentence-based entity extraction.
         """
         query = """
         MATCH (s:Sentence {group_id: $group_id})
-        RETURN s.id AS id, s.text AS text, s.chunk_id AS chunk_id,
+        RETURN s.id AS id, s.text AS text,
                s.document_id AS document_id, s.source AS source,
                s.section_path AS section_path,
                s.index_in_section AS index_in_section,
@@ -1095,7 +1093,6 @@ class Neo4jStoreV3:
                 {
                     "id": record["id"],
                     "text": record["text"],
-                    "chunk_id": record["chunk_id"],
                     "document_id": record["document_id"],
                     "source": record["source"],
                     "section_path": record["section_path"] or "",
@@ -1112,7 +1109,6 @@ class Neo4jStoreV3:
         """Batch insert/update Sentence nodes with embeddings and structural edges.
         
         Creates :Sentence nodes with direct IN_DOCUMENT and IN_SECTION edges.
-        Optionally creates PART_OF→parent chunk if chunk_id is present (legacy).
         Creates NEXT edges between sequential sentences within the same document.
         """
         if not sentences:
@@ -1122,10 +1118,8 @@ class Neo4jStoreV3:
         UNWIND $sentences AS s
         MERGE (sent:Sentence {id: s.id, group_id: $group_id})
         SET sent.text = s.text,
-            sent.chunk_id = s.chunk_id,
             sent.document_id = s.document_id,
             sent.source = s.source,
-            sent.index_in_chunk = s.index_in_chunk,
             sent.index_in_doc = s.index_in_doc,
             sent.section_path = s.section_path,
             sent.page = s.page,
@@ -1176,10 +1170,8 @@ class Neo4jStoreV3:
             sentence_data.append({
                 "id": s.id,
                 "text": s.text,
-                "chunk_id": s.chunk_id or "",
                 "document_id": s.document_id,
                 "source": s.source,
-                "index_in_chunk": s.index_in_chunk,
                 "index_in_doc": s.index_in_doc,
                 "section_path": s.section_path,
                 "page": s.page,
@@ -1394,7 +1386,6 @@ class Neo4jStoreV3:
                sent.section_path AS section_path,
                sent.parent_text AS parent_text,
                sent.page AS page,
-               sent.chunk_id AS chunk_id,
                sent.document_id AS document_id,
                chunk.text AS chunk_text,
                doc.title AS document_title,
@@ -1420,7 +1411,6 @@ class Neo4jStoreV3:
                     "section_path": record["section_path"],
                     "parent_text": record["parent_text"],
                     "page": record["page"],
-                    "chunk_id": record["chunk_id"],
                     "document_id": record["document_id"],
                     "chunk_text": record["chunk_text"],
                     "document_title": record["document_title"],
