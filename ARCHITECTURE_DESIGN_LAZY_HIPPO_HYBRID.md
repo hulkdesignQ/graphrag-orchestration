@@ -11599,3 +11599,24 @@ Compared E2's extraction output against the entities/triples already stored in N
 ### Next Step
 
 Full reindex with E2 → deploy → Route 7 benchmark to validate retrieval quality is maintained (≥55/57).
+
+## §42. Chat UI: Remove Thought Process & Supporting Content Buttons (2026-03-04)
+
+### Rationale
+
+The chat UI answer toolbar had two developer-oriented buttons:
+
+1. **💡 Show thought process** — opened a side panel showing route selection, entity lists, community counts, and chunk counts.
+2. **📋 Show supporting content** — opened a side panel showing raw retrieved data points.
+
+The information surfaced was superficial (e.g., "Using route_7 for this query", "Retrieved 12 text chunks as supporting evidence") and not actionable for end users. These are debugging aids for builders, not user-facing features.
+
+### Change
+
+Removed both buttons from `Answer.tsx`. The copy button and citation links remain. The underlying `AnalysisPanel`, `ThoughtProcess`, and `SupportingContent` components are retained as dead code for potential future developer tooling.
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `frontend/app/frontend/src/components/Answer/Answer.tsx` | Removed lightbulb and clipboard button JSX; removed unused icon imports (`LightbulbFilament24Regular`, `ClipboardTextLtr24Regular`) |
