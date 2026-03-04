@@ -11744,3 +11744,35 @@ For small corpora (5 PDFs, ~200 sentences), entity **connectivity** matters more
 
 - `benchmarks/route7_hipporag2_r4questions_20260304T122203Z.json` — Two-step (52/57)
 - `benchmarks/route7_hipporag2_r4questions_20260304T125842Z.json` — Single-step reindex (54/57)
+
+## §45. Frontend Cleanup: Error Handling, Button Removal, Auth Guard (2026-03-04)
+
+### Problem
+
+Several frontend/backend issues surfaced during UI testing:
+
+1. **File list 400 error** — `/list_uploaded` returned `"File upload is not enabled"` because `showUserUpload` config defaulted to `true` even when ADLS storage wasn't configured. Error messages were blank due to HTTP/2 not transmitting `statusText`.
+2. **Dashboard 504 timeout** — `/dashboard/me/usage` hung indefinitely when Redis was slow because the Redis client had no socket timeout and the endpoint had no async timeout guard.
+3. **Broken answer tests** — 4 tests in `answer.test.tsx` expected thought process/supporting content buttons that were intentionally removed from the Answer component.
+4. **Developer settings button** — Not useful for end users; exposed RAG tuning internals (prompt template, temperature, retrieve count, etc.).
+5. **Manage file uploads button** — Redundant after adding the Files sidebar tab.
+
+### Changes
+
+| Area | Fix | Commits |
+|------|-----|---------|
+| File list error reporting | `files.ts`: parse response body for error detail (HTTP/2 compat) | `2d4da9fa` |
+| File list backend | `files.py`: wrap `list_uploaded` in try/except, return 502 with storage error | `2d4da9fa` |
+| Config accuracy | `config.py`: `showUserUpload` now checks `AZURE_USERSTORAGE_ACCOUNT` + `AZURE_USERSTORAGE_CONTAINER` are set | `2d4da9fa` |
+| Redis timeout | `redis_service.py`: add `socket_timeout=5`, `socket_connect_timeout=5` | `ba9d1886` |
+| Dashboard timeout | `dashboard.py`: wrap `/me/usage` in `asyncio.timeout(15)`, return proper 504 | `ba9d1886` |
+| Dashboard error reporting | `dashboard.ts`: parse response body for error detail | `ba9d1886` |
+| Auth-disabled layout | `layoutWrapper.tsx`: set `loggedIn=true` when auth is disabled | `ba9d1886` |
+| Answer tests | Updated 4 tests to verify buttons are absent (matching component) | `f56c13e1` |
+| Chat UI cleanup | Removed "Developer settings" button, drawer, and "Manage file uploads" popover | `bfa011b5` |
+
+### Design Decisions
+
+- **Settings state preserved** — RAG settings (temperature, retrieve count, streaming, etc.) are still initialized from server config and sent with queries. Only the UI to change them at runtime was removed.
+- **File management consolidated** — The Files sidebar tab is the single entry point for file operations. The old chat-bar popover (`UploadFile` component) is no longer rendered.
+- **Fail-fast Redis** — 5-second socket timeout ensures Redis issues surface as caught exceptions rather than gateway timeouts.
