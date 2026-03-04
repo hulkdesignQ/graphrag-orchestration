@@ -247,7 +247,11 @@ async def list_uploaded(
 ):
     """List the uploaded documents for the current user."""
     blob_manager = _get_blob_manager(request)
-    files = await blob_manager.list_blobs(user_id)
+    try:
+        files = await blob_manager.list_blobs(user_id)
+    except Exception as e:
+        logger.exception("Failed to list files for user %s: %s", user_id, e)
+        raise HTTPException(status_code=502, detail=f"Storage error: {type(e).__name__}: {e}")
     return files
 
 

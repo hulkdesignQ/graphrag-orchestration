@@ -133,7 +133,16 @@ export async function listFilesApi(idToken: string): Promise<string[]> {
         method: "GET",
         headers: await getHeaders(idToken),
     });
-    if (!response.ok) throw new Error(`List failed: ${response.statusText}`);
+    if (!response.ok) {
+        let detail = "";
+        try {
+            const body = await response.json();
+            detail = body.detail || body.message || JSON.stringify(body);
+        } catch {
+            detail = response.statusText || `HTTP ${response.status}`;
+        }
+        throw new Error(`List failed (${response.status}): ${detail}`);
+    }
     return response.json();
 }
 
