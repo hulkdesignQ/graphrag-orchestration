@@ -21,6 +21,7 @@ Benchmark results (Strategy A):
   - 8 wins, 0 real losses, 1 tie (1 "loss" was metric artifact)
 """
 
+import json as json_mod
 import os
 import re
 import threading
@@ -61,6 +62,7 @@ def _split_sentences(text: str) -> List[str]:
 
     Uses do_paragraph_segmentation=True to handle embedded newlines
     from DI-extracted PDF text (line wrapping, section breaks).
+
     Returns a flat list of stripped, non-empty sentence strings.
     """
     sat = _get_sat()
@@ -73,6 +75,216 @@ def _split_sentences(text: str) -> List[str]:
             sentences.append(item.strip())
     return sentences
 
+
+# ---------------------------------------------------------------------------
+# LLM sentence-boundary review (bundled)
+# ---------------------------------------------------------------------------
+
+_LLM_REVIEW_SINGLE_PROMPT = """You are a sentence boundary reviewer. Below are text segments produced by an automated sentence splitter. Some boundaries may be WRONG.
+
+RULES — you must follow ALL of these:
+1. You may MERGE adjacent segments (remove a split between them).
+2. You may SPLIT one segment into two (add a split inside it).
+3. You must NOT add, remove, or change any character.
+4. You must NOT reorder segments.
+5. Every character from the input must appear exactly once in the output.
+
+Segments to review (JSON array):
+{segments_json}
+
+Return ONLY a JSON array of the corrected segments. If no changes are needed, return the input unchanged.
+"""
+
+_LLM_REVIEW_BUNDLED_PROMPT = """You are a sentence boundary reviewer. Below are text segments from multiple sections, produced by an automated sentence splitter. Some boundaries may be WRONG.
+
+RULES — you must follow ALL of these:
+1. You may MERGE adjacent segments within a section (remove a split between them).
+2. You may SPLIT one segment into two within a section (add a split inside it).
+3. You must NOT add, remove, or change any character.
+4. You must NOT reorder segments.
+5. You must NOT move segments between sections.
+6. Every character from the input must appear exactly once in the output.
+
+Sections to review:
+{sections_json}
+
+Return ONLY a JSON array of objects with "id" and "sentences" keys, matching the input structure. If no changes are needed for a section, return it unchanged.
+"""
+
+# Maximum sentences per section before it gets its own LLM call
+_LLM_REVIEW_SECTION_CEILING = 30
+
+
+def verify_llm_review(
+    original_segments: List[str],
+    reviewed_segments: List[str],
+) -> bool:
+    """Return True iff the LLM only moved boundaries (no text changes)."""
+    orig = " ".join(s.strip() for s in original_segments)
+    rev = " ".join(s.strip() for s in reviewed_segments)
+    return orig == rev
+
+
+def llm_review_sections_bundled(
+    sections: List[Tuple[str, List[str]]],
+) -> Dict[str, List[str]]:
+    """Review sentence boundaries for multiple sections in one LLM call.
+
+    Args:
+        sections: list of (section_id, sentences) pairs.
+
+    Returns:
+        dict mapping section_id → reviewed sentences.
+        Sections that fail verification keep their original sentences.
+    """
+    if not sections:
+        return {}
+
+    results: Dict[str, List[str]] = {}
+    # Separate oversized sections (> ceiling) for individual calls
+    normal: List[Tuple[str, List[str]]] = []
+    oversized: List[Tuple[str, List[str]]] = []
+    for sid, sents in sections:
+        if len(sents) > _LLM_REVIEW_SECTION_CEILING:
+            oversized.append((sid, sents))
+        else:
+            normal.append((sid, sents))
+
+    # Handle oversized sections individually
+    for sid, sents in oversized:
+        segments_json = json_mod.dumps(sents, ensure_ascii=False)
+        prompt = _LLM_REVIEW_SINGLE_PROMPT.format(segments_json=segments_json)
+        try:
+            corrected = _call_llm_for_review(prompt)
+        except Exception:
+            corrected = None
+        if corrected and verify_llm_review(sents, corrected):
+            results[sid] = corrected
+            logger.info("llm_review_section_complete", section=sid,
+                        original=len(sents), reviewed=len(corrected))
+        else:
+            results[sid] = sents
+
+    if not normal:
+        return results
+
+    # Bundle normal sections into one call
+    payload = [{"id": sid, "sentences": sents} for sid, sents in normal]
+    sections_json = json_mod.dumps(payload, ensure_ascii=False)
+    prompt = _LLM_REVIEW_BUNDLED_PROMPT.format(sections_json=sections_json)
+
+    try:
+        raw = _call_llm_for_review_raw(prompt)
+    except Exception as exc:
+        logger.debug("llm_review_bundled_call_failed", error=str(exc))
+        for sid, sents in normal:
+            results[sid] = sents
+        return results
+
+    if raw is None:
+        for sid, sents in normal:
+            results[sid] = sents
+        return results
+
+    # Parse bundled response: list of {id, sentences}
+    if not isinstance(raw, list):
+        for sid, sents in normal:
+            results[sid] = sents
+        return results
+
+    # Build lookup from original sections
+    orig_map = {sid: sents for sid, sents in normal}
+    reviewed_map: Dict[str, List[str]] = {}
+    for item in raw:
+        if isinstance(item, dict) and "id" in item and "sentences" in item:
+            reviewed_map[str(item["id"])] = item["sentences"]
+
+    # Verify each section independently
+    for sid, orig_sents in normal:
+        reviewed = reviewed_map.get(sid)
+        if reviewed and verify_llm_review(orig_sents, reviewed):
+            results[sid] = reviewed
+            if reviewed != orig_sents:
+                logger.info("llm_review_section_changed", section=sid,
+                            original=len(orig_sents), reviewed=len(reviewed))
+        else:
+            results[sid] = orig_sents
+
+    logger.info("llm_review_bundled_complete",
+                sections=len(normal), changed=sum(
+                    1 for sid, sents in normal if results[sid] != sents))
+    return results
+
+
+def _call_llm_json(prompt: str) -> Optional[Any]:
+    """Synchronous LLM call that returns parsed JSON (any type) or None."""
+    try:
+        from llama_index.llms.azure_openai import AzureOpenAI
+    except ImportError:
+        logger.debug("llm_sentence_review_no_llama_index")
+        return None
+
+    from src.core.config import settings
+
+    model = os.getenv("SENTENCE_REVIEW_MODEL", "gpt-4.1")
+    deployment = os.getenv("SENTENCE_REVIEW_DEPLOYMENT", model)
+    api_version = settings.AZURE_OPENAI_API_VERSION or "2025-03-01-preview"
+
+    # Auth: mirror LLMService._create_llm_client() pattern
+    llm_kwargs: dict = {
+        "engine": deployment,
+        "azure_endpoint": settings.AZURE_OPENAI_ENDPOINT,
+        "api_version": api_version,
+        "temperature": 0.0,
+    }
+    if settings.AZURE_OPENAI_API_KEY:
+        llm_kwargs["api_key"] = settings.AZURE_OPENAI_API_KEY
+    else:
+        env_token = os.getenv("AZURE_OPENAI_BEARER_TOKEN")
+        if env_token:
+            llm_kwargs["use_azure_ad"] = True
+            llm_kwargs["azure_ad_token_provider"] = lambda: env_token
+        else:
+            try:
+                from azure.identity import DefaultAzureCredential, get_bearer_token_provider
+                credential = DefaultAzureCredential()
+                token_provider = get_bearer_token_provider(
+                    credential, "https://cognitiveservices.azure.com/.default"
+                )
+                llm_kwargs["use_azure_ad"] = True
+                llm_kwargs["azure_ad_token_provider"] = token_provider
+            except Exception:
+                logger.debug("llm_sentence_review_no_credential")
+                return None
+
+    try:
+        llm = AzureOpenAI(**llm_kwargs)
+        response = llm.complete(prompt)
+        text = (response.text or "").strip()
+        # Strip markdown fences
+        if text.startswith("```"):
+            text = text.split("\n", 1)[1] if "\n" in text else text[3:]
+        if text.endswith("```"):
+            text = text[:-3].rstrip()
+        if text.startswith("json"):
+            text = text[4:].lstrip()
+        return json_mod.loads(text)
+    except Exception as exc:
+        logger.debug("llm_sentence_review_parse_failed", error=str(exc))
+        return None
+
+
+def _call_llm_for_review(prompt: str) -> Optional[List[str]]:
+    """LLM call expecting a JSON array of strings. Returns list or None."""
+    parsed = _call_llm_json(prompt)
+    if isinstance(parsed, list) and all(isinstance(s, str) for s in parsed):
+        return parsed
+    return None
+
+
+def _call_llm_for_review_raw(prompt: str) -> Optional[Any]:
+    """LLM call expecting any JSON structure (for bundled review)."""
+    return _call_llm_json(prompt)
 
 # ---------------------------------------------------------------------------
 # DI paragraph roles to skip (not embeddable content)

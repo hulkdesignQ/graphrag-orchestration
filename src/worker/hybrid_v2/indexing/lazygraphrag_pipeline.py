@@ -755,6 +755,61 @@ class LazyGraphRAGIndexingPipeline:
             logger.info("index_sentences_direct: no sentences extracted")
             return stats
 
+        # ── Optional LLM sentence-boundary review (bundled) ──────
+        if settings.SKELETON_LLM_SENTENCE_REVIEW:
+            from src.worker.services.sentence_extraction_service import (
+                llm_review_sections_bundled,
+            )
+            # Group sentences by their section_path for bundled review
+            section_order: List[str] = []
+            section_sents: Dict[str, List[str]] = {}
+            section_indices: Dict[str, List[int]] = {}
+            for i, s in enumerate(all_raw_sentences):
+                if s.get("source") != "paragraph":
+                    continue
+                key = f"{s['document_id']}|{s.get('section_path', '')}"
+                if key not in section_sents:
+                    section_order.append(key)
+                    section_sents[key] = []
+                    section_indices[key] = []
+                section_sents[key].append(s["text"])
+                section_indices[key].append(i)
+
+            if section_sents:
+                sections_input = [(k, section_sents[k]) for k in section_order]
+                reviewed = llm_review_sections_bundled(sections_input)
+                # Apply reviewed sentences back
+                for key in section_order:
+                    new_sents = reviewed.get(key, section_sents[key])
+                    old_indices = section_indices[key]
+                    if len(new_sents) == len(old_indices):
+                        # Same count — update texts in place
+                        for idx, new_text in zip(old_indices, new_sents):
+                            all_raw_sentences[idx]["text"] = new_text
+                    else:
+                        # Count changed — rebuild section sentences
+                        doc_id_sec = all_raw_sentences[old_indices[0]]["document_id"]
+                        base = all_raw_sentences[old_indices[0]].copy()
+                        new_entries = []
+                        for j, new_text in enumerate(new_sents):
+                            entry = base.copy()
+                            entry["text"] = new_text
+                            entry["id"] = f"{doc_id_sec}_sent_llm_{old_indices[0]}_{j}"
+                            new_entries.append(entry)
+                        # Replace old entries with new (mark old for removal, append new)
+                        for idx in old_indices:
+                            all_raw_sentences[idx] = None  # type: ignore[assignment]
+                        all_raw_sentences.extend(new_entries)
+                # Remove None entries from count-changed sections
+                all_raw_sentences = [s for s in all_raw_sentences if s is not None]
+                # Re-index index_in_doc
+                for i, s in enumerate(all_raw_sentences):
+                    s["index_in_doc"] = i
+                logger.info(
+                    "index_sentences_direct: LLM review applied to %d sections",
+                    len(section_sents),
+                )
+
         logger.info(
             "index_sentences_direct: extracted %d sentences from %d documents",
             len(all_raw_sentences), stats["documents_processed"],
