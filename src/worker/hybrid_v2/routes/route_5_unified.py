@@ -949,7 +949,7 @@ class UnifiedSearchHandler(BaseRouteHandler):
            OR sent.text CONTAINS 'Signed this'
         WITH sent, doc
         WHERE $folder_id IS NULL OR (doc)-[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})
-        RETURN DISTINCT sent.id AS chunk_id,
+        RETURN DISTINCT sent.id AS sentence_id,
                sent.text AS text,
                doc.title AS document_title,
                doc.id AS document_id,
@@ -989,7 +989,7 @@ class UnifiedSearchHandler(BaseRouteHandler):
                     "page_number": r.get("page"),
                     "_entity_score": 0.35,
                     "_source_entity": "__sigblock_coverage__",
-                    "chunk_id": r.get("chunk_id", ""),
+                    "sentence_id": r.get("sentence_id", ""),
                 }
             )
 
