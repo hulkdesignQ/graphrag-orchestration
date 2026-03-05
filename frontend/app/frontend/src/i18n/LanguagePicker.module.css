@@ -59,3 +59,14 @@
 .languagePickerDropdownHeader::after {
     border-bottom-color: rgba(255, 255, 255, 0.3) !important;
 }
+
+/* Mobile: collapse to icon-only to save header space */
+@media (max-width: 480px) {
+    .languagePickerHeader {
+        padding: 0.2rem;
+    }
+
+    .languagePickerDropdownHeader {
+        display: none;
+    }
+}
