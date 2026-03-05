@@ -11961,3 +11961,36 @@ entities too different to merge but similar enough to connect.
 | `route_7_hipporag2.py` | ROUTE7_SYNONYM_THRESHOLD default updated to 0.70 |
 
 Commit: `89138ac5` (entity synonymy edges)
+
+### Indexing Pipeline Integration (Step 7.6)
+
+Entity synonymy edge computation is now integrated into the indexing pipeline as **step 7.6**
+(after triple embedding pre-computation, before GDS algorithms):
+
+```
+Step 6:   Entity dedup (Union-Find @0.8) — merges near-identical
+Step 7:   Commit entities + relationships to Neo4j
+Step 7.5: Pre-compute triple embeddings (Voyage)
+Step 7.6: Compute entity synonymy edges (@0.70) ← NEW
+Step 8:   GDS algorithms (Louvain, PageRank)
+Step 9:   Materialize Louvain communities
+```
+
+The `_compute_entity_synonymy_edges()` method:
+1. Loads all entity embeddings from Neo4j
+2. Computes all-pairs cosine similarity (O(n²), ~189 entities = trivial)
+3. Creates bidirectional `SEMANTICALLY_SIMILAR` edges with `method: 'entity_synonymy'`
+4. Clears old synonymy edges before writing (idempotent)
+
+New parameter on `index_documents()`:
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `entity_synonymy_threshold` | `0.70` | Min cosine for entity synonymy edges |
+
+| File | Change |
+|------|--------|
+| `lazygraphrag_pipeline.py` | Added `_compute_entity_synonymy_edges()` method and step 7.6 call |
+| `index_5pdfs_v2_local.py` | Passes `entity_synonymy_threshold=0.70` |
+
+Commit: `684fa027` (indexing pipeline integration)
