@@ -1,15 +1,25 @@
-# Exclude large data files from Docker build context
-experiment_*.json
-comparison_*.json
-benchmark_*.json
-*.rdb
-deploy_log*.txt
-_archived/
-docs/
-benchmarks/
-.git/
-__pycache__/
-*.pyc
-.ruff_cache/
-.pytest_cache/
-node_modules/
+# Exclude everything by default, then whitelist what the Dockerfiles need
+*
+
+# Whitelist: src/ (API + worker application code)
+!src/
+
+# Whitelist: frontend SPA source + backend prepdocslib
+!frontend/app/frontend/
+!frontend/app/backend/prepdocslib/
+
+# Whitelist: Python requirements and third-party stubs
+!graphrag-orchestration/requirements.txt
+!graphrag-orchestration/third_party/
+
+# Whitelist: Dockerfiles themselves (needed by ACR build)
+!Dockerfile.api
+!Dockerfile.worker
+
+# Re-exclude build artifacts that sneak in via whitelisted dirs
+**/node_modules/
+**/__pycache__/
+**/*.pyc
+**/dist/
+**/.ruff_cache/
+**/.pytest_cache/
