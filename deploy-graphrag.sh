@@ -151,7 +151,39 @@ WORKER_IMAGE_URI="$ACR_SERVER/$WORKER_IMAGE_NAME:$AZURE_ENV_IMAGETAG"
 
 echo "API Image:    $API_IMAGE_URI"
 echo "Worker Image: $WORKER_IMAGE_URI"
-echo "Build Context: $APP_DIR"
+echo ""
+
+# Create minimal staging directory with only what the Dockerfiles need.
+# az acr build's tar packer recursively walks ALL dirs (even ignored ones)
+# which is extremely slow when node_modules (558MB) exists in the tree.
+STAGING_DIR=$(mktemp -d /tmp/graphrag-build-XXXXXX)
+trap "rm -rf '$STAGING_DIR'" EXIT
+
+echo "📦 Creating minimal build context..."
+mkdir -p "$STAGING_DIR/frontend/app/frontend" \
+         "$STAGING_DIR/frontend/app/backend" \
+         "$STAGING_DIR/graphrag-orchestration"
+
+cp Dockerfile.api Dockerfile.worker "$STAGING_DIR/"
+cp -r src/ "$STAGING_DIR/src/"
+# Frontend SPA source (exclude node_modules, dist)
+cp frontend/app/frontend/package.json \
+   frontend/app/frontend/package-lock.json \
+   frontend/app/frontend/.npmrc \
+   frontend/app/frontend/tsconfig.json \
+   frontend/app/frontend/vite.config.ts \
+   frontend/app/frontend/index.html \
+   "$STAGING_DIR/frontend/app/frontend/"
+cp -r frontend/app/frontend/src/ "$STAGING_DIR/frontend/app/frontend/src/"
+cp -r frontend/app/frontend/public/ "$STAGING_DIR/frontend/app/frontend/public/"
+# Backend prepdocslib (used by API Dockerfile)
+cp -r frontend/app/backend/prepdocslib/ "$STAGING_DIR/frontend/app/backend/prepdocslib/"
+# Python requirements and third-party stubs
+cp graphrag-orchestration/requirements.txt "$STAGING_DIR/graphrag-orchestration/"
+cp -r graphrag-orchestration/third_party/ "$STAGING_DIR/graphrag-orchestration/third_party/"
+
+CONTEXT_SIZE=$(du -sh "$STAGING_DIR" | cut -f1)
+echo "✅ Build context: $CONTEXT_SIZE (staging dir)"
 echo ""
 
 echo "⏳ Building and pushing API image in ACR..."
@@ -163,7 +195,7 @@ az acr build \
     --build-arg BUILD_DATE="$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
     --build-arg VERSION="$AZURE_ENV_IMAGETAG" \
     --build-arg CACHE_BUST="$AZURE_ENV_IMAGETAG" \
-    "$APP_DIR"
+    "$STAGING_DIR"
 
 echo "⏳ Building and pushing Worker image in ACR..."
 az acr build \
@@ -172,7 +204,7 @@ az acr build \
     --file Dockerfile.worker \
     --image "$WORKER_IMAGE_NAME:$AZURE_ENV_IMAGETAG" \
     --build-arg CACHE_BUST="$AZURE_ENV_IMAGETAG" \
-    "$APP_DIR"
+    "$STAGING_DIR"
 
 echo "✅ Images built and pushed"
 echo ""
