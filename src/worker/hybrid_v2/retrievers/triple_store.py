@@ -306,16 +306,41 @@ async def recognition_memory_filter(
         },
     ]
 
-    # Build messages in upstream format
+    # Build messages in upstream DSPy-optimized format (from filter_default_prompt.py)
     _SYS = (
-        "You are a critical component of a high-stakes question-answering system. "
-        "Your task is to filter facts based on their relevance to a given query, "
-        "ensuring that the most crucial information is retained. "
-        "The query may require multi-hop reasoning to connect different pieces of information. "
-        "Select relevant facts from the candidate list that have a strong connection to the query. "
-        "Output JSON: {\"fact\": [[\"s1\",\"p1\",\"o1\"], [\"s2\",\"p2\",\"o2\"]]}. "
-        "If no facts are relevant, return {\"fact\": []}. "
-        "Only use facts from the candidate list — do not generate new facts."
+        "Your input fields are:\n"
+        "1. `question` (str): Query for retrieval\n"
+        "2. `fact_before_filter` (str): Candidate facts to be filtered\n"
+        "\n"
+        "Your output fields are:\n"
+        '1. `fact_after_filter` (Fact): Filtered facts in JSON format\n'
+        "\n"
+        "All interactions will be structured in the following way, with the appropriate values filled in.\n"
+        "\n"
+        "[[ ## question ## ]]\n"
+        "{question}\n"
+        "\n"
+        "[[ ## fact_before_filter ## ]]\n"
+        "{fact_before_filter}\n"
+        "\n"
+        "[[ ## fact_after_filter ## ]]\n"
+        '{fact_after_filter}        # note: the value you produce must be pareseable according to the following JSON schema: '
+        '{"type": "object", "properties": {"fact": {"type": "array", "description": "A list of facts, each fact is a list of 3 strings: [subject, predicate, object]", '
+        '"items": {"type": "array", "items": {"type": "string"}}, "title": "Fact"}}, "required": ["fact"], "title": "Fact"}\n'
+        "\n"
+        "[[ ## completed ## ]]\n"
+        "\n"
+        "In adhering to this structure, your objective is: \n"
+        "        You are a critical component of a high-stakes question-answering system used by top researchers and "
+        "decision-makers worldwide. Your task is to filter facts based on their relevance to a given query, ensuring "
+        "that the most crucial information is presented to these stakeholders. The query requires careful analysis and "
+        "possibly multi-hop reasoning to connect different pieces of information. You must select up to 4 relevant facts "
+        "from the provided candidate list that have a strong connection to the query, aiding in reasoning and providing "
+        'an accurate answer. The output should be in JSON format, e.g., {"fact": [["s1", "p1", "o1"], ["s2", "p2", "o2"]]}, '
+        'and if no facts are relevant, return an empty list, {"fact": []}. The accuracy of your response is paramount, '
+        "as it will directly impact the decisions made by these high-level stakeholders. You must only use facts from the "
+        "candidate list and not generate new facts. The future of critical decision-making relies on your ability to "
+        "accurately filter and present relevant information."
     )
 
     _INPUT_TPL = "[[ ## question ## ]]\n{question}\n\n[[ ## fact_before_filter ## ]]\n{fact_before_filter}\n\nRespond with the corresponding output fields, starting with the field `[[ ## fact_after_filter ## ]]`, and then ending with the marker for `[[ ## completed ## ]]`."
