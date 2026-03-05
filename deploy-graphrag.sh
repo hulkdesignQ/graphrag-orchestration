@@ -401,8 +401,6 @@ ENV_VARS=(
     VECTOR_FALLBACK_TOP_K="$VECTOR_FALLBACK_TOP_K"
     VOYAGE_API_KEY="secretref:voyage-api-key"
     NEO4J_PASSWORD="secretref:neo4j-password"
-    MISTRAL_API_KEY="secretref:mistral-api-key"
-    LLMWHISPERER_API_KEY="secretref:llmwhisperer-api-key"
     AURA_DS_CLIENT_ID="$AURA_DS_CLIENT_ID"
     AURA_DS_CLIENT_SECRET="secretref:aura-ds-client-secret"
     SKELETON_ENRICHMENT_ENABLED="$SKELETON_ENRICHMENT_ENABLED"
@@ -420,6 +418,10 @@ ENV_VARS=(
     AZURE_USERSTORAGE_CONTAINER="$AZURE_USERSTORAGE_CONTAINER"
     RUNNING_IN_PRODUCTION="true"
 )
+
+# Only add secret-ref env vars for optional secrets that actually exist
+[ -n "$MISTRAL_API_KEY" ]      && ENV_VARS+=(MISTRAL_API_KEY="secretref:mistral-api-key")
+[ -n "$LLMWHISPERER_API_KEY" ] && ENV_VARS+=(LLMWHISPERER_API_KEY="secretref:llmwhisperer-api-key")
 
 # Update graphrag-api
 echo "⏳ Updating $CONTAINER_APP_API with $API_IMAGE_URI..."
