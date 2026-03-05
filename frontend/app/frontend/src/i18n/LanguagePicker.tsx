@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { LocalLanguage24Regular } from "@fluentui/react-icons";
+import { LocalLanguage24Regular, LocalLanguage20Regular } from "@fluentui/react-icons";
 import { Dropdown, Option, OptionOnSelectData, SelectionEvents } from "@fluentui/react-components";
 import { useId } from "react";
 
@@ -20,9 +20,15 @@ export const LanguagePicker = ({ onLanguageChange, variant = "default" }: Props)
     const languagePickerId = useId();
     const { t } = useTranslation();
 
+    const isHeader = variant === "header";
+
     return (
-        <div className={variant === "header" ? styles.languagePickerHeader : styles.languagePicker}>
-            <LocalLanguage24Regular className={variant === "header" ? styles.languagePickerIconHeader : styles.languagePickerIcon} />
+        <div className={isHeader ? styles.languagePickerHeader : styles.languagePicker}>
+            {isHeader ? (
+                <LocalLanguage20Regular className={styles.languagePickerIconHeader} />
+            ) : (
+                <LocalLanguage24Regular className={styles.languagePickerIcon} />
+            )}
             <Dropdown
                 id={languagePickerId}
                 selectedOptions={[i18n.language]}
@@ -30,7 +36,8 @@ export const LanguagePicker = ({ onLanguageChange, variant = "default" }: Props)
                 onOptionSelect={handleLanguageChange}
                 aria-label={t("labels.languagePicker")}
                 appearance="underline"
-                className={variant === "header" ? styles.languagePickerDropdownHeader : undefined}
+                size={isHeader ? "small" : "medium"}
+                className={isHeader ? styles.languagePickerDropdownHeader : undefined}
             >
                 {Object.entries(supportedLngs).map(([code, details]) => (
                     <Option key={code} value={code}>
