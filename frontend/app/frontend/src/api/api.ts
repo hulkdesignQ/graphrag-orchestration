@@ -108,9 +108,27 @@ export async function getSpeechApi(text: string): Promise<string | null> {
         .then(blob => (blob ? URL.createObjectURL(blob) : null));
 }
 
-export function getCitationFilePath(citation: string): string {
+/**
+ * Build the /content/<filename> URL for a citation.
+ * When documentUrl (full blob URL) is available, extract the filename from it
+ * so the extension (e.g. ".pdf") is preserved — document_title has it stripped.
+ */
+export function getCitationFilePath(citation: string, documentUrl?: string): string {
+    let filename = citation;
+    if (documentUrl) {
+        try {
+            // Extract last path segment: ".../test-docs/PROPERTY%20MANAGEMENT%20AGREEMENT.pdf" → decoded filename
+            const urlPath = new URL(documentUrl).pathname;
+            const lastSegment = urlPath.split("/").filter(Boolean).pop();
+            if (lastSegment) {
+                filename = decodeURIComponent(lastSegment);
+            }
+        } catch {
+            // If URL parsing fails, fall through to use citation as-is
+        }
+    }
     // Remove only the last parenthesized suffix (e.g., "(page 3)")
-    const cleanedCitation = citation.replace(/\s*\([^)]*\)\s*$/, "").trim();
+    const cleanedCitation = filename.replace(/\s*\([^)]*\)\s*$/, "").trim();
     return `${BACKEND_URI}/content/${encodeURIComponent(cleanedCitation)}`;
 }
 

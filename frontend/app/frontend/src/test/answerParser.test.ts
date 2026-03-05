@@ -143,16 +143,16 @@ describe("parseAnswerToHtml", () => {
         expect(result.answerHtml).toContain("supContainer");
     });
 
-    it("prefers document_url over document_title for reference", () => {
+    it("extracts filename from document_url to preserve extension", () => {
         const sc: StructuredCitation[] = [
-            { citation: "[1]", document_title: "Contract.pdf", document_url: "https://blob.example.com/Contract.pdf" }
+            { citation: "[1]", document_title: "Contract", document_url: "https://blob.example.com/docs/Contract.pdf" }
         ];
         const response = makeResponse("See [1].", [], {
             data_points: { text: [], images: [], citations: [], structured_citations: sc }
         });
         const result = parseAnswerToHtml(response, false, noopClick);
-        expect(result.citations[0].reference).toBe("https://blob.example.com/Contract.pdf");
-        expect(result.citations[0].isWeb).toBe(true);
+        expect(result.citations[0].reference).toBe("Contract.pdf");
+        expect(result.citations[0].isWeb).toBe(false);
     });
 
     it("deduplicates repeated [N] markers", () => {

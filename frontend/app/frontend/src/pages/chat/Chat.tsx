@@ -392,9 +392,15 @@ const Chat = () => {
                 // Extract document name from citation URL: /content/docname.pdf#page=N
                 const pathPart = citation.split("#")[0];
                 const docName = decodeURIComponent(pathPart.replace(/^.*\/content\//, ""));
+                // Also compute name without extension for matching against document_title (which strips .pdf)
+                const docNameNoExt = docName.replace(/\.[^.]+$/, "");
                 // Find ALL structured citations for this document
                 const matched = structured.filter(
-                    sc => sc.document_title === docName || sc.source === docName
+                    sc =>
+                        sc.document_title === docName ||
+                        sc.document_title === docNameNoExt ||
+                        sc.source === docName ||
+                        (sc.document_url && sc.document_url.endsWith(encodeURIComponent(docName)))
                 );
                 setActiveCitationObj(matched.length > 0 ? matched : structured.length > 0 ? [structured[0]] : undefined);
             } else {

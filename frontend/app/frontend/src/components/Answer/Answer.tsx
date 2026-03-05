@@ -128,7 +128,7 @@ export const Answer = ({
                             <span className={styles.citationLearnMore}>{t("citationWithColon")}</span>
                             {uniqueCitations.map((sc, idx) => {
                                 const docName = sc.document_title || sc.source || "Unknown";
-                                let path = getCitationFilePath(docName);
+                                let path = getCitationFilePath(docName, sc.document_url);
                                 if (sc.page_number) {
                                     path += `#page=${sc.page_number}`;
                                 }

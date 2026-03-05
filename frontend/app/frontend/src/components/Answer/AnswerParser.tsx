@@ -140,7 +140,14 @@ const collectCitations = (answer: ChatAppResponse, isStreaming: boolean): { frag
         const scIdx = scMap.get(part);
         if (scIdx !== undefined) {
             const sc = structuredCitations[scIdx];
-            const ref = sc.document_url || sc.document_title || sc.source || part;
+            // Prefer filename from document_url (preserves .pdf extension stripped from document_title)
+            let ref = sc.document_title || sc.source || part;
+            if (sc.document_url) {
+                try {
+                    const lastSeg = new URL(sc.document_url).pathname.split("/").filter(Boolean).pop();
+                    if (lastSeg) ref = decodeURIComponent(lastSeg);
+                } catch { /* use fallback */ }
+            }
             const resolvedRef = resolveSharePointUrl(ref);
 
             // De-duplicate by citation key to avoid rendering the same badge twice
