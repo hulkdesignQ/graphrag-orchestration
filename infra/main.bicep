@@ -772,15 +772,15 @@ module roleAssignments './core/security/role-assignments.bicep' = if (!skipRoleA
     documentIntelligenceName: 'doc-intel-graphrag'
     storageAccountName: storageAccountName
     containerRegistryName: containerRegistry.name
-    containerAppPrincipalIds: [
+    containerAppPrincipalIds: concat([
       graphragApi.outputs.identityPrincipalId
       graphragWorker.outputs.identityPrincipalId
-    ]
+    ], (enableB2C && !empty(b2cClientId)) ? [graphragApiB2C.outputs.identityPrincipalId] : [])
     azureOpenAiName: 'graphrag-openai-8476'
     cosmosAccountName: cosmosDb.outputs.cosmosAccountName
     userStorageAccountName: useUserUpload ? storageAccountName : ''
   }
-  dependsOn: [openAiModels, cosmosDb, graphragApi, graphragWorker] // Ensure resources exist before assigning permissions
+  dependsOn: [openAiModels, cosmosDb, graphragApi, graphragWorker, graphragApiB2C] // Ensure resources exist before assigning permissions
 }
 
 // ============================================================================

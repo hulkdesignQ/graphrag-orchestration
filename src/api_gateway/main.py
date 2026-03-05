@@ -256,7 +256,7 @@ async def lifespan(app: FastAPI):
         manager = getattr(app.state, attr, None)
         if manager:
             try:
-                await manager.close_clients()
+                await manager.close()
             except Exception as e:
                 logger.error("%s_close_failed", attr, error=str(e))
 
