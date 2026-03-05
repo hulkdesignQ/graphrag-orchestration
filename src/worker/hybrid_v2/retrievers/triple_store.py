@@ -331,7 +331,7 @@ async def recognition_memory_filter(
     prompt = "\n\n".join(messages_parts)
 
     try:
-        response = await llm_client.acomplete(prompt)
+        response = await llm_client.acomplete(prompt, temperature=0)
         text = response.text.strip()
 
         # Parse upstream structured format: look for [[ ## fact_after_filter ## ]]
