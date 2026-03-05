@@ -13,6 +13,8 @@ export type CitationDetail = {
     stepSource?: string;
     /** Original marker key from the LLM, e.g. "[1]" or "[1a]" */
     citationKey?: string;
+    /** Blob storage URL – used to derive the real filename with extension */
+    documentUrl?: string;
 };
 
 type CitationFragment =
@@ -163,6 +165,7 @@ const collectCitations = (answer: ChatAppResponse, isStreaming: boolean): { frag
                 index: citationList.length + 1,
                 isWeb: isWebCitation(resolvedRef),
                 citationKey: sc.citation || `[${part}]`,
+                documentUrl: sc.document_url,
             };
 
             citationMap.set(dedupeKey, detail);
@@ -235,7 +238,7 @@ const renderCitation = (detail: CitationDetail) => {
         );
     }
 
-    const path = getCitationFilePath(detail.reference);
+    const path = getCitationFilePath(detail.reference, detail.documentUrl);
     return renderToStaticMarkup(
         <span className="citationBadgeContainer">
             <a className="supContainer" title={detail.reference} href="#" data-citation-path={path}>
