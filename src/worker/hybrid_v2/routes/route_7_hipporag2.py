@@ -1361,7 +1361,9 @@ class HippoRAG2Handler(BaseRouteHandler):
                coalesce(node.text, '') AS text,
                coalesce(node.index_in_doc, 0) AS index_in_doc,
                node.hierarchical_id AS hierarchical_id,
+               node.page AS page,
                d.id AS document_id, d.title AS document_title,
+               d.source AS document_source,
                s.title AS section_title, s.id AS section_id
         """
 
@@ -1431,6 +1433,8 @@ class HippoRAG2Handler(BaseRouteHandler):
                 "_entity_score": 1.0,
                 "_source_entity": "__ppr_passage__",
                 "_ppr_score": best_score,
+                "document_source": r.get("document_source", ""),
+                "page_number": r.get("page"),
                 "metadata": {
                     "document_id": r.get("document_id", ""),
                     "section_path": r.get("section_title", ""),
@@ -1641,6 +1645,7 @@ class HippoRAG2Handler(BaseRouteHandler):
                sent.parent_text AS chunk_text,
                doc.title AS document_title,
                doc.id AS document_id,
+               doc.source AS document_source,
                score
         ORDER BY score DESC
         """
@@ -1681,6 +1686,7 @@ class HippoRAG2Handler(BaseRouteHandler):
                 "score": r.get("score", 0),
                 "document_title": r.get("document_title", "Unknown"),
                 "document_id": r.get("document_id", ""),
+                "document_source": r.get("document_source", ""),
                 "section_path": r.get("section_path", ""),
                 "hierarchical_id": r.get("hierarchical_id", ""),
                 "page": r.get("page"),
