@@ -50,10 +50,18 @@
 }
 
 .languagePickerDropdownHeader {
-    min-width: 0;
+    min-width: 0 !important;
+    width: fit-content;
     color: #f2f2f2;
     background: transparent;
     border: none;
+}
+
+/* Override Fluent UI Dropdown's internal button min-width */
+.languagePickerDropdownHeader button {
+    min-width: 0 !important;
+    padding-left: 0.25rem;
+    padding-right: 0.25rem;
 }
 
 .languagePickerDropdownHeader::after {
