@@ -304,6 +304,15 @@ class HippoRAG2Handler(BaseRouteHandler):
             "ROUTE7_SENTENCE_SEARCH", "0"
         ).strip().lower() in {"1", "true", "yes"}
 
+        # Cross-encoder passage seeding: rerank ALL passages and feed top results
+        # into passage_seeds BEFORE PPR, so the graph walk starts from semantically
+        # relevant passages (catches graph-isolated sentences that DPR misses).
+        semantic_passage_seeds_enabled = os.getenv(
+            "ROUTE7_SEMANTIC_PASSAGE_SEEDS", "0"
+        ).strip().lower() in {"1", "true", "yes"}
+        semantic_seed_top_k = int(os.getenv("ROUTE7_SEMANTIC_SEED_TOP_K", "20"))
+        semantic_seed_weight = float(os.getenv("ROUTE7_SEMANTIC_SEED_WEIGHT", "0.1"))
+
         # Triple reranking config (read early for logging)
         triple_rerank_enabled = os.getenv(
             "ROUTE7_TRIPLE_RERANK", "0"
@@ -367,20 +376,36 @@ class HippoRAG2Handler(BaseRouteHandler):
                 self._retrieve_sentence_evidence(query, top_k=sentence_top_k)
             )
 
+        # 2d. Optional cross-encoder passage seeding (Priority 2A)
+        semantic_seed_task = None
+        if semantic_passage_seeds_enabled:
+            semantic_seed_task = asyncio.create_task(
+                self._rerank_all_passages(query, top_k=semantic_seed_top_k)
+            )
+
         # Await parallel tasks
         tasks = [triple_task, dpr_task]
         if sentence_task:
             tasks.append(sentence_task)
+        if semantic_seed_task:
+            tasks.append(semantic_seed_task)
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        # Unpack results
+        # Unpack results (positions depend on which optional tasks were added)
         surviving_triples = results[0] if not isinstance(results[0], BaseException) else []
         dpr_results = results[1] if not isinstance(results[1], BaseException) else []
 
+        _idx = 2
         sentence_evidence: List[Dict[str, Any]] = []
         if sentence_task:
-            raw_sent = results[2] if len(results) > 2 else []
+            raw_sent = results[_idx] if len(results) > _idx else []
             sentence_evidence = raw_sent if not isinstance(raw_sent, BaseException) else []
+            _idx += 1
+
+        semantic_seed_results: List[Tuple[str, float]] = []
+        if semantic_seed_task:
+            raw_ss = results[_idx] if len(results) > _idx else []
+            semantic_seed_results = raw_ss if not isinstance(raw_ss, BaseException) else []
 
         if isinstance(results[0], BaseException):
             logger.warning("route7_triple_linking_failed", error=str(results[0]))
@@ -394,6 +419,7 @@ class HippoRAG2Handler(BaseRouteHandler):
             surviving_triples=len(surviving_triples),
             dpr_hits=len(dpr_results),
             sentence_hits=len(sentence_evidence),
+            semantic_seed_hits=len(semantic_seed_results),
         )
 
         # ------------------------------------------------------------------
@@ -448,12 +474,38 @@ class HippoRAG2Handler(BaseRouteHandler):
                 normalized = (score - _s_min) / _spread
                 passage_seeds[sentence_id] = normalized * passage_node_weight
 
+        # Priority 2A: Cross-encoder passage seeds — merge into passage_seeds
+        # so PPR walks from semantically relevant passages (catches graph-isolated
+        # sentences that cosine DPR misses, e.g. Q-D3 "day-based timeframes").
+        semantic_seeds_added = 0
+        if semantic_seed_results:
+            # Min-max normalize cross-encoder scores to [0,1]
+            _ss_scores = [s for _, s in semantic_seed_results]
+            _ss_min, _ss_max = min(_ss_scores), max(_ss_scores)
+            _ss_spread = _ss_max - _ss_min if _ss_max > _ss_min else 1.0
+            for sentence_id, score in semantic_seed_results:
+                normalized = (score - _ss_min) / _ss_spread
+                weighted = normalized * semantic_seed_weight
+                # Take max of DPR seed and semantic seed (don't stack)
+                if sentence_id in passage_seeds:
+                    passage_seeds[sentence_id] = max(passage_seeds[sentence_id], weighted)
+                else:
+                    passage_seeds[sentence_id] = weighted
+                    semantic_seeds_added += 1
+            logger.info(
+                "step_3_semantic_seeds_merged",
+                semantic_total=len(semantic_seed_results),
+                new_seeds=semantic_seeds_added,
+                top_score=round(_ss_max, 4),
+            )
+
         timings_ms["step_3_seed_build_ms"] = int((time.perf_counter() - t0) * 1000)
 
         logger.info(
             "step_3_seeds_built",
             entity_seeds=len(entity_seeds),
             passage_seeds=len(passage_seeds),
+            semantic_seeds_added=semantic_seeds_added,
         )
 
         # ------------------------------------------------------------------
@@ -821,6 +873,8 @@ class HippoRAG2Handler(BaseRouteHandler):
             "rerank_enabled": rerank_enabled,
             "rerank_all_enabled": rerank_all_enabled,
             "rerank_all_injected": rerank_all_injected,
+            "semantic_passage_seeds_enabled": semantic_passage_seeds_enabled,
+            "semantic_seeds_added": semantic_seeds_added,
             "llm_filter_enabled": llm_filter_enabled,
             "llm_filter_removed": llm_filter_removed,
             "query_mode": query_mode,
