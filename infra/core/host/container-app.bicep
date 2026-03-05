@@ -163,11 +163,13 @@ resource authConfig 'Microsoft.App/containerApps/authConfigs@2024-10-02-preview'
         convention: 'FixedTime'
         timeToExpiration: '08:00:00'
       }
-      // CIAM (External ID) does not support nonce validation — only enable for B2B
-      nonce: authType == 'B2B' ? {
+      // Nonce validation is required for the Nonce cookie to be set.
+      // Without the Nonce cookie, the callback returns 401.
+      // CIAM does support nonce in id_tokens (claims_supported includes "nonce").
+      nonce: {
         validateNonce: true
         nonceExpirationInterval: '00:05:00'
-      } : null
+      }
     }
   }
 }
