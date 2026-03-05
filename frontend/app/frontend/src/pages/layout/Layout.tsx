@@ -1,17 +1,24 @@
 import { Outlet, NavLink } from "react-router-dom";
-import { useState, useCallback, useContext } from "react";
+import { useState, useEffect, useCallback, useContext } from "react";
 import { useTranslation } from "react-i18next";
 import styles from "./Layout.module.css";
 
 import { useLogin } from "../../authConfig";
 import { LoginButton } from "../../components/LoginButton";
+import { LanguagePicker } from "../../i18n/LanguagePicker";
 import { LoginContext } from "../../loginContext";
+import { configApi } from "../../api";
 import appLogo from "../../assets/applogo.png";
 
 const Layout = () => {
-    const { t } = useTranslation();
+    const { t, i18n } = useTranslation();
     const { loggedIn } = useContext(LoginContext);
     const [sidebarOpen, setSidebarOpen] = useState(false);
+    const [showLanguagePicker, setShowLanguagePicker] = useState(false);
+
+    useEffect(() => {
+        configApi().then(config => setShowLanguagePicker(config.showLanguagePicker));
+    }, []);
 
     const toggleSidebar = useCallback(() => setSidebarOpen(prev => !prev), []);
     const closeSidebar = useCallback(() => setSidebarOpen(false), []);
@@ -37,7 +44,10 @@ const Layout = () => {
                             <h3 className={styles.headerTitle}>{t("headerTitle")}</h3>
                         </NavLink>
                     </div>
-                    <div className={styles.loginMenuContainer}>{useLogin && <LoginButton />}</div>
+                    <div className={styles.headerRight}>
+                        {showLanguagePicker && <LanguagePicker onLanguageChange={newLang => i18n.changeLanguage(newLang)} variant="header" />}
+                        {useLogin && <LoginButton />}
+                    </div>
                 </div>
             </header>
 

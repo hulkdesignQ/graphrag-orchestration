@@ -20,7 +20,7 @@ import { ClearChatButton } from "../../components/ClearChatButton";
 import { useLogin, getToken, requireAccessControl } from "../../authConfig";
 import { useMsal } from "@azure/msal-react";
 import { LoginContext } from "../../loginContext";
-import { LanguagePicker } from "../../i18n/LanguagePicker";
+
 
 const Chat = () => {
     const [isHistoryPanelOpen, setIsHistoryPanelOpen] = useState(false);
@@ -71,7 +71,7 @@ const Chat = () => {
     const [showQueryRewritingOption, setShowQueryRewritingOption] = useState<boolean>(false);
     const [showReasoningEffortOption, setShowReasoningEffortOption] = useState<boolean>(false);
     const [showVectorOption, setShowVectorOption] = useState<boolean>(false);
-    const [showLanguagePicker, setshowLanguagePicker] = useState<boolean>(false);
+
     const [showSpeechInput, setShowSpeechInput] = useState<boolean>(false);
     const [showSpeechOutputBrowser, setShowSpeechOutputBrowser] = useState<boolean>(false);
     const [showSpeechOutputAzure, setShowSpeechOutputAzure] = useState<boolean>(false);
@@ -120,7 +120,7 @@ const Chat = () => {
             if (!config.showVectorOption) {
                 setRetrievalMode(RetrievalMode.Text);
             }
-            setshowLanguagePicker(config.showLanguagePicker);
+
             setShowSpeechInput(config.showSpeechInput);
             setShowSpeechOutputBrowser(config.showSpeechOutputBrowser);
             setShowSpeechOutputAzure(config.showSpeechOutputAzure);
@@ -480,8 +480,6 @@ const Chat = () => {
 
                             <h1 className={styles.chatEmptyStateTitle}>{t("chatEmptyStateTitle")}</h1>
                             <h2 className={styles.chatEmptyStateSubtitle}>{t("chatEmptyStateSubtitle")}</h2>
-                            {showLanguagePicker && <LanguagePicker onLanguageChange={newLang => i18n.changeLanguage(newLang)} />}
-
                             <ExampleList onExampleClicked={onExampleClicked} useMultimodalAnswering={showMultimodalOptions} />
                         </div>
                     ) : (

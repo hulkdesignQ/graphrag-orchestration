@@ -8,9 +8,10 @@ import styles from "./LanguagePicker.module.css";
 
 interface Props {
     onLanguageChange: (language: string) => void;
+    variant?: "default" | "header";
 }
 
-export const LanguagePicker = ({ onLanguageChange }: Props) => {
+export const LanguagePicker = ({ onLanguageChange, variant = "default" }: Props) => {
     const { i18n } = useTranslation();
 
     const handleLanguageChange = (_ev: SelectionEvents, data: OptionOnSelectData) => {
@@ -20,8 +21,8 @@ export const LanguagePicker = ({ onLanguageChange }: Props) => {
     const { t } = useTranslation();
 
     return (
-        <div className={styles.languagePicker}>
-            <LocalLanguage24Regular className={styles.languagePickerIcon} />
+        <div className={variant === "header" ? styles.languagePickerHeader : styles.languagePicker}>
+            <LocalLanguage24Regular className={variant === "header" ? styles.languagePickerIconHeader : styles.languagePickerIcon} />
             <Dropdown
                 id={languagePickerId}
                 selectedOptions={[i18n.language]}
@@ -29,6 +30,7 @@ export const LanguagePicker = ({ onLanguageChange }: Props) => {
                 onOptionSelect={handleLanguageChange}
                 aria-label={t("labels.languagePicker")}
                 appearance="underline"
+                className={variant === "header" ? styles.languagePickerDropdownHeader : undefined}
             >
                 {Object.entries(supportedLngs).map(([code, details]) => (
                     <Option key={code} value={code}>

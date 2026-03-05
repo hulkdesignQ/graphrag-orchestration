@@ -53,9 +53,10 @@
     white-space: nowrap;
 }
 
-.loginMenuContainer {
+.headerRight {
     display: flex;
     align-items: center;
+    gap: 0.5rem;
 }
 
 /* --- Body = sidebar + main --- */

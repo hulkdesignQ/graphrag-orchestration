@@ -23,3 +23,39 @@
     flex-shrink: 0;
     color: #616161;
 }
+
+/* Header variant — compact, dark background */
+.languagePickerHeader {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.2rem 0.4rem;
+    border-radius: 0.375rem;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    background: transparent;
+    cursor: pointer;
+    transition:
+        background 0.2s ease,
+        border-color 0.2s ease;
+}
+
+.languagePickerHeader:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(76, 201, 240, 0.5);
+}
+
+.languagePickerIconHeader {
+    flex-shrink: 0;
+    color: #e0e0e0;
+}
+
+.languagePickerDropdownHeader {
+    min-width: 0;
+    color: #f2f2f2;
+    background: transparent;
+    border: none;
+}
+
+.languagePickerDropdownHeader::after {
+    border-bottom-color: rgba(255, 255, 255, 0.3) !important;
+}
