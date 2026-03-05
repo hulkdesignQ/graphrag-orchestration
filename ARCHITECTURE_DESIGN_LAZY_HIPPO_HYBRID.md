@@ -11878,3 +11878,86 @@ The LLM faithfully reports all timeframes present in its context but cannot ment
 | `route_7_hipporag2.py` | Cross-encoder results merged into `passage_seeds` dict BEFORE PPR (not after) |
 
 Commit: `9f48d51` (cross-encoder passage seeds)
+
+## §47. Entity Synonymy Edges — The Missing Cross-Document Bridge (2026-03-05)
+
+### Problem
+
+After achieving 56/57 with CE supplemental seeding (§46), Q-D3 ("list all day-based timeframes")
+and Q-D5 ("warranty coverage start") still failed intermittently. Deep analysis revealed:
+
+1. **Entity synonymy edges were removed** at §40 OpenIE migration (hipporag2_ppr.py line ~271-277).
+   Upstream HippoRAG 2 uses entity KNN (topk=2047, threshold=0.8) as its PRIMARY cross-doc bridge.
+2. **Entity dedup at 0.8 consumed synonymy potential**: Union-Find merging made max entity pair
+   similarity = 0.79, so threshold 0.8 yields ZERO synonym edges.
+3. **Sentence KNN is 100% intra-document**: All 146 SEMANTICALLY_SIMILAR edges between sentences
+   are same-document. Even at threshold 0.70, only 12 cross-doc (irrelevant to Q-D3).
+4. **GDS entity KNN was disabled**: `knn_enabled=False` in indexing script → 0 entity KNN edges.
+
+### Root Cause: PPR Mass Flow Without Entity Bridges
+
+Without entity synonymy edges, PPR mass can only traverse: passage → entity → passage (same entity
+mentioned in multiple docs). For Q-D3, timeframe entities like "sixty 60 days written notice" and
+"five 5 business days of listing agreement" are semantically related (cosine 0.755) but share NO
+common entity. Without a bridge, PPR cannot flow mass between them.
+
+Hub entities ("defect" deg=99, "owner" deg=96) absorb 16.9%+ of graph mass, diluting signal to
+isolated passages.
+
+### Solution: Entity Synonymy at Threshold 0.70
+
+Computed 65 entity-entity synonym pairs (20 cross-community) at cosine ≥ 0.70:
+
+| Threshold | Total Pairs | Cross-Community | Key Pairs |
+|-----------|-------------|-----------------|-----------|
+| 0.80 | 0 | 0 | (all consumed by dedup) |
+| 0.75 | 25 | 7 | fabrikam_inc↔fabrikam, defect↔warranty |
+| 0.70 | 65 | 20 | **sixty_60_days↔five_5_business_days (0.755)** |
+| 0.60 | 425 | 175 | (too noisy) |
+
+Critical Q-D3 bridge: `sixty 60 days written notice` (comm69, real estate) ↔
+`five 5 business days of listing agreement` (comm89, property management) at similarity 0.755.
+
+### Result: 57/57 PERFECT SCORE
+
+| Config | Score | Q-D3 | Q-D5 | Notes |
+|--------|-------|------|------|-------|
+| Baseline (no CE, no synonymy) | 54/57 | ❌ | ❌ | |
+| + CE supplemental seeds (§46) | 56/57 | ❌ | ✅ | CE bypasses graph for D5 |
+| + Entity synonymy @0.70 | **57/57** | ✅ | ✅ | Graph bridges restored |
+
+### Our Implementation vs Upstream HippoRAG 2
+
+| Feature | Upstream | Ours (before) | Ours (after) |
+|---------|----------|---------------|--------------|
+| Entity synonymy | topk=2047, @0.8 | REMOVED (§40) | Restored, @0.70 |
+| Entity dedup | None | Union-Find @0.8 | Same (synonymy below dedup) |
+| Entity KNN source | In-memory all-pairs | GDS (disabled) | Direct computation |
+| Sentence KNN | None | 146 edges (intra-doc) | Same |
+| DPR passage seeding | All passages ×0.05 | Top-50 | Same + CE top-20 |
+| Louvain communities | Not used | 10 communities ✅ | Same |
+
+### Architectural Insight
+
+Entity dedup and entity synonymy serve **complementary** roles:
+- **Dedup (≥0.8)**: Merges near-identical entities into single nodes (reduces noise)
+- **Synonymy (0.70–0.79)**: Connects semantically related but distinct entities (adds bridges)
+
+The gap between dedup threshold (0.80) and synonymy threshold (0.70) is the **bridge zone** —
+entities too different to merge but similar enough to connect.
+
+### Env Vars
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ROUTE7_SYNONYM_THRESHOLD` | `0.70` | Min cosine for entity synonymy edges in PPR |
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `hipporag2_ppr.py` | Restored entity-entity SEMANTICALLY_SIMILAR loading (section 5) |
+| `hipporag2_ppr.py` | Default synonym_threshold lowered from 0.8 → 0.70 |
+| `route_7_hipporag2.py` | ROUTE7_SYNONYM_THRESHOLD default updated to 0.70 |
+
+Commit: `89138ac5` (entity synonymy edges)
