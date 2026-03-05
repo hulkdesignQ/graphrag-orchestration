@@ -62,29 +62,43 @@ else
 fi
 echo ""
 
-# ── 5. Upload square logo ────────────────────────────────────────────────────
+# ── 5. Upload logos ───────────────────────────────────────────────────────────
 if [ ! -f "$LOGO_PATH" ]; then
     echo "❌ Logo not found at $LOGO_PATH"
     exit 1
 fi
 
-echo "Uploading square logo (${LOGO_PATH})…"
-curl -sf -X PUT \
-    -H "Authorization: Bearer $TOKEN" \
-    -H "Content-Type: image/png" \
-    --data-binary @"$LOGO_PATH" \
-    "https://graph.microsoft.com/v1.0/organization/${ORG_ID}/branding/localizations/0/squareLogo"
-echo "✅ Square logo uploaded"
-echo ""
+# bannerLogo is what actually appears on the CIAM sign-in page.
+# squareLogo is NOT displayed on the authentication UI.
+# Upload to BOTH locale "0" (default) and "en-US" for full coverage.
+for LOCALE in 0 en-US; do
+    echo "── Locale: ${LOCALE} ──"
 
-echo "Uploading square logo (dark theme)…"
-curl -sf -X PUT \
-    -H "Authorization: Bearer $TOKEN" \
-    -H "Content-Type: image/png" \
-    --data-binary @"$LOGO_PATH" \
-    "https://graph.microsoft.com/v1.0/organization/${ORG_ID}/branding/localizations/0/squareLogoDark"
-echo "✅ Square logo (dark) uploaded"
-echo ""
+    echo "  Uploading bannerLogo…"
+    curl -sf -X PUT \
+        -H "Authorization: Bearer $TOKEN" \
+        -H "Content-Type: image/png" \
+        --data-binary @"$LOGO_PATH" \
+        "https://graph.microsoft.com/v1.0/organization/${ORG_ID}/branding/localizations/${LOCALE}/bannerLogo"
+    echo "  ✅ bannerLogo uploaded"
+
+    echo "  Uploading squareLogo…"
+    curl -sf -X PUT \
+        -H "Authorization: Bearer $TOKEN" \
+        -H "Content-Type: image/png" \
+        --data-binary @"$LOGO_PATH" \
+        "https://graph.microsoft.com/v1.0/organization/${ORG_ID}/branding/localizations/${LOCALE}/squareLogo"
+    echo "  ✅ squareLogo uploaded"
+
+    echo "  Uploading squareLogoDark…"
+    curl -sf -X PUT \
+        -H "Authorization: Bearer $TOKEN" \
+        -H "Content-Type: image/png" \
+        --data-binary @"$LOGO_PATH" \
+        "https://graph.microsoft.com/v1.0/organization/${ORG_ID}/branding/localizations/${LOCALE}/squareLogoDark"
+    echo "  ✅ squareLogoDark uploaded"
+    echo ""
+done
 
 # ── 6. Set sign-in page text & background ────────────────────────────────────
 echo "Setting sign-in page properties…"
