@@ -143,11 +143,13 @@ async def _fetch_profile(
 ) -> UserProfileResponse:
     user_id = user.get("oid", "")
 
-    # Resolve plan from quota enforcer (Redis-cached) with fallback
+    # Resolve plan from quota enforcer (Redis-cached) with fallback.
+    # Inner timeouts must sum to less than the outer asyncio.timeout(10)
+    # so the fallback executes instead of the outer raising 504.
     try:
-        enforcer = await asyncio.wait_for(get_quota_enforcer(), timeout=10)
-        plan_tier = await asyncio.wait_for(enforcer.get_plan(user_id), timeout=5)
-        usage = await asyncio.wait_for(enforcer.get_usage(user_id), timeout=5)
+        enforcer = await asyncio.wait_for(get_quota_enforcer(), timeout=5)
+        plan_tier = await asyncio.wait_for(enforcer.get_plan(user_id), timeout=2)
+        usage = await asyncio.wait_for(enforcer.get_usage(user_id), timeout=2)
     except Exception:
         plan_tier = PlanTier.FREE
         usage = {"queries_today": 0, "queries_this_month": 0}
@@ -217,11 +219,13 @@ async def _fetch_user_usage(
 ) -> UsageStatsResponse:
     user_id = user.get("oid", "")
 
-    # Get plan and usage from quota enforcer
+    # Get plan and usage from quota enforcer.
+    # Inner timeouts must sum to less than the outer asyncio.timeout(15)
+    # so the fallback executes instead of the outer raising 504.
     try:
-        enforcer = await asyncio.wait_for(get_quota_enforcer(), timeout=10)
-        plan_tier = await asyncio.wait_for(enforcer.get_plan(user_id), timeout=5)
-        usage = await asyncio.wait_for(enforcer.get_usage(user_id), timeout=5)
+        enforcer = await asyncio.wait_for(get_quota_enforcer(), timeout=5)
+        plan_tier = await asyncio.wait_for(enforcer.get_plan(user_id), timeout=2)
+        usage = await asyncio.wait_for(enforcer.get_usage(user_id), timeout=2)
     except Exception:
         plan_tier = PlanTier.FREE
         usage = {"queries_today": 0, "queries_this_month": 0}

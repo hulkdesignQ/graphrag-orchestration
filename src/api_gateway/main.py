@@ -225,6 +225,14 @@ async def lifespan(app: FastAPI):
                 image_container=os.getenv("AZURE_IMAGESTORAGE_CONTAINER"),
             )
 
+        # Redis — warm the singleton so the first /dashboard/me doesn't cold-start
+        try:
+            from src.core.services.redis_service import get_redis_service
+            await get_redis_service()
+            logger.info("redis_connected")
+        except Exception as e:
+            logger.warning("redis_init_failed", error=str(e))
+
         # Usage tracking (Cosmos DB) — initialize the singleton so dashboard works
         if os.getenv("COSMOS_DB_ENDPOINT"):
             try:
