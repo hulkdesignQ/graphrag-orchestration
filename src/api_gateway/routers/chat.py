@@ -1235,7 +1235,12 @@ async def _frontend_stream_response(
     NDJSON format:
     {"delta": {"role": "assistant"}, "context": {"thoughts": [...]}}
     {"delta": {"content": "Hello"}, "context": {...}}
+
+    Uses ``except BaseException`` so that ``CancelledError`` (raised by
+    ``asyncio.timeout`` / ``asyncio.wait_for``) and ``GeneratorExit`` are
+    caught instead of silently producing an empty body.
     """
+    query_task: Optional[asyncio.Task] = None
     try:
         # Initial chunk with role and starting thought
         initial_thoughts = [
@@ -1310,9 +1315,21 @@ async def _frontend_stream_response(
             "context": stream_context,
             "session_state": session_state,
         }) + "\n"
-        
-    except Exception as e:
-        logger.error("frontend_stream_failed", error=str(e), exc_info=True)
-        yield json.dumps({
-            "error": str(e),
-        }) + "\n"
+
+    except BaseException as e:
+        # BaseException catches CancelledError and GeneratorExit — without
+        # this the generator silently produces zero bytes on timeout/cancel.
+        if isinstance(e, GeneratorExit):
+            # Client disconnected; nothing to yield — just clean up.
+            return
+        error_type = type(e).__name__
+        logger.error("frontend_stream_failed", error=str(e), error_type=error_type, exc_info=True)
+        try:
+            yield json.dumps({
+                "error": f"{error_type}: {e}",
+            }) + "\n"
+        except GeneratorExit:
+            pass
+    finally:
+        if query_task and not query_task.done():
+            query_task.cancel()
