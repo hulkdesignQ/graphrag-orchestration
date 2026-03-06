@@ -217,7 +217,7 @@ class HippoRAG2Handler(BaseRouteHandler):
                 os.getenv("ROUTE7_PASSAGE_NODE_WEIGHT", "0.05")
             )
             synonym_threshold = float(
-                os.getenv("ROUTE7_SYNONYM_THRESHOLD", "0.70")
+                os.getenv("ROUTE7_SYNONYM_THRESHOLD", "0.65")
             )
 
             # Load triple store and PPR graph in parallel

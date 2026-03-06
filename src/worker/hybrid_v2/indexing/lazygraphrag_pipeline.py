@@ -235,7 +235,7 @@ class LazyGraphRAGIndexingPipeline:
         knn_similarity_cutoff: float = 0.60,
         knn_config: Optional[str] = None,  # Tag for KNN edges (e.g., "knn-1", "knn-2") for A/B testing
         # Entity synonymy parameters (cross-doc bridging via embedding similarity)
-        entity_synonymy_threshold: float = 0.70,
+        entity_synonymy_threshold: float = 0.65,
     ) -> Dict[str, Any]:
         start_time = time.time()
         
@@ -1951,8 +1951,9 @@ Return ONLY valid JSON (no markdown fences):
         import re as _re
 
         def _text_processing(text: str) -> str:
-            """Upstream HippoRAG 2 text normalization."""
-            return _re.sub(r'[^A-Za-z0-9 ]', ' ', text.lower()).strip()
+            """Upstream HippoRAG 2 text normalization (with multi-space collapse)."""
+            cleaned = _re.sub(r'[^A-Za-z0-9 ]', ' ', text.lower())
+            return _re.sub(r' +', ' ', cleaned).strip()
 
         def _is_valid_entity(name: str) -> bool:
             """Filter garbage entities (upstream: len(alphanumeric) > 2)."""

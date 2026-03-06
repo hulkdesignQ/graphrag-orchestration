@@ -299,7 +299,7 @@ async def run_v2_indexing(group_id: str, reindex: bool, dry_run: bool):
         knn_enabled=False,               # GDS entity KNN disabled (synonymy computed locally in step 7.6)
         knn_top_k=0,
         knn_similarity_cutoff=0.60,
-        entity_synonymy_threshold=0.70,  # Cross-doc entity bridges (§47)
+        entity_synonymy_threshold=0.65,  # Cross-doc entity bridges (§47) — lowered from 0.70 for LLM non-determinism robustness
     )
 
     elapsed = time.time() - start_time
