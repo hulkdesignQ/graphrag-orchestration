@@ -119,7 +119,8 @@ class TestUserBlobManager:
     @pytest.mark.asyncio
     async def test_count_blobs(self):
         """Fix #3: count_blobs returns correct count for dashboard."""
-        from src.api_gateway.services.user_blob_manager import UserBlobManager
+        from src.api_gateway.services.user_blob_manager import UserBlobManager, _blob_stats_cache
+        _blob_stats_cache.clear()
 
         blobs = [
             self._make_blob("grp1/a.pdf"),
@@ -149,7 +150,8 @@ class TestUserBlobManager:
     @pytest.mark.asyncio
     async def test_get_storage_used_bytes(self):
         """Fix #3: get_storage_used_bytes sums all blob sizes."""
-        from src.api_gateway.services.user_blob_manager import UserBlobManager
+        from src.api_gateway.services.user_blob_manager import UserBlobManager, _blob_stats_cache
+        _blob_stats_cache.clear()
 
         blobs = [
             self._make_blob("grp1/a.pdf", size=1000),
@@ -499,11 +501,8 @@ class TestDashboardBlobIntegration:
         assert "user_blob_manager" in source, (
             "Dashboard should access user_blob_manager from app state"
         )
-        assert "count_blobs" in source, (
-            "Dashboard should call count_blobs() for document count"
-        )
-        assert "get_storage_used_bytes" in source, (
-            "Dashboard should call get_storage_used_bytes() for storage metric"
+        assert "get_blob_stats" in source, (
+            "Dashboard should call get_blob_stats() for document count and storage"
         )
 
 

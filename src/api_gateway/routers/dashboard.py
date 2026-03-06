@@ -126,7 +126,21 @@ async def get_my_profile(
     Get the current user's profile, roles, plan, and usage stats.
 
     This is the primary endpoint for the personal dashboard.
+    Lightweight: only Redis calls. Blob stats come from /me/usage.
     """
+    try:
+        async with asyncio.timeout(10):
+            return await _fetch_profile(request, user, group_id)
+    except TimeoutError:
+        logger.warning("dashboard_profile_timeout", user_id=user.get("oid", ""))
+        raise HTTPException(status_code=504, detail="Profile fetch timed out")
+
+
+async def _fetch_profile(
+    request: Request,
+    user: Dict[str, Any],
+    group_id: str,
+) -> UserProfileResponse:
     user_id = user.get("oid", "")
 
     # Resolve plan from quota enforcer (Redis-cached) with fallback
@@ -148,18 +162,6 @@ async def get_my_profile(
     billing_type = "b2b" if auth_type == "B2B" else "b2c"
 
     profile = resolve_user_profile(user, plan_tier=plan_tier, billing_type=billing_type)
-
-    # Populate document count and storage from blob storage
-    documents_count = 0
-    storage_used_gb = 0.0
-    blob_mgr = getattr(request.app.state, "user_blob_manager", None)
-    if blob_mgr:
-        try:
-            documents_count = await blob_mgr.count_blobs(group_id)
-            storage_bytes = await blob_mgr.get_storage_used_bytes(group_id)
-            storage_used_gb = round(storage_bytes / (1024 ** 3), 4)
-        except Exception:
-            logger.warning("blob_count_failed", group_id=group_id)
 
     limits = profile.plan_limits or PLAN_DEFINITIONS[PlanTier.FREE]
 
@@ -185,8 +187,8 @@ async def get_my_profile(
         billing_type=billing_type,
         queries_today=usage["queries_today"],
         queries_this_month=usage["queries_this_month"],
-        documents_count=documents_count,
-        storage_used_gb=storage_used_gb,
+        documents_count=0,
+        storage_used_gb=0.0,
         features=features,
     )
 
@@ -230,16 +232,16 @@ async def _fetch_user_usage(
 
     limits = PLAN_DEFINITIONS[plan_tier]
 
-    # Fetch document count from blob storage (primary source)
+    # Fetch document count from blob storage (single-pass, cached)
     documents_count = 0
     storage_used_gb = 0.0
     blob_mgr = getattr(request.app.state, "user_blob_manager", None)
     if blob_mgr:
         try:
-            documents_count = await blob_mgr.count_blobs(group_id)
-            storage_bytes = await blob_mgr.get_storage_used_bytes(group_id)
-            storage_used_gb = round(storage_bytes / (1024 ** 3), 4)
-        except Exception:
+            async with asyncio.timeout(5):
+                documents_count, storage_bytes = await blob_mgr.get_blob_stats(group_id)
+                storage_used_gb = round(storage_bytes / (1024 ** 3), 4)
+        except (TimeoutError, Exception):
             logger.warning("usage_blob_count_failed", group_id=group_id)
 
     recent_queries: List[Dict[str, Any]] = []

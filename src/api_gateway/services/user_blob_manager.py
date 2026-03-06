@@ -2,12 +2,18 @@
 
 import logging
 import os
-from typing import IO
+import time
+from typing import IO, Tuple
 
 from azure.core.credentials_async import AsyncTokenCredential
 from azure.storage.blob.aio import BlobServiceClient
 
 logger = logging.getLogger(__name__)
+
+# In-memory TTL cache for blob stats: group_id → (timestamp, count, total_bytes)
+_blob_stats_cache: dict[str, Tuple[float, int, int]] = {}
+_BLOB_CACHE_TTL = 60  # seconds
+
 
 class UserBlobManager:
     """Manages user-uploaded files in Azure Blob Storage (no ADLS/HNS required)."""
@@ -33,31 +39,46 @@ class UserBlobManager:
             files.append(name)
         return files
 
-    async def count_blobs(self, group_id: str) -> int:
-        """Count top-level blobs for a group (for dashboard document count)."""
+    async def get_blob_stats(self, group_id: str) -> Tuple[int, int]:
+        """Single-pass: count top-level blobs and sum all sizes, with TTL cache."""
+        now = time.monotonic()
+        cached = _blob_stats_cache.get(group_id)
+        if cached and (now - cached[0]) < _BLOB_CACHE_TTL:
+            return cached[1], cached[2]
+
         prefix = f"{group_id}/"
         container_client = self.blob_service_client.get_container_client(self.container)
         count = 0
+        total_bytes = 0
         async for blob in container_client.list_blobs(name_starts_with=prefix):
+            total_bytes += blob.size or 0
             name = blob.name[len(prefix):]
             if "/" not in name:
                 count += 1
+
+        _blob_stats_cache[group_id] = (now, count, total_bytes)
+        return count, total_bytes
+
+    def invalidate_blob_cache(self, group_id: str) -> None:
+        """Invalidate cached stats after upload/delete so next read is fresh."""
+        _blob_stats_cache.pop(group_id, None)
+
+    async def count_blobs(self, group_id: str) -> int:
+        """Count top-level blobs for a group (for dashboard document count)."""
+        count, _ = await self.get_blob_stats(group_id)
         return count
 
     async def get_storage_used_bytes(self, group_id: str) -> int:
         """Sum blob sizes for a group (for dashboard storage metric)."""
-        prefix = f"{group_id}/"
-        container_client = self.blob_service_client.get_container_client(self.container)
-        total = 0
-        async for blob in container_client.list_blobs(name_starts_with=prefix):
-            total += blob.size or 0
-        return total
+        _, total_bytes = await self.get_blob_stats(group_id)
+        return total_bytes
 
     async def upload_blob(self, file: IO, filename: str, group_id: str) -> str:
         blob_name = f"{group_id}/{filename}"
         container_client = self.blob_service_client.get_container_client(self.container)
         blob_client = container_client.get_blob_client(blob_name)
         await blob_client.upload_blob(file, overwrite=True)
+        self.invalidate_blob_cache(group_id)
         return blob_client.url
 
     async def remove_blob(self, filename: str, group_id: str) -> None:
@@ -65,6 +86,7 @@ class UserBlobManager:
         container_client = self.blob_service_client.get_container_client(self.container)
         blob_client = container_client.get_blob_client(blob_name)
         await blob_client.delete_blob(delete_snapshots="include")
+        self.invalidate_blob_cache(group_id)
 
     async def rename_blob(self, old_filename: str, new_filename: str, group_id: str) -> str:
         old_blob = f"{group_id}/{old_filename}"
