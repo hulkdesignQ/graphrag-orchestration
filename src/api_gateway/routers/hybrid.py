@@ -53,7 +53,43 @@ logger = structlog.get_logger(__name__)
 # Note: Pipelines are stateless and can be recreated on any instance.
 # This cache is an optimization, not a correctness requirement.
 _pipeline_cache: Dict[str, HybridPipeline] = {}
+_pipeline_cache_timestamps: Dict[str, float] = {}  # cache_key → creation epoch
 _pipeline_cache_lock = asyncio.Lock()
+
+
+def _get_neo4j_updated_at(group_id: str) -> Optional[float]:
+    """Query Neo4j for the latest updated_at timestamp of any node in the group.
+
+    Returns epoch seconds or None on error.  Uses a sync driver call
+    (fast — single indexed property lookup) so it can be awaited from
+    the async cache-check path via ``asyncio.to_thread``.
+    """
+    try:
+        from src.core.config import settings as _s
+        from neo4j import GraphDatabase as _GD
+
+        driver = _GD.driver(_s.NEO4J_URI, auth=(_s.NEO4J_USERNAME, _s.NEO4J_PASSWORD))
+        with driver.session() as session:
+            result = session.run(
+                "MATCH (n {group_id: $gid}) "
+                "RETURN max(n.updated_at) AS ts",
+                gid=group_id,
+            )
+            record = result.single()
+            ts = record["ts"] if record else None
+            if ts is not None:
+                # Neo4j DateTime → epoch float
+                if hasattr(ts, "to_native"):
+                    ts = ts.to_native().timestamp()
+                elif isinstance(ts, (int, float)):
+                    ts = float(ts)
+                else:
+                    ts = None
+        driver.close()
+        return ts
+    except Exception as e:
+        logger.debug("neo4j_updated_at_check_failed", group_id=group_id, error=str(e))
+        return None
 
 
 async def _invalidate_pipeline_cache(group_id: str) -> int:
@@ -71,6 +107,7 @@ async def _invalidate_pipeline_cache(group_id: str) -> int:
         keys = [k for k in _pipeline_cache if k.startswith(f"{group_id}:")]
         for key in keys:
             del _pipeline_cache[key]
+            _pipeline_cache_timestamps.pop(key, None)
             removed += 1
     if removed:
         logger.info("pipeline_cache_invalidated", group_id=group_id, entries_removed=removed)
@@ -343,15 +380,27 @@ async def _get_or_create_pipeline(
 ) -> HybridPipeline:
     """
     Get or create a HybridPipeline for the given group.
-    
-    In production, this would initialize:
-    - LLM client from settings
-    - HippoRAG instance from indexed data
-    - Graph store connection
-    - Vector RAG client
+
+    Includes a staleness check: if Neo4j data is newer than the cached
+    pipeline, the cache entry is evicted and a fresh pipeline is built.
+    This catches the case where a local reindex bypasses the API
+    invalidation endpoints.
     """
     cache_key = f"{group_id}:{profile.value}"
-    
+
+    # Staleness check — runs outside the lock to avoid blocking
+    if cache_key in _pipeline_cache:
+        cached_at = _pipeline_cache_timestamps.get(cache_key, 0)
+        neo4j_ts = await asyncio.to_thread(_get_neo4j_updated_at, group_id)
+        if neo4j_ts is not None and neo4j_ts > cached_at:
+            logger.warning(
+                "pipeline_cache_stale_auto_invalidate",
+                group_id=group_id,
+                cached_at=cached_at,
+                neo4j_updated_at=neo4j_ts,
+            )
+            await _invalidate_pipeline_cache(group_id)
+
     async with _pipeline_cache_lock:
         if cache_key not in _pipeline_cache:
             logger.info("creating_hybrid_pipeline",
@@ -444,11 +493,26 @@ async def _initialize_pipeline(
     logger.info("hybrid_pipeline_initialized_for_group", group_id=group_id)
     
     _pipeline_cache[cache_key] = pipeline
+    _pipeline_cache_timestamps[cache_key] = time.time()
 
 
 # ============================================================================
 # Endpoints
 # ============================================================================
+
+@router.post("/cache/flush")
+async def flush_pipeline_cache(
+    request: Request,
+    group_id: str = Depends(get_group_id),
+):
+    """Flush the in-memory pipeline cache for a group.
+
+    Call this after a local (non-API) reindex to ensure the next query
+    loads fresh graph data.  Idempotent — safe to call multiple times.
+    """
+    removed = await _invalidate_pipeline_cache(group_id)
+    return {"flushed": removed, "group_id": group_id}
+
 
 @router.post("/query", response_model=HybridQueryResponse)
 async def hybrid_query(request: Request, body: HybridQueryRequest, group_id: str = Depends(get_group_id)):

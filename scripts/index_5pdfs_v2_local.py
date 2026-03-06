@@ -483,6 +483,30 @@ async def verify_v2_index(group_id: str):
     log("=" * 70)
 
 
+def _flush_api_cache(group_id: str):
+    """Tell a running local API to flush its pipeline cache for this group.
+
+    Best-effort: if the API isn't running, we just log a reminder.
+    """
+    import urllib.request
+    import urllib.error
+
+    api_port = os.getenv("API_PORT", "8000")
+    url = f"http://localhost:{api_port}/hybrid/cache/flush"
+    headers = {"Content-Type": "application/json", "X-Group-ID": group_id}
+    body = b"{}"
+
+    try:
+        req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            result = resp.read().decode()
+            log(f"🔄 API cache flushed for {group_id}: {result}")
+    except urllib.error.URLError:
+        log(f"⚠️  API not reachable on port {api_port} — remember to restart API before benchmarking")
+    except Exception as e:
+        log(f"⚠️  Cache flush failed ({e}) — remember to restart API before benchmarking")
+
+
 def main():
     parser = argparse.ArgumentParser(description="V2 Local Indexing with Voyage Embeddings")
     parser.add_argument("--dry-run", action="store_true", help="Verify setup without indexing")
@@ -511,7 +535,10 @@ def main():
     if stats and not args.dry_run:
         # Verify results
         asyncio.run(verify_v2_index(group_id))
-        
+
+        # Flush API pipeline cache so next query loads fresh graph data
+        _flush_api_cache(group_id)
+
         log("")
         log("=" * 70)
         log("✅ V2 INDEXING COMPLETE")
