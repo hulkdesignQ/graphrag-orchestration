@@ -82,6 +82,9 @@ STORAGE_ACCOUNT=$(get_env_value_or_default "STORAGE_ACCOUNT_NAME" "neo4jstorage2
 AZURE_USERSTORAGE_ACCOUNT=${AZURE_USERSTORAGE_ACCOUNT:-$STORAGE_ACCOUNT}
 AZURE_USERSTORAGE_CONTAINER=${AZURE_USERSTORAGE_CONTAINER:-user-content}
 
+# Group ID override — maps all users to a shared demo tenant (critical for B2C)
+GROUP_ID_OVERRIDE=$(get_env_value_or_default "GROUP_ID_OVERRIDE" "test-5pdfs-v2-fix2" false)
+
 # Docker cleanup control (default: enabled for deployment)
 DOCKER_CLEANUP_ENABLED=${DOCKER_CLEANUP_ENABLED:-true}
 
@@ -357,6 +360,7 @@ ENV_VARS=(
     AZURE_USERSTORAGE_ACCOUNT="$AZURE_USERSTORAGE_ACCOUNT"
     AZURE_USERSTORAGE_CONTAINER="$AZURE_USERSTORAGE_CONTAINER"
     RUNNING_IN_PRODUCTION="true"
+    GROUP_ID_OVERRIDE="$GROUP_ID_OVERRIDE"
 )
 
 # Only add secret-ref env vars when the corresponding secret exists
