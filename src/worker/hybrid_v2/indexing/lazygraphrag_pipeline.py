@@ -191,11 +191,13 @@ class LazyGraphRAGIndexingPipeline:
         neo4j_store: Neo4jStoreV3,
         llm: Optional[Any],
         embedder: Optional[Any],
+        voyage_service: Optional[Any] = None,
         config: Optional[LazyGraphRAGIndexingConfig] = None,
     ):
         self.neo4j_store = neo4j_store
         self.llm = llm
         self.embedder = embedder
+        self.voyage_service = voyage_service  # VoyageEmbedService for independent entity embedding
         self.config = config or LazyGraphRAGIndexingConfig()
 
         self._splitter = SentenceSplitter(
@@ -1423,13 +1425,20 @@ class LazyGraphRAGIndexingPipeline:
         )
 
         # ── Step 3b: Embed entities (name-only, for synonym detection) ────────
-        if entities and self.embedder is not None:
+        # CRITICAL: Use aembed_independent_texts() so each entity name is embedded
+        # as its own document. The default aget_text_embedding_batch() wraps all
+        # names as chunks of ONE document, causing contextual bleed that destroys
+        # pairwise similarity (e.g., cos drops from 0.93→0.54 with 252 entities).
+        if entities and (self.voyage_service or self.embedder):
             texts = [e.name for e in entities]
             try:
-                embs = await self.embedder.aget_text_embedding_batch(texts)
+                if self.voyage_service:
+                    embs = await self.voyage_service.aembed_independent_texts(texts)
+                else:
+                    embs = await self.embedder.aget_text_embedding_batch(texts)
                 for ent, emb in zip(entities, embs):
                     ent.embedding_v2 = emb
-                logger.info(f"openie_entity_embeddings: {len(embs)} entities embedded")
+                logger.info(f"openie_entity_embeddings: {len(embs)} entities embedded (independent)")
             except Exception as e:
                 logger.warning("openie_entity_embedding_failed", extra={"error": str(e)})
 
@@ -2362,11 +2371,14 @@ Return ONLY valid JSON (no markdown fences):
 
         entities = list(entities_by_id.values())
 
-        # Embeddings for entities — name-only (no description anchoring, HippoRAG 2)
-        if entities and self.embedder is not None:
+        # Embeddings for entities — name-only, independently embedded (HippoRAG 2)
+        if entities and (self.voyage_service or self.embedder):
             texts = [e.name for e in entities]
             try:
-                embs = await self.embedder.aget_text_embedding_batch(texts)
+                if self.voyage_service:
+                    embs = await self.voyage_service.aembed_independent_texts(texts)
+                else:
+                    embs = await self.embedder.aget_text_embedding_batch(texts)
                 for ent, emb in zip(entities, embs):
                     ent.embedding_v2 = emb
             except Exception as e:
@@ -2476,10 +2488,13 @@ Return ONLY valid JSON (no markdown fences):
                 ))
 
         entities = list(entities_by_key.values())
-        if entities and self.embedder is not None:
-            texts = [e.name for e in entities]  # name-only (HippoRAG 2)
+        if entities and (self.voyage_service or self.embedder):
+            texts = [e.name for e in entities]  # name-only, independently embedded
             try:
-                embs = await self.embedder.aget_text_embedding_batch(texts)
+                if self.voyage_service:
+                    embs = await self.voyage_service.aembed_independent_texts(texts)
+                else:
+                    embs = await self.embedder.aget_text_embedding_batch(texts)
                 for ent, emb in zip(entities, embs):
                     ent.embedding_v2 = emb
             except Exception as e:

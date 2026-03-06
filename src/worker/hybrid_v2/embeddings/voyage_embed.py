@@ -480,6 +480,91 @@ class VoyageEmbedService:
         
         return [doc.embeddings[0] for doc in result.results]
     
+    def embed_independent_texts(
+        self,
+        texts: List[str],
+        group_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> List[List[float]]:
+        """
+        Embed texts independently — each text as its own single-chunk document.
+        
+        Unlike embed_documents() which treats all texts as chunks of one document
+        (enabling contextual awareness), this method embeds each text in isolation.
+        
+        CRITICAL: Use this for short independent texts like entity names where
+        cross-text contextual bleed would corrupt embeddings. When 252 entity
+        names are batched as chunks of one document, contextualized_embed() makes
+        each name's vector a mix of ALL names, destroying pairwise similarity
+        (e.g., cos("3 business days","five 5 business days") drops from 0.93→0.54).
+        
+        Args:
+            texts: List of independent texts to embed (e.g., entity names)
+            group_id: Optional group ID for usage tracking
+            user_id: Optional user ID for usage tracking
+            
+        Returns:
+            List of embedding vectors (2048 dimensions each)
+        """
+        if not texts:
+            return []
+        
+        all_embeddings: List[Optional[List[float]]] = [None] * len(texts)
+        total_tokens_used = 0
+        
+        # Batch respecting API limits (each text is 1 input + 1 chunk)
+        for batch_start in range(0, len(texts), MAX_API_INPUTS):
+            batch_end = min(batch_start + MAX_API_INPUTS, len(texts))
+            batch_texts = texts[batch_start:batch_end]
+            
+            # Each text as its own single-chunk document (no contextual bleed)
+            inputs = [[t] for t in batch_texts]
+            result = self._client.contextualized_embed(
+                inputs=inputs,
+                model=self.model_name,
+                input_type="document",
+                output_dimension=settings.VOYAGE_EMBEDDING_DIM,
+            )
+            
+            for res_item in result.results:
+                all_embeddings[batch_start + res_item.index] = res_item.embeddings[0]
+            
+            if hasattr(result, 'usage') and result.usage:
+                total_tokens_used += result.usage.total_tokens
+        
+        # Track usage
+        if total_tokens_used > 0:
+            try:
+                loop = asyncio.get_event_loop()
+                task = loop.create_task(get_usage_tracker().log_embedding_usage(
+                    partition_id=group_id or "unknown",
+                    model=self.model_name,
+                    total_tokens=total_tokens_used,
+                    dimensions=settings.VOYAGE_EMBEDDING_DIM,
+                    chunk_count=len(texts),
+                    user_id=user_id,
+                ))
+                _background_tasks.add(task)
+                task.add_done_callback(_background_tasks.discard)
+            except Exception:
+                pass
+        
+        return all_embeddings  # type: ignore[return-value]
+    
+    async def aembed_independent_texts(
+        self,
+        texts: List[str],
+        group_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> List[List[float]]:
+        """Async wrapper for embed_independent_texts()."""
+        import asyncio
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            lambda: self.embed_independent_texts(texts, group_id, user_id)
+        )
+    
     async def aget_text_embedding_batch(
         self, 
         texts: List[str],

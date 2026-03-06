@@ -123,6 +123,7 @@ def get_lazygraphrag_indexing_pipeline_v2():
                 neo4j_store=store,
                 llm=llm_service.get_indexing_llm() if llm_service.llm is not None else None,
                 embedder=embedder,
+                voyage_service=voyage_service if is_voyage_v2_enabled() else None,
                 config=config,
             )
 

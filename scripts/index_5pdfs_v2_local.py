@@ -266,6 +266,7 @@ async def run_v2_indexing(group_id: str, reindex: bool, dry_run: bool):
         neo4j_store=neo4j_store,
         llm=llm_service.get_indexing_llm() if llm_service.llm is not None else None,
         embedder=embedder,
+        voyage_service=voyage_service,
         config=config,
     )
 
