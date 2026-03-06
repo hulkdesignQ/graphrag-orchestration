@@ -387,20 +387,35 @@ async def content_file(
     global_blob_manager = getattr(request.app.state, "global_blob_manager", None)
     user_blob_manager = getattr(request.app.state, "user_blob_manager", None)
 
-    # Try user storage first, then global
-    for manager in [user_blob_manager, global_blob_manager]:
-        if manager is None:
-            continue
+    # Try user storage first (files stored as {group_id}/{filename})
+    if user_blob_manager is not None:
         try:
-            blob_data = await manager.download_blob(path, group_id)
+            blob_data = await user_blob_manager.download_blob(path, group_id)
             if blob_data:
-                content_type, _ = mimetypes.guess_type(path)
+                content_bytes, props = blob_data
+                content_type = props.get("content_settings", {}).get("content_type") or mimetypes.guess_type(path)[0] or "application/octet-stream"
                 return StreamingResponse(
-                    iter([blob_data]),
-                    media_type=content_type or "application/octet-stream",
+                    iter([content_bytes]),
+                    media_type=content_type,
                     headers={"Content-Disposition": f'inline; filename="{path.split("/")[-1]}"'},
                 )
-        except Exception:
-            continue
+        except Exception as e:
+            logger.debug("User blob manager failed for %s: %s", path, e)
+
+    # Fall back to global storage (flat path, no group_id prefix)
+    if global_blob_manager is not None:
+        try:
+            blob_data = await global_blob_manager.download_blob(path)
+            if blob_data:
+                content_bytes, props = blob_data
+                ct = props.get("content_settings", {}).get("content_type") if isinstance(props, dict) else None
+                content_type = ct or mimetypes.guess_type(path)[0] or "application/octet-stream"
+                return StreamingResponse(
+                    iter([content_bytes]),
+                    media_type=content_type,
+                    headers={"Content-Disposition": f'inline; filename="{path.split("/")[-1]}"'},
+                )
+        except Exception as e:
+            logger.debug("Global blob manager failed for %s: %s", path, e)
 
     raise HTTPException(status_code=404, detail=f"Content not found: {path}")

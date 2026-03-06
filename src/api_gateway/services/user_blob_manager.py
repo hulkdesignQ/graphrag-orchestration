@@ -131,5 +131,26 @@ class UserBlobManager:
         self.invalidate_blob_cache(group_id)
         return dst_client.url
 
+    async def download_blob(self, filename: str, group_id: str) -> "tuple[bytes, dict] | None":
+        """Download a blob from {group_id}/{filename}. Returns (content, properties) or None."""
+        blob_name = f"{group_id}/{filename}"
+        container_client = self.blob_service_client.get_container_client(self.container)
+        blob_client = container_client.get_blob_client(blob_name)
+        try:
+            download = await blob_client.download_blob()
+            content = await download.readall()
+            ct = "application/octet-stream"
+            if (
+                hasattr(download.properties, "content_settings")
+                and download.properties.content_settings
+                and hasattr(download.properties.content_settings, "content_type")
+                and download.properties.content_settings.content_type
+            ):
+                ct = download.properties.content_settings.content_type
+            return content, {"content_settings": {"content_type": ct}}
+        except Exception:
+            logger.debug("Blob not found in user storage: %s", blob_name)
+            return None
+
     async def close(self):
         await self.blob_service_client.close()
