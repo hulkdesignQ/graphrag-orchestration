@@ -1231,7 +1231,7 @@ async def frontend_chat_stream(
     )
 
     return StreamingResponse(
-        _frontend_stream_response(query, approach, group_id, body.session_state, overrides, force_route_str),
+        _frontend_stream_response(query, approach, group_id, user_id, body.session_state, overrides, force_route_str),
         media_type="text/event-stream",
         headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
     )
@@ -1241,6 +1241,7 @@ async def _frontend_stream_response(
     query: str,
     approach: str,
     group_id: str,
+    user_id: str,
     session_state: Optional[Any],
     overrides: Optional[FrontendChatOverrides],
     force_route: Optional[str] = None,
@@ -1281,6 +1282,24 @@ async def _frontend_stream_response(
             if not query_task.done():
                 yield json.dumps({"delta": {}, "session_state": session_state}) + "\n"
         result = query_task.result()
+        
+        # Track query usage for dashboard counters
+        try:
+            from src.core.services.quota_enforcer import QuotaEnforcer
+            redis_svc = get_redis_service()
+            redis = await redis_svc.get_client()
+            enforcer = QuotaEnforcer(redis)
+            await enforcer.record_query(user_id)
+            # Fire-and-forget Cosmos usage record
+            route_used = result.get("route_used", approach)
+            query_id = str(uuid.uuid4())
+            task = asyncio.create_task(
+                _write_cosmos_usage(user_id, route_used, query_id, 0, "stream")
+            )
+            _background_tasks.add(task)
+            task.add_done_callback(_background_tasks.discard)
+        except Exception as e:
+            logger.warning("stream_quota_tracking_failed", error=str(e))
         
         # Extract context data
         thoughts = result.get("thoughts", [])

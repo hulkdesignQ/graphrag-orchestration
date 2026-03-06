@@ -925,6 +925,18 @@ class LazyGraphRAGIndexingPipeline:
         # ── Build Sentence dataclass instances ──
         sentence_objects: List[Sentence] = []
         for raw, emb in zip(all_raw_sentences, sentence_embeddings):
+            # Build metadata dict with polygon geometry (if available from DI)
+            sent_meta: Dict[str, Any] = {}
+            if raw.get("polygons"):
+                sent_meta["sentences"] = [{
+                    "text": raw["text"],
+                    "polygons": raw["polygons"],
+                    "page": raw.get("page", 1),
+                    "confidence": raw.get("confidence", 1.0),
+                }]
+            if raw.get("page_dimensions"):
+                sent_meta["page_dimensions"] = raw["page_dimensions"]
+
             sentence_objects.append(Sentence(
                 id=raw["id"],
                 text=raw["text"],
@@ -939,6 +951,7 @@ class LazyGraphRAGIndexingPipeline:
                 parent_text=raw.get("parent_text"),
                 index_in_section=raw.get("index_in_section", 0),
                 total_in_section=raw.get("total_in_section", 0),
+                metadata=sent_meta,
             ))
 
         # ── Persist in Neo4j ──

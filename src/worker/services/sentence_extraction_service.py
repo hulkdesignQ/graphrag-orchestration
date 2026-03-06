@@ -833,6 +833,52 @@ def extract_sentences_from_chunks(
     return all_sentences, extra_chunk_map
 
 
+def _match_geometry_for_sentence(
+    sent_text: str,
+    geometry_sentences: List[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    """Find the DI geometry sentence that best matches a wtpsplit sentence.
+
+    Returns the matching geometry dict (with ``polygons``, ``page``, etc.)
+    or *None* if no reasonable match is found.
+    """
+    if not geometry_sentences or not sent_text:
+        return None
+
+    norm_sent = " ".join(sent_text.lower().split())
+    if len(norm_sent) < 5:
+        return None
+
+    best: Optional[Dict[str, Any]] = None
+    best_overlap = 0
+
+    for geo in geometry_sentences:
+        geo_text = geo.get("text", "")
+        if not geo_text:
+            continue
+        norm_geo = " ".join(geo_text.lower().split())
+
+        # Quick containment check (covers 90%+ of cases)
+        if norm_sent in norm_geo or norm_geo in norm_sent:
+            overlap = min(len(norm_sent), len(norm_geo))
+            if overlap > best_overlap:
+                best_overlap = overlap
+                best = geo
+            continue
+
+        # Partial overlap: first 40 chars of sentence in geometry text
+        probe = norm_sent[:40]
+        if probe in norm_geo:
+            overlap = len(probe)
+            if overlap > best_overlap:
+                best_overlap = overlap
+                best = geo
+
+    if best and best_overlap >= 20:
+        return best
+    return None
+
+
 def extract_sentences_from_di_units(
     di_units: List[Any],
     doc_id: str,
@@ -907,6 +953,10 @@ def extract_sentences_from_di_units(
             continue
         meta = getattr(unit, "metadata", None) or {}
         unit_text = getattr(unit, "text", "") or ""
+
+        # ─── DI geometry data for pixel-accurate highlighting ────
+        unit_geometry_sentences = meta.get("sentences") or []
+        unit_page_dimensions = meta.get("page_dimensions") or []
 
         # Section path from DI metadata
         section_path_raw = meta.get("section_path") or meta.get("di_section_path") or ""
@@ -1055,7 +1105,7 @@ def extract_sentences_from_di_units(
                 section_key = section_path or "[Document Root]"
                 idx_in_section = section_counters.get(section_key, 0)
                 section_counters[section_key] = idx_in_section + 1
-                all_sentences.append({
+                sent_dict: Dict[str, Any] = {
                     "id": sent_id,
                     "text": sent_text,
                     "document_id": doc_id,
@@ -1067,7 +1117,17 @@ def extract_sentences_from_di_units(
                     "tokens": len(sent_text.split()),
                     "parent_text": clean_text[:500] if clean_text else "",
                     "index_in_section": idx_in_section,
-                })
+                }
+                # Attach DI polygon geometry for pixel-accurate highlighting
+                if unit_geometry_sentences:
+                    geo = _match_geometry_for_sentence(sent_text, unit_geometry_sentences)
+                    if geo and geo.get("polygons"):
+                        sent_dict["polygons"] = geo["polygons"]
+                        if geo.get("page"):
+                            sent_dict["page"] = geo["page"]
+                if unit_page_dimensions:
+                    sent_dict["page_dimensions"] = unit_page_dimensions
+                all_sentences.append(sent_dict)
                 global_idx += 1
 
         # ─── Source B: Table rows ────────────────────────────────
@@ -1094,7 +1154,7 @@ def extract_sentences_from_di_units(
                     section_key = section_path or "[Document Root]"
                     idx_in_section = section_counters.get(section_key, 0)
                     section_counters[section_key] = idx_in_section + 1
-                    all_sentences.append({
+                    row_dict: Dict[str, Any] = {
                         "id": sent_id,
                         "text": row_text,
                         "document_id": doc_id,
@@ -1106,7 +1166,10 @@ def extract_sentences_from_di_units(
                         "tokens": len(row_text.split()),
                         "parent_text": "",
                         "index_in_section": idx_in_section,
-                    })
+                    }
+                    if unit_page_dimensions:
+                        row_dict["page_dimensions"] = unit_page_dimensions
+                    all_sentences.append(row_dict)
                     global_idx += 1
 
                 # Table caption (if DI detected one)
