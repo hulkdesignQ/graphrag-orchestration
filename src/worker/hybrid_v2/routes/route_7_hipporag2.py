@@ -276,7 +276,7 @@ class HippoRAG2Handler(BaseRouteHandler):
         ppr_damping = float(os.getenv("ROUTE7_DAMPING", "0.5"))
         passage_node_weight = float(os.getenv("ROUTE7_PASSAGE_NODE_WEIGHT", "0.05"))
         ppr_passage_top_k = preset.get("ppr_passage_top_k") or int(
-            os.getenv("ROUTE7_PPR_PASSAGE_TOP_K", "20")
+            os.getenv("ROUTE7_PPR_PASSAGE_TOP_K", "30")
         )
         # Reranker: disabled by default to match upstream HippoRAG 2 (no passage reranker)
         rerank_enabled = os.getenv(

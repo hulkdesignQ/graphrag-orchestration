@@ -12078,3 +12078,113 @@ The 0.70 threshold was **fragile** — it depended on the LLM producing rich ent
 in a specific run. Lowering to 0.65 makes the system **robust to LLM non-determinism**
 while maintaining quality. The 57/57 score was achievable with lucky entity extraction;
 56/57 is the reliable, reproducible baseline.
+
+---
+
+## §48. PPR Passage Top-K Ceiling Fix — DPR Seed Dilution (2026-03-06)
+
+### Problem
+
+After the code-default audit (§ deploy cleanup, commit `e856ebf0`), `DPR_TOP_K` was
+raised from ~18 → 50 and `SEMANTIC_PASSAGE_SEEDS` was enabled (+9 seeds). This increased
+`passage_seeds_count` from ~18 to ~59. However, `PPR_PASSAGE_TOP_K` remained at 20.
+
+PPR now had to select 20 winners from 59 candidates. Passages whose entities were
+*not extracted as graph nodes* received minimal PPR probability mass and fell below the
+top-20 cutoff — even if they were highly relevant by embedding similarity (DPR).
+
+This created a **retrieval ceiling** for enumeration queries like Q-D3 ("list all
+day-based timeframes"), which requires passages about "180 days", "10 business days",
+and "3 business days". These timeframes were extracted as entities in some graph builds
+but not others (LLM non-determinism). When absent from the graph, their passages had
+no entity anchors → low PPR score → dropped from top-20.
+
+### Evidence: v7.0 vs v7.4 Comparison
+
+| Version | DPR seeds | PPR top-k | Passage survival | Q-D3 chunks | Q-D3 score |
+|---------|-----------|-----------|------------------|-------------|------------|
+| v7.0 (Feb 21) | 18 | 18 | 100% (all pass) | 18 | **3/3** |
+| v7.4 (Mar 6) | 59 | 20 | 34% (39 dropped) | 16 | **1-2/3** |
+| v7.4 + RERANK_ALL (Mar 2) | 20+36 | 56 | ~100% | 41 | **3/3** |
+| v7.4 + lucky extraction (Mar 5) | 59 | 20 | 34% | 15 | **3/3** ¹ |
+
+¹ Mar 5 run had 15 entity seeds for Q-D3 — strong entity signal pulled timeframe
+passages into PPR top-20 despite the narrow window.
+
+### Variance Decomposition (5 runs, same graph)
+
+Total scores: 54, 56, 53, 53, 54 (mean 54.0). Only 2 questions have variance:
+
+| Source | Contribution | Affected questions |
+|--------|-------------|-------------------|
+| **PPR passage ceiling** | 40% | Q-D3 (missing passages for entity-less timeframes) |
+| **Synthesis LLM** | 40% | Q-D10 (same context → different answer selections) |
+| **Recognition memory filter** | 15% | Q-D3 (entity seeds vary 8-13 per run) |
+| **Judge variance** | 5% | Q-D10 (borderline 2↔3 scoring) |
+
+### Fix
+
+Raised `PPR_PASSAGE_TOP_K` from 20 → 30 to absorb the larger DPR seed set. This
+allows ~51% of passage seeds to survive PPR (vs 34%), recovering passages that are
+DPR-relevant but lack entity anchors in the graph.
+
+The value 30 was chosen as a balance: enough headroom for enumeration queries without
+flooding the synthesis context for focused queries (which typically have 15-25 seeds).
+
+| Variable | Old | New | Description |
+|----------|-----|-----|-------------|
+| `ROUTE7_PPR_PASSAGE_TOP_K` | 20 | **30** | Max passages returned by PPR |
+
+### .env Override Discovery
+
+The initial code change (`"20"` → `"30"` in `route_7_hipporag2.py`) appeared to have
+no effect: `num_ppr_passages` still reported 20 after process restart. Investigation
+revealed `.env` contained `ROUTE7_PPR_PASSAGE_TOP_K=20`, and since `load_dotenv()` was
+added to `main.py` (commit `691827f6`), the `.env` value took precedence over the code
+default. Fixed by updating `.env` to `ROUTE7_PPR_PASSAGE_TOP_K=30`.
+
+**Lesson:** When `load_dotenv()` is active, env var overrides in `.env` always win over
+code defaults. Check `.env` first when a code-default change has no effect at runtime.
+
+### Deeper Entity Isolation Analysis
+
+Even with `PPR_PASSAGE_TOP_K=30`, Q-D3 still misses two key timeframes:
+
+| Timeframe | Entity exists? | Synonym edges | Retrieval status |
+|-----------|---------------|---------------|-----------------|
+| "3 business days" | ✓ | **0** (isolated) | sentence in same document but NOT in PPR top-30 |
+| "ten (10) business days" | ✗ (no entity) | n/a | document NOT retrieved |
+| "180 days" | ✗ (no entity) | n/a | DPR seeds it; sometimes survives PPR |
+| "90 days" | ✓ | 2 | ✓ always retrieved |
+| "five 5 business days" | ✓ | 6 | ✓ always retrieved |
+| "sixty 60 days written notice" | ✓ | 16 | ✓ always retrieved |
+
+The "3 business days" entity has cos < 0.65 with ALL other day-related entities:
+- vs "90 days": 0.590
+- vs "five 5 business days": 0.539
+- vs "sixty 60 days written notice": 0.434
+
+This means lowering `entity_synonymy_threshold` further (e.g., to 0.50) would be needed
+to bridge "3 business days" — but would create many false synonym edges across unrelated
+entities. The entity isolation is a fundamental limit of short atomic entity names with
+Voyage embeddings.
+
+### Benchmark Results (PPR_PASSAGE_TOP_K=30)
+
+| Run | Total | Q-D3 | Q-D8 | Q-D10 | Notes |
+|-----|-------|------|------|-------|-------|
+| 1 | **56/57** | 2/3 | 3/3 | 3/3 | |
+| 2 | **55/57** | 1/3 | 3/3 | 3/3 | |
+| 3 | **53/57** | 1/3 | 1/3 | 3/3 | Q-D8 synthesis variance |
+| Mean | **54.7** | | | | Marginal improvement from 54.0 |
+
+The improvement from PPR 20→30 is marginal (~0.7 points) because the real bottleneck is
+entity-level coverage, not the PPR passage window. Q-D3's hardest timeframes ("3 business
+days", "ten (10) business days") lack the entity connections needed for PPR promotion.
+
+#### Files Changed
+
+| File | Change |
+|------|--------|
+| `route_7_hipporag2.py` | `ROUTE7_PPR_PASSAGE_TOP_K` default 20 → 30 |
+| `.env` | `ROUTE7_PPR_PASSAGE_TOP_K` 20 → 30 |
