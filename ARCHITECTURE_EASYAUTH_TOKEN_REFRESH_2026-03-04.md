@@ -1,6 +1,6 @@
 # Architecture: EasyAuth Token Refresh on Azure Container Apps
 
-**Date:** 2026-03-04  
+**Date:** 2026-03-04 (updated 2026-03-06)  
 **Status:** Implemented & Live  
 **Affects:** `graphrag-api` (B2B), `graphrag-api-b2c` (CIAM), Frontend SPA
 
@@ -16,52 +16,106 @@ On **Azure App Service**, the token store uses built-in file storage (`D:\home`)
 
 On **Azure Container Apps**, there is **no built-in persistent filesystem**. The token store requires an **external Azure Blob Storage** container with a SAS URL. Without it, EasyAuth cannot persist refresh tokens and `.auth/refresh` returns 401.
 
-## Key Difference: B2B (Entra ID) vs B2C (CIAM / Entra External ID)
+## Correct EasyAuth Configuration for CIAM (2026-03-06)
 
-### ⚠️ CRITICAL: CIAM Does NOT Support Nonce Validation
+Both B2B and B2C use the **standard `azureActiveDirectory` provider** — no custom OIDC provider needed.
 
-Standard Entra ID (B2B) supports the full EasyAuth feature set:
-- `offline_access` scope → Azure AD issues a refresh token
-- `response_type=code` → authorization code flow
-- Nonce validation → replay attack protection
-- `.auth/refresh` endpoint → silent token renewal
+### How It Works
 
-**CIAM (Entra External ID) does NOT support:**
-- Nonce validation (`validateNonce: true`) — CIAM does not include a `nonce` claim in id_tokens
+EasyAuth with a client secret uses **hybrid flow** (`response_type=code id_token`). CIAM returns both `code` and `id_token` via **form_post** to `/.auth/login/aad/callback`. EasyAuth validates the `id_token`, exchanges the `code` for tokens, and sets the `AppServiceAuthSession` cookie.
 
-**CIAM DOES support (confirmed via OIDC discovery `scopes_supported`):**
-- `offline_access` scope — **required** for EasyAuth to get a refresh token
-- `response_type=code` — supported but optional (EasyAuth auto-selects when client secret is present)
-- Token store with blob storage
-- `.auth/refresh` endpoint (when a refresh token exists)
+### ⚠️ CRITICAL: Two Things That Break CIAM Login
 
-### AADSTS900144 Root Cause (Fixed 2026-03-04)
+1. **Do NOT enable `validateNonce: true`** — CIAM does not include a nonce claim in id_tokens issued via the hybrid flow form_post. Enabling nonce validation causes EasyAuth to reject the callback → 401.
 
-After initial implementation, B2C users saw `AADSTS900144: missing client_id` ~60 minutes after login. Root cause: we initially added `offline_access` + `nonce` together, both broke login, so we removed both. But only `nonce` was the culprit. Without `offline_access`, CIAM never issued a refresh token. When EasyAuth tried to refresh after the access token expired (~60 min), the malformed request to the CIAM token endpoint failed with AADSTS900144.
+2. **Do NOT override `response_type=code`** — This disables the hybrid flow. While CIAM correctly exchanges the code, EasyAuth's internal AAD provider token processing silently fails when it receives only a code without an id_token in the callback → redirect loop → 401.
 
-**Fix:** Add `offline_access` back WITHOUT nonce validation.
+### Correct Issuer URL
 
-### What CIAM Supports
+Per [Microsoft guidance](https://learn.microsoft.com/en-ca/answers/questions/5615481/issuer-id-is-always-https-sts-windows-net), CIAM issuer uses **tenant ID** (not tenant name) as subdomain:
+
+```
+https://{tenantId}.ciamlogin.com/{tenantId}/v2.0
+```
+
+Both `{tenantName}.ciamlogin.com` and `{tenantId}.ciamlogin.com` resolve to the same OIDC metadata (both return `issuer: https://{tenantId}.ciamlogin.com/{tenantId}/v2.0`), but the tenant ID format is canonical.
+
+### B2B vs B2C Configuration Matrix
 
 | Setting | B2B (Entra ID) | B2C (CIAM) |
 |---|---|---|
+| Provider | `azureActiveDirectory` | `azureActiveDirectory` |
+| `openIdIssuer` | `https://login.microsoftonline.com/{tid}/v2.0` | `https://{tid}.ciamlogin.com/{tid}/v2.0` |
 | `clientSecretSettingName` | ✅ Required | ✅ Required |
-| `offline_access` scope | ✅ Required | ✅ Required |
-| `response_type=code` | ✅ Used | ⚠️ Optional (auto from client secret) |
-| `nonce.validateNonce` | ✅ Recommended | ❌ Breaks login (no nonce in id_token) |
+| `loginParameters` | `scope=openid profile email offline_access` | `scope=openid profile email offline_access` |
+| `response_type` override | ❌ Do not set | ❌ Do not set |
+| `nonce.validateNonce` | ✅ `true` | ❌ Must be `null` |
 | `tokenStore` with blob storage | ✅ Required | ✅ Required |
-| `tokenRefreshExtensionHours` | ✅ Recommended (72h) | ✅ Safe to set |
-| `cookieExpiration` (FixedTime) | ✅ Recommended (8h) | ✅ Safe to set |
+| `tokenRefreshExtensionHours` | 72 | 72 |
+| `cookieExpiration` (FixedTime) | 08:00:00 | 08:00:00 |
 | `.auth/refresh` endpoint | ✅ Works | ✅ Works (with offline_access) |
 
-## Architecture: Six Fixes Applied
+### Bicep Auth Config (Simplified)
+
+```bicep
+// Issuer URL
+var openIdIssuerUrl = useExternalIdIssuer
+  ? 'https://${authTenantId}.ciamlogin.com/${authTenantId}/v2.0'
+  : 'https://login.microsoftonline.com/${authTenantId}/v2.0'
+
+// Auth config (same structure for both B2B and B2C)
+identityProviders: {
+  azureActiveDirectory: {
+    enabled: true
+    registration: {
+      clientId: authClientId
+      clientSecretSettingName: clientSecretSettingName
+      openIdIssuer: openIdIssuerUrl
+    }
+    login: {
+      loginParameters: [ 'scope=openid profile email offline_access' ]
+    }
+  }
+}
+login: {
+  nonce: authType == 'B2B' ? { validateNonce: true } : null
+}
+```
+
+### Login Callback Flow (Verified 2026-03-06)
+
+```
+Browser → /.auth/login/aad
+  → 302 to CIAM authorize (response_type=code id_token)
+  → User authenticates (email OTP or password)
+  → CIAM returns form_post to /.auth/login/aad/callback
+     with fields: code, id_token, state, session_state
+  → EasyAuth validates id_token, exchanges code for tokens
+  → 302 to app with AppServiceAuthSession cookie
+  → /.auth/me returns user claims ✓
+```
+
+### What Broke on 2026-03-05 (Postmortem)
+
+Four changes were applied together, obscuring the root cause:
+
+| Change | Effect |
+|---|---|
+| `validateNonce: true` for B2C | ❌ **Broke login** — CIAM hybrid flow id_tokens lack nonce |
+| `response_type=code` override | ❌ **Broke login** — Disabled hybrid flow, EasyAuth AAD provider can't process code-only callbacks |
+| Issuer URL changed to `{tid}.ciamlogin.com` | ✅ Harmless — both URL formats resolve to same metadata |
+| Blob token store enabled | ✅ Harmless — improves token persistence |
+
+Fix: revert nonce + response_type overrides, keep issuer + blob store improvements.
+
+## Architecture: Six Fixes Applied (2026-03-04)
 
 ### 1. Backend Bicep: `container-app.bicep`
 
-Added conditional EasyAuth settings based on `authType`:
-- **B2B only:** `response_type=code`, `nonce` validation
-- **B2B + B2C:** `offline_access` scope in `loginParameters`
-- **Both:** `clientSecretSettingName`, blob token store, `cookieExpiration`, `tokenRefreshExtensionHours`
+Unified EasyAuth settings for both B2B and B2C:
+- **Both:** `azureActiveDirectory` provider, `offline_access` scope, blob token store, session management
+- **B2B only:** `nonce` validation
+- **B2C only:** nonce disabled (`null`)
 
 ### 2. Frontend Bicep: `container-apps-auth.bicep`
 
@@ -110,16 +164,23 @@ Both Container Apps use `neo4jstorage21224` (in `rg-graphrag-feature`) with:
 
 ## Debugging Checklist
 
-If token expiration issues return:
+If login or token expiration issues return:
 
 1. **Check EasyAuth config:** `az containerapp auth show -n <app> -g rg-graphrag-feature`
-   - B2B: must have `clientSecretSettingName`, `offline_access`, `nonce`, blob storage
-   - B2C: must have `clientSecretSettingName`, `offline_access`, blob storage. Must NOT have `nonce`
+   - Both B2B and B2C: must have `azureActiveDirectory` provider, `clientSecretSettingName`, `offline_access` scope, blob storage
+   - B2B only: `nonce.validateNonce: true`
+   - B2C: `nonce` must be `null` — **never enable nonce validation for CIAM**
+   - Neither: must NOT have `response_type=code` in loginParameters — **let EasyAuth use default hybrid flow**
 2. **Check secrets exist:** `az containerapp secret list -n <app> -g rg-graphrag-feature`
    - B2B: `aad-client-secret`, `token-store-sas`
-   - B2C: `microsoft-provider-authentication-secret`, `token-store-sas`
+   - B2C: `b2c-client-secret`, `token-store-sas`
 3. **Check blob storage:** `az storage container list --account-name neo4jstorage21224 --auth-mode login`
-   - Container `easyauth-tokens` must exist
+   - Container `tokenstore` must exist
 4. **Check SAS URL expiry:** SAS URLs expire — regenerate if needed
 5. **Check managed identity role:** Both container apps need `Storage Blob Data Contributor` on `neo4jstorage21224`
 6. **Check client secret expiry:** `az ad app show --id <client-id> --query "passwordCredentials[].endDateTime"`
+7. **Test login flow manually:**
+   ```bash
+   # Should return 302 with response_type=code+id_token (NOT just code)
+   curl -s -o /dev/null -w '%{redirect_url}' https://evidoc.hulkdesign.com/.auth/login/aad
+   ```
