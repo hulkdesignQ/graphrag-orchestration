@@ -8,6 +8,7 @@ Replaces the Quart file operation endpoints.
 
 import logging
 import mimetypes
+import asyncio
 from typing import List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, UploadFile, File as FastAPIFile
@@ -251,7 +252,11 @@ async def list_uploaded(
     """List the uploaded documents for the current group."""
     blob_manager = _get_blob_manager(request)
     try:
-        files = await blob_manager.list_blobs(group_id)
+        async with asyncio.timeout(10):
+            files = await blob_manager.list_blobs(group_id)
+    except TimeoutError:
+        logger.error("list_uploaded_timeout", group_id=group_id)
+        raise HTTPException(status_code=504, detail="File listing timed out")
     except Exception as e:
         logger.exception("Failed to list files for group %s: %s", group_id, e)
         raise HTTPException(status_code=502, detail=f"Storage error: {type(e).__name__}: {e}")

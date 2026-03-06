@@ -337,83 +337,92 @@ async def _get_or_create_pipeline(
                        group_id=group_id,
                        profile=profile.value)
 
-            # Real wiring (E2E-real): use in-process services.
-            # If a dependency is unavailable, we still construct the pipeline but
-            # downstream behavior may degrade (and E2E tests should catch it).
-            from src.worker.services import GraphService, LLMService
-            from src.worker.services.community_service import CommunityService
-            from src.worker.hybrid.indexing.hipporag_service import get_hipporag_service
-            # V2 text store has proper IN_DOCUMENT relationship support
-            from src.worker.hybrid_v2.indexing.text_store import Neo4jTextUnitStore
-            from src.worker.hybrid.indexing.text_store import HippoRAGTextUnitStore
-
-            llm_service = LLMService()
-            # Use dedicated synthesis model for final answer generation (Route 2/3)
-            llm_client = llm_service.get_synthesis_llm()
-
-            graph_store = None
-            neo4j_driver = None
             try:
-                graph_service = GraphService()
-                graph_store = graph_service.get_store(group_id)
-                neo4j_driver = graph_service.driver
-            except Exception as e:
-                logger.warning("hybrid_graph_store_unavailable", group_id=group_id, error=str(e))
-
-            # Community summaries (optional but improves intent disambiguation)
-            graph_communities = None
-            try:
-                community_service = CommunityService()
-                summaries = community_service.get_community_summaries(group_id)
-                graph_communities = [
-                    {"title": f"Community {cid}", "summary": summary}
-                    for cid, summary in sorted((summaries or {}).items(), key=lambda x: x[0])
-                ]
-            except Exception as e:
-                logger.warning("hybrid_community_summaries_unavailable", group_id=group_id, error=str(e))
-
-            # HippoRAG (Route 2/3 tracer + citation text backing)
-            hipporag_service = get_hipporag_service(group_id, "./hipporag_index")
-            try:
-                await hipporag_service.initialize()
-            except Exception as e:
-                logger.warning("hybrid_hipporag_initialize_failed", group_id=group_id, error=str(e))
-
-            hipporag_instance = hipporag_service.get_instance()
-
-            # Prefer Neo4j-backed text chunks for citations (preserves DI section_path/page_number).
-            # Fall back to HippoRAG on-disk index text if Neo4j is unavailable.
-            if neo4j_driver is not None:
-                text_unit_store = Neo4jTextUnitStore(neo4j_driver, group_id=group_id)
-            else:
-                text_unit_store = HippoRAGTextUnitStore(hipporag_service)
-
-            # Always use Voyage V2 embeddings (V1 OpenAI fallback removed)
-            from src.worker.hybrid_v2.embeddings.voyage_embed import VoyageEmbedService
-            voyage_service = VoyageEmbedService()
-            embedding_client = voyage_service.get_llama_index_embed_model()
-            logger.info("hybrid_using_v2_voyage_embedder", group_id=group_id)
-
-            pipeline = HybridPipeline(
-                profile=profile,
-                llm_client=llm_client,
-                embedding_client=embedding_client,  # Voyage V2 (2048D)
-                hipporag_instance=hipporag_instance,
-                graph_store=graph_store,
-                text_unit_store=text_unit_store,
-                neo4j_driver=neo4j_driver,
-                graph_communities=graph_communities,
-                relevance_budget=relevance_budget,
-                group_id=group_id,
-            )
-            
-            # Initialize async resources (AsyncNeo4jService connection)
-            await pipeline.initialize()
-            logger.info("hybrid_pipeline_initialized_for_group", group_id=group_id)
-            
-            _pipeline_cache[cache_key] = pipeline
+                async with asyncio.timeout(60):
+                    await _initialize_pipeline(group_id, profile, relevance_budget, cache_key)
+            except TimeoutError:
+                logger.error("pipeline_init_timeout", group_id=group_id)
+                raise HTTPException(
+                    status_code=504,
+                    detail="Pipeline initialization timed out (60s). Retry shortly.",
+                )
     
         return _pipeline_cache[cache_key]
+
+
+async def _initialize_pipeline(
+    group_id: str,
+    profile: DeploymentProfile,
+    relevance_budget: float,
+    cache_key: str,
+) -> None:
+    """Initialize a HybridPipeline with timeouts on each major I/O step."""
+    from src.worker.services import GraphService, LLMService
+    from src.worker.services.community_service import CommunityService
+    from src.worker.hybrid.indexing.hipporag_service import get_hipporag_service
+    from src.worker.hybrid_v2.indexing.text_store import Neo4jTextUnitStore
+    from src.worker.hybrid.indexing.text_store import HippoRAGTextUnitStore
+
+    llm_service = LLMService()
+    llm_client = llm_service.get_synthesis_llm()
+
+    graph_store = None
+    neo4j_driver = None
+    try:
+        graph_service = GraphService()
+        graph_store = graph_service.get_store(group_id)
+        neo4j_driver = graph_service.driver
+    except Exception as e:
+        logger.warning("hybrid_graph_store_unavailable", group_id=group_id, error=str(e))
+
+    graph_communities = None
+    try:
+        community_service = CommunityService()
+        summaries = community_service.get_community_summaries(group_id)
+        graph_communities = [
+            {"title": f"Community {cid}", "summary": summary}
+            for cid, summary in sorted((summaries or {}).items(), key=lambda x: x[0])
+        ]
+    except Exception as e:
+        logger.warning("hybrid_community_summaries_unavailable", group_id=group_id, error=str(e))
+
+    hipporag_service = get_hipporag_service(group_id, "./hipporag_index")
+    try:
+        await asyncio.wait_for(hipporag_service.initialize(), timeout=30)
+    except asyncio.TimeoutError:
+        logger.warning("hybrid_hipporag_initialize_timeout", group_id=group_id)
+    except Exception as e:
+        logger.warning("hybrid_hipporag_initialize_failed", group_id=group_id, error=str(e))
+
+    hipporag_instance = hipporag_service.get_instance()
+
+    if neo4j_driver is not None:
+        text_unit_store = Neo4jTextUnitStore(neo4j_driver, group_id=group_id)
+    else:
+        text_unit_store = HippoRAGTextUnitStore(hipporag_service)
+
+    from src.worker.hybrid_v2.embeddings.voyage_embed import VoyageEmbedService
+    voyage_service = VoyageEmbedService()
+    embedding_client = voyage_service.get_llama_index_embed_model()
+    logger.info("hybrid_using_v2_voyage_embedder", group_id=group_id)
+
+    pipeline = HybridPipeline(
+        profile=profile,
+        llm_client=llm_client,
+        embedding_client=embedding_client,
+        hipporag_instance=hipporag_instance,
+        graph_store=graph_store,
+        text_unit_store=text_unit_store,
+        neo4j_driver=neo4j_driver,
+        graph_communities=graph_communities,
+        relevance_budget=relevance_budget,
+        group_id=group_id,
+    )
+    
+    await asyncio.wait_for(pipeline.initialize(), timeout=15)
+    logger.info("hybrid_pipeline_initialized_for_group", group_id=group_id)
+    
+    _pipeline_cache[cache_key] = pipeline
 
 
 # ============================================================================

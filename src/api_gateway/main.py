@@ -71,10 +71,14 @@ async def lifespan(app: FastAPI):
     try:
         graph_service = GraphService()
         if graph_service.driver:
-            # Verify Neo4j connectivity
-            with graph_service.driver.session() as session:
-                result = session.run("RETURN 1 as ping")
-                result.single()
+            # Verify Neo4j connectivity (async-safe: run in thread to avoid blocking event loop)
+            import asyncio
+            loop = asyncio.get_running_loop()
+            def _ping():
+                with graph_service.driver.session() as session:
+                    result = session.run("RETURN 1 as ping")
+                    result.single()
+            await loop.run_in_executor(None, _ping)
             logger.info("neo4j_connected", uri=graph_service.config.get("NEO4J_URI"))
             
             # Initialize Neo4j schema for hybrid routes (vector indexes, constraints)

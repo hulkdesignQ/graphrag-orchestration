@@ -12,6 +12,8 @@ logger = logging.getLogger(__name__)
 
 # In-memory TTL cache for blob stats: group_id → (timestamp, count, total_bytes)
 _blob_stats_cache: dict[str, Tuple[float, int, int]] = {}
+# In-memory TTL cache for blob file listings: group_id → (timestamp, [filenames])
+_blob_list_cache: dict[str, Tuple[float, list[str]]] = {}
 _BLOB_CACHE_TTL = 60  # seconds
 
 
@@ -28,6 +30,12 @@ class UserBlobManager:
         )
 
     async def list_blobs(self, group_id: str) -> list[str]:
+        """List top-level blob filenames for a group, with 60s TTL cache."""
+        now = time.monotonic()
+        cached = _blob_list_cache.get(group_id)
+        if cached and (now - cached[0]) < _BLOB_CACHE_TTL:
+            return list(cached[1])  # return a copy
+
         prefix = f"{group_id}/"
         container_client = self.blob_service_client.get_container_client(self.container)
         files = []
@@ -37,7 +45,9 @@ class UserBlobManager:
             if "/" in name:
                 continue
             files.append(name)
-        return files
+
+        _blob_list_cache[group_id] = (now, files)
+        return list(files)  # return a copy
 
     async def get_blob_stats(self, group_id: str) -> Tuple[int, int]:
         """Single-pass: count top-level blobs and sum all sizes, with TTL cache."""
@@ -60,8 +70,9 @@ class UserBlobManager:
         return count, total_bytes
 
     def invalidate_blob_cache(self, group_id: str) -> None:
-        """Invalidate cached stats after upload/delete so next read is fresh."""
+        """Invalidate cached stats and file list after mutations so next read is fresh."""
         _blob_stats_cache.pop(group_id, None)
+        _blob_list_cache.pop(group_id, None)
 
     async def count_blobs(self, group_id: str) -> int:
         """Count top-level blobs for a group (for dashboard document count)."""
@@ -96,6 +107,7 @@ class UserBlobManager:
         dst_client = container_client.get_blob_client(new_blob)
         await dst_client.start_copy_from_url(src_client.url)
         await src_client.delete_blob(delete_snapshots="include")
+        self.invalidate_blob_cache(group_id)
         return dst_client.url
 
     async def move_blob(self, filename: str, source_folder: str, dest_folder: str, group_id: str) -> str:
@@ -106,6 +118,7 @@ class UserBlobManager:
         dst_client = container_client.get_blob_client(dst)
         await dst_client.start_copy_from_url(src_client.url)
         await src_client.delete_blob(delete_snapshots="include")
+        self.invalidate_blob_cache(group_id)
         return dst_client.url
 
     async def copy_blob(self, filename: str, dest_filename: str, group_id: str) -> str:
@@ -115,6 +128,7 @@ class UserBlobManager:
         src_client = container_client.get_blob_client(src)
         dst_client = container_client.get_blob_client(dst)
         await dst_client.start_copy_from_url(src_client.url)
+        self.invalidate_blob_cache(group_id)
         return dst_client.url
 
     async def close(self):
