@@ -361,7 +361,7 @@ async def _get_or_create_pipeline(
             try:
                 async with asyncio.timeout(60):
                     await _initialize_pipeline(group_id, profile, relevance_budget, cache_key)
-            except TimeoutError:
+            except (TimeoutError, asyncio.CancelledError):
                 logger.error("pipeline_init_timeout", group_id=group_id)
                 raise HTTPException(
                     status_code=504,
@@ -410,7 +410,7 @@ async def _initialize_pipeline(
     hipporag_service = get_hipporag_service(group_id, "./hipporag_index")
     try:
         await asyncio.wait_for(hipporag_service.initialize(), timeout=30)
-    except asyncio.TimeoutError:
+    except (asyncio.TimeoutError, asyncio.CancelledError):
         logger.warning("hybrid_hipporag_initialize_timeout", group_id=group_id)
     except Exception as e:
         logger.warning("hybrid_hipporag_initialize_failed", group_id=group_id, error=str(e))
