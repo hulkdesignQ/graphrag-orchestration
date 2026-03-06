@@ -1286,9 +1286,8 @@ async def _frontend_stream_response(
         # Track query usage for dashboard counters
         try:
             from src.core.services.quota_enforcer import QuotaEnforcer
-            redis_svc = get_redis_service()
-            redis = await redis_svc.get_client()
-            enforcer = QuotaEnforcer(redis)
+            redis_svc = await get_redis_service()
+            enforcer = QuotaEnforcer(redis_svc)
             await enforcer.record_query(user_id)
             # Fire-and-forget Cosmos usage record
             route_used = result.get("route_used", approach)
