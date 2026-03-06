@@ -2,7 +2,7 @@ import { useEffect, useState, useContext } from "react";
 import { Link } from "react-router-dom";
 import { useMsal } from "@azure/msal-react";
 import styles from "./Dashboard.module.css";
-import { useLogin, getToken } from "../../authConfig";
+import { useLogin, getToken, isUsingAppServicesLogin } from "../../authConfig";
 import { LoginContext } from "../../loginContext";
 import { fetchUserProfile, fetchUsageStats, fetchPlanInfo, UserProfileResponse, UsageStats, PlanInfo } from "../../api/dashboard";
 
@@ -39,6 +39,16 @@ const Dashboard = () => {
     const [plans, setPlans] = useState<PlanInfo | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [sessionExpired, setSessionExpired] = useState(false);
+
+    const handleReLogin = () => {
+        if (isUsingAppServicesLogin) {
+            window.location.href = ".auth/login/aad?post_login_redirect_uri=" + encodeURIComponent(window.location.pathname + window.location.search);
+        } else {
+            // MSAL: clear cache and reload to trigger interactive login
+            client?.logoutRedirect({ postLogoutRedirectUri: window.location.pathname });
+        }
+    };
 
     useEffect(() => {
         if (!loggedIn) {
@@ -58,7 +68,12 @@ const Dashboard = () => {
                 setUsage(usageData);
                 setPlans(planData);
             } catch (e: any) {
-                setError(e.message || "Failed to load dashboard");
+                const msg = e.message || "Failed to load dashboard";
+                if (msg.includes("401") || msg.toLowerCase().includes("expired") || msg.toLowerCase().includes("unauthorized")) {
+                    setSessionExpired(true);
+                } else {
+                    setError(msg);
+                }
             } finally {
                 setLoading(false);
             }
@@ -82,6 +97,20 @@ const Dashboard = () => {
         return (
             <div className={styles.loadingContainer}>
                 <div className={styles.spinner} />
+            </div>
+        );
+    }
+
+    // --- Session expired ---
+    if (sessionExpired) {
+        return (
+            <div className={styles.loginRequired}>
+                <span>🔑</span>
+                <h2>Session Expired</h2>
+                <p>Your authentication session has expired. Please sign in again to continue.</p>
+                <button className={styles.upgradeButton} onClick={handleReLogin}>
+                    Sign In
+                </button>
             </div>
         );
     }

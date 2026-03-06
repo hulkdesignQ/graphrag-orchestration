@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import Header, HTTPException, Request, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import jwt as pyjwt
-from jwt.exceptions import DecodeError as JWTError
+from jwt.exceptions import DecodeError as JWTDecodeError, ExpiredSignatureError
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 from src.core.config import settings
@@ -98,8 +98,15 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
                         token = auth_value
             
             if token:
-                # Validate and decode token
-                claims = self._decode_token(token)
+                # EasyAuth already validates session lifetime; skip JWT exp
+                # check for platform-injected tokens to avoid false 401s when
+                # the embedded id_token outlives its exp but the session is
+                # still valid.
+                is_easyauth = bool(
+                    request.headers.get("x-ms-token-aad-id-token")
+                    or request.headers.get("X-MS-TOKEN-AAD-ID-TOKEN")
+                )
+                claims = self._decode_token(token, skip_exp=is_easyauth)
                 
                 # Extract roles from token (Entra ID appRoles)
                 roles = claims.get("roles", [])
@@ -264,33 +271,38 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
         
         return None
     
-    def _decode_token(self, token: str) -> dict:
+    def _decode_token(self, token: str, skip_exp: bool = False) -> dict:
         """
         Decode and validate JWT token.
         
-        Note: In production, this should validate:
-        - Token signature using Azure AD public keys (JWKS)
-        - Issuer (iss claim)
-        - Audience (aud claim)
-        - Expiration (exp claim)
+        Args:
+            token: Raw JWT string
+            skip_exp: If True, skip expiration check (safe for EasyAuth
+                      tokens where the platform already validated the session).
         
         For Easy Auth, Azure App Service already validates the token,
-        so we can safely decode without re-verification.
+        so we can safely decode without re-verification of signature or exp.
+        For direct Bearer tokens (API/Swagger), exp is still checked.
         """
         try:
-            # Decode without verification (Easy Auth already validated)
-            # In production without Easy Auth, use jwt.decode() with verify=True
             claims = pyjwt.decode(
                 token,
-                options={"verify_signature": False, "verify_exp": True},
+                options={"verify_signature": False, "verify_exp": not skip_exp},
                 algorithms=["RS256", "HS256"],
             )
             return claims
-        except JWTError as e:
+        except ExpiredSignatureError:
+            logger.warning("jwt_token_expired")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token has expired. Please refresh your session.",
+                headers={"WWW-Authenticate": "Bearer"}
+            )
+        except JWTDecodeError as e:
             logger.warning("jwt_decode_failed", error=str(e))
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid or expired token",
+                detail="Invalid token",
                 headers={"WWW-Authenticate": "Bearer"}
             )
 

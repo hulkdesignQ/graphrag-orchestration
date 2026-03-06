@@ -32,17 +32,25 @@ async function refreshEasyAuthToken(): Promise<boolean> {
 
 /**
  * Wrapper around fetch that automatically retries once on 401 after refreshing
- * the EasyAuth token. For non-EasyAuth (MSAL) auth, the caller already
- * refreshes via acquireTokenSilent, so no retry is attempted.
+ * the EasyAuth token. Invalidates the cached token before refreshing so the
+ * retry uses a genuinely new token, not the stale one.
  */
 export async function fetchWithAuthRetry(url: string, init: RequestInit): Promise<Response> {
     const response = await fetch(url, init);
 
     if (response.status === 401 && isUsingAppServicesLogin) {
+        // Invalidate stale cached token so refresh fetches a new one
+        globalThis.cachedAppServicesToken = null;
+
         const refreshed = await refreshEasyAuthToken();
         if (refreshed) {
-            // Retry — EasyAuth middleware will inject the new token headers
-            return fetch(url, init);
+            // Rebuild headers with the fresh token from .auth/me
+            const freshHeaders = await getHeaders(undefined);
+            const retryInit: RequestInit = {
+                ...init,
+                headers: { ...freshHeaders, "Content-Type": "application/json" }
+            };
+            return fetch(url, retryInit);
         }
         // Refresh failed — redirect to fresh login
         window.location.href = ".auth/login/aad?post_login_redirect_uri=" + encodeURIComponent(window.location.pathname + window.location.search);
