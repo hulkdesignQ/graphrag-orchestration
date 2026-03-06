@@ -5,7 +5,7 @@ Provides REST endpoints for maintenance jobs, health checks, and admin operation
 """
 
 from typing import Optional, List
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from datetime import datetime
 
@@ -16,6 +16,7 @@ from src.worker.hybrid_v2.services.maintenance import (
     GroupHealth,
 )
 from src.worker.hybrid_v2.services.neo4j_store import Neo4jStoreV3
+from src.api_gateway.middleware.auth import get_group_id
 from src.core.config import settings
 
 router = APIRouter(prefix="/api/v2/maintenance", tags=["maintenance"])
@@ -131,14 +132,18 @@ def compute_health_score(health: GroupHealth) -> float:
     summary="Run a maintenance job",
     description="Execute a specific maintenance job on a group.",
 )
-async def run_maintenance_job(request: RunJobRequest):
+async def run_maintenance_job(request: RunJobRequest, auth_group_id: str = Depends(get_group_id)):
     """Run a maintenance job."""
+    # Enforce: request body group_id must match auth group_id
+    effective_group_id = request.group_id or auth_group_id
+    if effective_group_id != auth_group_id:
+        raise HTTPException(status_code=403, detail="group_id in request body does not match authenticated group_id")
     service = get_maintenance_service()
     job_type = parse_job_type(request.job_type)
     
     result = await service.run_job(
         job_type=job_type,
-        group_id=request.group_id,
+        group_id=auth_group_id,
         dry_run=request.dry_run,
     )
     
@@ -162,8 +167,11 @@ async def run_maintenance_job(request: RunJobRequest):
 async def run_all_gc(
     group_id: str,
     dry_run: bool = Query(False, description="If true, report without making changes"),
+    auth_group_id: str = Depends(get_group_id),
 ):
     """Run all GC jobs for a group."""
+    if group_id != auth_group_id:
+        raise HTTPException(status_code=403, detail="Path group_id does not match authenticated group_id")
     service = get_maintenance_service()
     
     results = await service.run_all_gc(
@@ -191,8 +199,10 @@ async def run_all_gc(
     summary="Get group health",
     description="Get comprehensive health metrics for a group.",
 )
-async def get_group_health(group_id: str):
+async def get_group_health(group_id: str, auth_group_id: str = Depends(get_group_id)):
     """Get health metrics for a group."""
+    if group_id != auth_group_id:
+        raise HTTPException(status_code=403, detail="Path group_id does not match authenticated group_id")
     service = get_maintenance_service()
     
     health = await service.get_group_health(group_id)
@@ -223,8 +233,11 @@ async def get_group_health(group_id: str):
 async def trigger_gds_recompute(
     group_id: str,
     dry_run: bool = Query(False),
+    auth_group_id: str = Depends(get_group_id),
 ):
     """Trigger GDS recomputation for a group."""
+    if group_id != auth_group_id:
+        raise HTTPException(status_code=403, detail="Path group_id does not match authenticated group_id")
     service = get_maintenance_service()
     
     result = await service.run_job(
@@ -272,8 +285,10 @@ async def list_stale_groups():
     summary="Validate group isolation",
     description="Check for nodes/edges missing group_id (isolation violations).",
 )
-async def validate_group_isolation(group_id: str):
+async def validate_group_isolation(group_id: str, auth_group_id: str = Depends(get_group_id)):
     """Validate group isolation."""
+    if group_id != auth_group_id:
+        raise HTTPException(status_code=403, detail="Path group_id does not match authenticated group_id")
     service = get_maintenance_service()
     
     result = await service.run_job(

@@ -6,7 +6,7 @@ Provides REST endpoints for document deprecation, restoration, and deletion.
 
 import asyncio
 from typing import Optional, List
-from fastapi import APIRouter, HTTPException, Query, Header
+from fastapi import APIRouter, Depends, HTTPException, Query, Header
 from pydantic import BaseModel, Field
 
 from src.worker.hybrid_v2.services.document_lifecycle import (
@@ -17,6 +17,7 @@ from src.worker.hybrid_v2.services.document_lifecycle import (
     DeletionResult,
 )
 from src.worker.hybrid_v2.services.neo4j_store import Neo4jStoreV3
+from src.api_gateway.middleware.auth import get_group_id
 from src.core.config import settings
 
 router = APIRouter(prefix="/api/v2/lifecycle", tags=["document-lifecycle"])
@@ -136,8 +137,11 @@ async def deprecate_document(
     group_id: str,
     document_id: str,
     request: Optional[DeprecateRequest] = None,
+    auth_group_id: str = Depends(get_group_id),
 ):
     """Deprecate a document (soft delete)."""
+    if group_id != auth_group_id:
+        raise HTTPException(status_code=403, detail="Path group_id does not match authenticated group_id")
     service = get_lifecycle_service()
     
     result = await service.deprecate_document(
@@ -169,8 +173,11 @@ async def deprecate_document(
 async def restore_document(
     group_id: str,
     document_id: str,
+    auth_group_id: str = Depends(get_group_id),
 ):
     """Restore a deprecated document."""
+    if group_id != auth_group_id:
+        raise HTTPException(status_code=403, detail="Path group_id does not match authenticated group_id")
     service = get_lifecycle_service()
     
     result = await service.restore_document(
@@ -201,8 +208,11 @@ async def hard_delete_document(
     document_id: str,
     confirm: bool = Query(False, description="Must be true to confirm deletion"),
     orphan_cleanup: bool = Query(True, description="Delete orphaned entities"),
+    auth_group_id: str = Depends(get_group_id),
 ):
     """Hard delete a document (permanent)."""
+    if group_id != auth_group_id:
+        raise HTTPException(status_code=403, detail="Path group_id does not match authenticated group_id")
     if not confirm:
         raise HTTPException(
             status_code=400,
@@ -239,8 +249,11 @@ async def hard_delete_document(
 async def bulk_deprecate_documents(
     group_id: str,
     request: BulkDeprecateRequest,
+    auth_group_id: str = Depends(get_group_id),
 ):
     """Bulk deprecate multiple documents."""
+    if group_id != auth_group_id:
+        raise HTTPException(status_code=403, detail="Path group_id does not match authenticated group_id")
     service = get_lifecycle_service()
     
     async def _deprecate_one(doc_id: str) -> DeprecationResponse:
@@ -275,8 +288,11 @@ async def list_documents(
     group_id: str,
     status: Optional[str] = Query(None, description="Filter: active, deprecated, or all"),
     limit: int = Query(100, ge=1, le=1000),
+    auth_group_id: str = Depends(get_group_id),
 ):
     """List documents with optional status filter."""
+    if group_id != auth_group_id:
+        raise HTTPException(status_code=403, detail="Path group_id does not match authenticated group_id")
     service = get_lifecycle_service()
     
     doc_status = None
@@ -306,8 +322,11 @@ async def list_documents(
 async def get_document_impact(
     group_id: str,
     document_id: str,
+    auth_group_id: str = Depends(get_group_id),
 ):
     """Preview the impact of deprecating/deleting a document."""
+    if group_id != auth_group_id:
+        raise HTTPException(status_code=403, detail="Path group_id does not match authenticated group_id")
     service = get_lifecycle_service()
     
     impact = await service.get_document_impact(

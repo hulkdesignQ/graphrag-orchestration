@@ -397,10 +397,10 @@ class MultiTenantNeo4jStore(StandaloneNeo4jStore):
         ]
         is_system_query = any(keyword.lower() in query.lower() for keyword in system_query_keywords)
         
-        # Log a warning if the query doesn't seem to filter by group_id (unless it's a system query)
+        # Reject non-system queries that don't filter by group_id (prevents data leaks)
         if not is_system_query and "group_id" not in query.lower():
-            logger.warning(
-                f"Cypher query may not filter by group_id! "
+            raise ValueError(
+                f"Cypher query missing group_id filter — potential tenant isolation violation. "
                 f"Query: {query[:100]}..."
             )
         

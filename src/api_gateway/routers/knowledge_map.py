@@ -20,13 +20,14 @@ from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
-from fastapi import APIRouter, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 
 from src.core.services import redis_service
 from src.worker.services.simple_document_analysis_service import (
     SimpleDocumentAnalysisService,
     DocumentAnalysisBackend,
 )
+from src.api_gateway.middleware.auth import get_group_id
 
 logger = logging.getLogger(__name__)
 
@@ -87,10 +88,9 @@ class OperationStoreAdapter:
             self._redis_service = await redis_service.get_redis_service()
         return self._redis_service.operations
     
-    async def create(self, operation_id: str, request: Dict[str, Any]) -> None:
+    async def create(self, operation_id: str, request: Dict[str, Any], tenant_id: str = "default") -> None:
         """Create a new pending operation."""
         store = await self._get_store()
-        tenant_id = request.get("tenant_id", "default")
         
         await store.create(
             operation_id=operation_id,
@@ -116,6 +116,7 @@ class OperationStoreAdapter:
             "error": op.error,
             "created_at": op.created_at,
             "completed_at": op.updated_at if op.status in (redis_service.OperationStatus.COMPLETED, redis_service.OperationStatus.FAILED) else None,
+            "tenant_id": op.tenant_id,
         }
     
     async def update(
@@ -368,7 +369,7 @@ async def _process_documents(operation_id: str, request: ProcessRequest) -> None
     ```
     """,
 )
-async def process_documents(request: ProcessRequest) -> ProcessStartResponse:
+async def process_documents(request: ProcessRequest, group_id: str = Depends(get_group_id)) -> ProcessStartResponse:
     """
     Start document processing.
     
@@ -382,9 +383,9 @@ async def process_documents(request: ProcessRequest) -> ProcessStartResponse:
                 detail=f"Document '{doc_input.id}' must have either 'url' or 'content'"
             )
     
-    # Create operation
+    # Create operation with authenticated tenant_id
     operation_id = str(uuid.uuid4())
-    await _operation_store.create(operation_id, request.model_dump())
+    await _operation_store.create(operation_id, request.model_dump(), tenant_id=group_id)
     
     # Start background processing
     task = asyncio.create_task(_process_documents(operation_id, request))
@@ -420,7 +421,7 @@ async def process_documents(request: ProcessRequest) -> ProcessStartResponse:
     Results expire 60 seconds after reaching terminal state (succeeded/failed).
     """,
 )
-async def get_operation(operation_id: str, response: Response) -> OperationResponse:
+async def get_operation(operation_id: str, response: Response, group_id: str = Depends(get_group_id)) -> OperationResponse:
     """
     Get operation status and result.
     
@@ -429,6 +430,13 @@ async def get_operation(operation_id: str, response: Response) -> OperationRespo
     operation = await _operation_store.get(operation_id)
     
     if not operation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Operation '{operation_id}' not found or expired"
+        )
+    
+    # Verify tenant ownership — don't leak existence of other tenants' operations
+    if operation.get("tenant_id") and operation["tenant_id"] != group_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Operation '{operation_id}' not found or expired"
@@ -459,11 +467,18 @@ async def get_operation(operation_id: str, response: Response) -> OperationRespo
     summary="Cancel/delete operation",
     description="Cancel a pending operation or delete a completed one.",
 )
-async def delete_operation(operation_id: str) -> None:
+async def delete_operation(operation_id: str, group_id: str = Depends(get_group_id)) -> None:
     """Delete or cancel an operation."""
     operation = await _operation_store.get(operation_id)
     
     if not operation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Operation '{operation_id}' not found"
+        )
+    
+    # Verify tenant ownership
+    if operation.get("tenant_id") and operation["tenant_id"] != group_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Operation '{operation_id}' not found"

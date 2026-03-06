@@ -329,6 +329,14 @@ if not _require_auth:
         "Set REQUIRE_AUTH=true before deploying to production.",
         stacklevel=1,
     )
+if _require_auth and settings.GROUP_ID_OVERRIDE:
+    import warnings
+    warnings.warn(
+        f"GROUP_ID_OVERRIDE is set to '{settings.GROUP_ID_OVERRIDE}' while REQUIRE_AUTH is True. "
+        "All requests will use this fixed group_id, overriding JWT group claims. "
+        "Unset GROUP_ID_OVERRIDE before deploying to production.",
+        stacklevel=1,
+    )
 app.add_middleware(
     JWTAuthMiddleware,
     auth_type=settings.AUTH_TYPE if hasattr(settings, "AUTH_TYPE") else "B2B",

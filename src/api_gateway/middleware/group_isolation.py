@@ -25,8 +25,11 @@ from src.core.config import settings
 
 logger = structlog.get_logger()
 
-# Use settings for legacy header control (defaults to True for backward compatibility)
-ALLOW_LEGACY_GROUP_HEADER = getattr(settings, "ALLOW_LEGACY_GROUP_HEADER", True)
+# Legacy header is only allowed when explicitly enabled AND auth is disabled.
+# In production (REQUIRE_AUTH=True), legacy headers are never accepted regardless of setting.
+_allow_legacy = getattr(settings, "ALLOW_LEGACY_GROUP_HEADER", False)
+_require_auth = getattr(settings, "REQUIRE_AUTH", True)
+ALLOW_LEGACY_GROUP_HEADER = _allow_legacy and not _require_auth
 
 
 class GroupIsolationMiddleware(BaseHTTPMiddleware):

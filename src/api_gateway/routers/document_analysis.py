@@ -15,13 +15,14 @@ Features:
 import logging
 from typing import List, Optional
 from pydantic import BaseModel, Field
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from src.worker.services.simple_document_analysis_service import (
     SimpleDocumentAnalysisService,
     DocumentAnalysisBackend,
     DocumentAnalysisResult,
 )
+from src.api_gateway.middleware.auth import get_group_id
 
 logger = logging.getLogger(__name__)
 
@@ -116,12 +117,13 @@ class BackendInfoResponse(BaseModel):
     with a simpler, more reliable API.
     """,
 )
-async def analyze_documents(request: DocumentAnalysisRequest) -> DocumentAnalysisResponse:
+async def analyze_documents(request: DocumentAnalysisRequest, group_id: str = Depends(get_group_id)) -> DocumentAnalysisResponse:
     """
     Analyze documents from URLs or text content.
     
     Args:
         request: DocumentAnalysisRequest with URLs or texts
+        group_id: Authenticated tenant (used for audit logging)
     
     Returns:
         DocumentAnalysisResponse with analyzed documents
@@ -129,6 +131,7 @@ async def analyze_documents(request: DocumentAnalysisRequest) -> DocumentAnalysi
     Raises:
         HTTPException: If analysis fails
     """
+    logger.info(f"Document analysis requested by group_id={group_id}")
     if not request.urls and not request.texts:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
