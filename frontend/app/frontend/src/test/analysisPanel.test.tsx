@@ -116,4 +116,64 @@ describe("AnalysisPanel", () => {
         const iframe = await screen.findByTitle("Citation");
         expect(iframe.tagName).toBe("IFRAME");
     });
+
+    it("does not render citation viewer when fetch returns 401", async () => {
+        vi.spyOn(globalThis, "fetch").mockResolvedValue(
+            new Response(JSON.stringify({ detail: "Authentication required." }), {
+                status: 401,
+                headers: { "Content-Type": "application/json" },
+            })
+        );
+        const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+        renderWithProviders(
+            <AnalysisPanel
+                className=""
+                activeTab={AnalysisPanelTabs.CitationTab}
+                onActiveTabChanged={onTabChanged}
+                activeCitation="/content/report.pdf"
+                citationHeight="600px"
+                answer={makeResponse()}
+            />
+        );
+        // Wait for the fetch to resolve and state to settle
+        await vi.waitFor(() => {
+            expect(consoleSpy).toHaveBeenCalledWith(
+                expect.stringContaining("Citation fetch failed: 401")
+            );
+        });
+        // No iframe or pdf viewer should be rendered with content
+        const iframe = screen.queryByTitle("Citation");
+        if (iframe) {
+            // iframe src should be empty or absent (no blob URL from error body)
+            const src = iframe.getAttribute("src");
+            expect(src === "" || src === null).toBe(true);
+        }
+        consoleSpy.mockRestore();
+    });
+
+    it("does not render citation viewer when fetch returns 404", async () => {
+        vi.spyOn(globalThis, "fetch").mockResolvedValue(
+            new Response(JSON.stringify({ detail: "Content not found" }), {
+                status: 404,
+                headers: { "Content-Type": "application/json" },
+            })
+        );
+        const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+        renderWithProviders(
+            <AnalysisPanel
+                className=""
+                activeTab={AnalysisPanelTabs.CitationTab}
+                onActiveTabChanged={onTabChanged}
+                activeCitation="/content/report.pdf"
+                citationHeight="600px"
+                answer={makeResponse()}
+            />
+        );
+        await vi.waitFor(() => {
+            expect(consoleSpy).toHaveBeenCalledWith(
+                expect.stringContaining("Citation fetch failed: 404")
+            );
+        });
+        consoleSpy.mockRestore();
+    });
 });
