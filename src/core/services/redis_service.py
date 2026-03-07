@@ -242,7 +242,7 @@ class RedisOperationStore:
     Operations expire after TTL to prevent unbounded growth.
     """
     
-    KEY_PREFIX = "graphrag:operation"
+    KEY_PREFIX = "{graphrag}:operation"
     DEFAULT_TTL = 3600  # 1 hour
     
     def __init__(self, redis_client: aioredis.Redis, ttl_seconds: int = DEFAULT_TTL):
@@ -382,7 +382,7 @@ class RedisResultStore:
     Results expire after TTL.
     """
     
-    KEY_PREFIX = "graphrag:result"
+    KEY_PREFIX = "{graphrag}:result"
     DEFAULT_TTL = 3600  # 1 hour
     
     def __init__(self, redis_client: aioredis.Redis, ttl_seconds: int = DEFAULT_TTL):
@@ -445,10 +445,10 @@ class RedisJobQueue:
     If worker crashes, jobs remain in processing list for recovery.
     """
     
-    QUEUE_KEY = "graphrag:jobs:pending"
-    PROCESSING_KEY = "graphrag:jobs:processing"
-    DLQ_KEY = "graphrag:jobs:dlq"
-    IDEMPOTENCY_PREFIX = "graphrag:idempotency"
+    QUEUE_KEY = "{graphrag}:jobs:pending"
+    PROCESSING_KEY = "{graphrag}:jobs:processing"
+    DLQ_KEY = "{graphrag}:jobs:dlq"
+    IDEMPOTENCY_PREFIX = "{graphrag}:idempotency"
     
     DEFAULT_VISIBILITY_TIMEOUT = 600  # 10 minutes
     

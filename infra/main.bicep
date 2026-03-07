@@ -374,7 +374,7 @@ module graphragApi './core/host/container-app.bicep' = {
       }
       {
         name: 'REDIS_QUEUE_NAME'
-        value: 'graphrag_jobs'
+        value: '{graphrag}:jobs:pending'
       }
       {
         name: 'ENABLE_GROUP_ISOLATION'
@@ -581,7 +581,7 @@ var sharedEnvVars = concat([
   }
   {
     name: 'REDIS_QUEUE_NAME'
-    value: 'graphrag_jobs'
+    value: '{graphrag}:jobs:pending'
   }
   {
     name: 'ENABLE_GROUP_ISOLATION'

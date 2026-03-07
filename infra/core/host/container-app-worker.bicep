@@ -97,7 +97,7 @@ resource containerApp 'Microsoft.App/containerApps@2024-10-02-preview' = {
               type: 'redis'
               metadata: {
                 address: '${redisHost}:${redisPort}'
-                listName: 'graphrag_jobs'
+                listName: '{graphrag}:jobs:pending'
                 listLength: '5'
                 enableTLS: 'true'
               }
