@@ -4,7 +4,9 @@ TrackedLLM wraps a LlamaIndex AzureOpenAI instance, intercepting
 acomplete() and complete() to:
 1. Extract response.raw['usage'] token counts
 2. Accumulate on a per-request TokenAccumulator (for RouteResult.usage)
-3. Fire-and-forget to UsageTracker (for Cosmos DB persistence)
+
+The TokenAccumulator aggregates all sub-call tokens, and chat.py writes
+ONE summary record per user query to Cosmos via _write_cosmos_usage().
 
 Inject via LLMService._create_llm_client() so all 22+ call sites are
 covered without individual modification.
@@ -12,18 +14,13 @@ covered without individual modification.
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any, Optional, Sequence
 
 import structlog
 
 from src.core.services.token_accumulator import TokenAccumulator
-from src.core.services.usage_tracker import get_usage_tracker
 
 logger = structlog.get_logger(__name__)
-
-# Strong references for fire-and-forget background tasks (prevent GC)
-_background_tasks: set = set()
 
 
 def _extract_usage(response: Any) -> dict:
@@ -147,22 +144,10 @@ class TrackedLLM:
                 total_tokens=total_tokens,
             )
 
-        # 2. Fire-and-forget to Cosmos via UsageTracker
-        try:
-            tracker = get_usage_tracker()
-            loop = asyncio.get_event_loop()
-            task = loop.create_task(tracker.log_llm_usage(
-                partition_id=group_id,
-                model=deployment,
-                prompt_tokens=prompt_tokens,
-                completion_tokens=completion_tokens,
-                user_id=user_id,
-                route=route,
-            ))
-            _background_tasks.add(task)
-            task.add_done_callback(_background_tasks.discard)
-        except Exception:
-            pass  # Fire-and-forget: never block the pipeline
+        # NOTE: Per-sub-call Cosmos writes removed. The TokenAccumulator
+        # aggregates all sub-call tokens, and chat.py writes ONE summary
+        # record per user query via _write_cosmos_usage(). Writing per
+        # sub-call caused duplicate rows in the dashboard Recent Activity.
 
         logger.debug(
             "llm_token_usage_recorded",
