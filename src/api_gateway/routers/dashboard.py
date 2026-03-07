@@ -8,12 +8,13 @@ Provides endpoints for:
 These endpoints serve data to the frontend dashboard pages.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 import asyncio
 import structlog
 import os
+import time
 from datetime import datetime, timezone
 
 from src.api_gateway.middleware.auth import get_current_user, get_user_roles, get_user_id, get_group_id
@@ -33,8 +34,28 @@ logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
+# Short-TTL in-memory cache for /dashboard/all responses.
+# Keyed by user_id → (timestamp, DashboardAllResponse).
+_DASHBOARD_ALL_CACHE: Dict[str, Tuple[float, Any]] = {}
+_DASHBOARD_ALL_CACHE_TTL = int(os.getenv("DASHBOARD_CACHE_TTL", "20"))
 
-# ============================================================================
+
+def _get_cached_dashboard(user_id: str) -> Optional[Any]:
+    entry = _DASHBOARD_ALL_CACHE.get(user_id)
+    if entry and (time.monotonic() - entry[0]) < _DASHBOARD_ALL_CACHE_TTL:
+        return entry[1]
+    _DASHBOARD_ALL_CACHE.pop(user_id, None)
+    return None
+
+
+def _set_cached_dashboard(user_id: str, response: Any) -> None:
+    _DASHBOARD_ALL_CACHE[user_id] = (time.monotonic(), response)
+    # Evict stale entries when cache grows (simple cap)
+    if len(_DASHBOARD_ALL_CACHE) > 500:
+        cutoff = time.monotonic() - _DASHBOARD_ALL_CACHE_TTL
+        stale = [k for k, (t, _) in _DASHBOARD_ALL_CACHE.items() if t < cutoff]
+        for k in stale:
+            _DASHBOARD_ALL_CACHE.pop(k, None)
 # Response Models
 # ============================================================================
 
@@ -429,13 +450,19 @@ async def get_dashboard_all(
 
     This avoids 3 separate HTTP round-trips through the EasyAuth sidecar,
     and performs only ONE Redis init + ONE set of plan/usage lookups shared
-    across all three response sections.
+    across all three response sections.  Results are cached for 20s per user.
     """
+    user_id = user.get("oid", "")
+    cached = _get_cached_dashboard(user_id)
+    if cached is not None:
+        return cached
     try:
         async with asyncio.timeout(15):
-            return await _fetch_dashboard_all(request, user, group_id)
+            result = await _fetch_dashboard_all(request, user, group_id)
+            _set_cached_dashboard(user_id, result)
+            return result
     except TimeoutError:
-        logger.warning("dashboard_all_timeout", user_id=user.get("oid", ""))
+        logger.warning("dashboard_all_timeout", user_id=user_id)
         raise HTTPException(status_code=504, detail="Dashboard fetch timed out")
 
 
@@ -500,31 +527,39 @@ async def _fetch_dashboard_all(
 
     # ── Phase 3: Blob + Cosmos + credits in parallel ─────────────────────
     async def _blob_stats() -> tuple[int, float, int]:
-        blob_mgr = getattr(request.app.state, "user_blob_manager", None)
-        personal_count, storage_gb = 0, 0.0
-        if blob_mgr:
+        async def _personal() -> tuple[int, float]:
+            blob_mgr = getattr(request.app.state, "user_blob_manager", None)
+            if not blob_mgr:
+                return 0, 0.0
             try:
                 async with asyncio.timeout(5):
                     count, size_bytes = await blob_mgr.get_blob_stats(group_id)
-                    personal_count = count
-                    storage_gb = round(size_bytes / (1024 ** 3), 4)
+                    return count, round(size_bytes / (1024 ** 3), 4)
             except (TimeoutError, Exception):
                 logger.warning("usage_blob_count_failed", group_id=group_id)
+                return 0, 0.0
 
-        global_count = 0
-        global_mgr = getattr(request.app.state, "global_blob_manager", None)
-        if global_mgr:
+        async def _global() -> int:
+            global_mgr = getattr(request.app.state, "global_blob_manager", None)
+            if not global_mgr:
+                return 0
             try:
                 async with asyncio.timeout(5):
                     container_client = global_mgr.blob_service_client.get_container_client(
                         global_mgr.container
                     )
+                    count = 0
                     async for blob in container_client.list_blobs():
                         if "/" not in blob.name:
-                            global_count += 1
+                            count += 1
+                    return count
             except (TimeoutError, Exception):
                 logger.warning("usage_global_blob_count_failed")
+                return 0
 
+        (personal_count, storage_gb), global_count = await asyncio.gather(
+            _personal(), _global()
+        )
         return personal_count, storage_gb, global_count
 
     async def _recent_queries() -> tuple[list, int, float]:
@@ -533,12 +568,12 @@ async def _fetch_dashboard_all(
         doc_storage = 0.0
         try:
             cosmos = get_cosmos_client()
-            records = await cosmos.query_usage(
-                partition_id=user_id,
-                usage_type="llm_completion",
+            llm_records, doc_records = await asyncio.gather(
+                cosmos.query_usage(partition_id=user_id, usage_type="llm_completion"),
+                cosmos.query_usage(partition_id=user_id, usage_type="doc_intel"),
             )
             sorted_records = sorted(
-                records, key=lambda r: r.get("timestamp", ""), reverse=True
+                llm_records, key=lambda r: r.get("timestamp", ""), reverse=True
             )[:20]
             queries = [
                 {
@@ -555,10 +590,6 @@ async def _fetch_dashboard_all(
                 }
                 for r in sorted_records
             ]
-            doc_records = await cosmos.query_usage(
-                partition_id=user_id,
-                usage_type="doc_intel",
-            )
             doc_ids = {r.get("document_id") for r in doc_records if r.get("document_id")}
             doc_count = len(doc_ids)
             total_pages = sum(r.get("pages_analyzed", 0) for r in doc_records)
