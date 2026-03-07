@@ -171,5 +171,12 @@
         "delete": "Slet ({{count}})",
         "selectAll": "Vælg alle",
         "refresh": "Opdater"
+    },
+
+    "errors": {
+        "networkError": "Kan ikke nå serveren. Tjek din internetforbindelse og prøv igen.",
+        "timeoutError": "Anmodningen tog for lang tid. Prøv igen.",
+        "serverError": "Noget gik galt hos os. Prøv igen om et øjeblik.",
+        "unknownError": "Der opstod en uventet fejl. Prøv igen."
     }
 }

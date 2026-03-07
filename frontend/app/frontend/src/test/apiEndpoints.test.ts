@@ -10,7 +10,8 @@ import {
     getChatHistoryListApi,
     getChatHistoryApi,
     deleteChatHistoryApi,
-    getHeaders
+    getHeaders,
+    fetchWithNetworkRetry
 } from "../api/api";
 
 function mockFetchOnce(body: unknown, status = 200) {
@@ -139,5 +140,69 @@ describe("chat history APIs", () => {
             expect.stringContaining("/chat_history/sessions/s1"),
             expect.objectContaining({ method: "DELETE" })
         );
+    });
+});
+
+describe("fetchWithNetworkRetry", () => {
+    it("returns response on success without retrying", async () => {
+        mockFetchOnce({ ok: true });
+        const response = await fetchWithNetworkRetry("/test", { method: "GET" });
+        expect(response.status).toBe(200);
+        expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it("retries on TypeError (network error) and succeeds", async () => {
+        const fetchSpy = vi.spyOn(globalThis, "fetch");
+        fetchSpy.mockRejectedValueOnce(new TypeError("Load failed"));
+        fetchSpy.mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+
+        const response = await fetchWithNetworkRetry("/test", { method: "GET" }, 1);
+        expect(response.status).toBe(200);
+        expect(fetchSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it("retries on 503 status and succeeds", async () => {
+        const fetchSpy = vi.spyOn(globalThis, "fetch");
+        fetchSpy.mockResolvedValueOnce(new Response(null, { status: 503 }));
+        fetchSpy.mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+
+        const response = await fetchWithNetworkRetry("/test", { method: "GET" }, 1);
+        expect(response.status).toBe(200);
+        expect(fetchSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it("throws after exhausting retries on persistent TypeError", async () => {
+        const fetchSpy = vi.spyOn(globalThis, "fetch");
+        fetchSpy.mockRejectedValue(new TypeError("Failed to fetch"));
+
+        await expect(fetchWithNetworkRetry("/test", { method: "GET" }, 1)).rejects.toThrow("Failed to fetch");
+        expect(fetchSpy).toHaveBeenCalledTimes(2); // initial + 1 retry
+    });
+
+    it("does not retry on non-retryable errors", async () => {
+        const fetchSpy = vi.spyOn(globalThis, "fetch");
+        fetchSpy.mockRejectedValueOnce(new Error("Some other error"));
+
+        await expect(fetchWithNetworkRetry("/test", { method: "GET" }, 2)).rejects.toThrow("Some other error");
+        expect(fetchSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not retry on 4xx status", async () => {
+        const fetchSpy = vi.spyOn(globalThis, "fetch");
+        fetchSpy.mockResolvedValueOnce(new Response(null, { status: 400 }));
+
+        const response = await fetchWithNetworkRetry("/test", { method: "GET" }, 2);
+        expect(response.status).toBe(400);
+        expect(fetchSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not retry when signal is aborted", async () => {
+        const controller = new AbortController();
+        controller.abort();
+        const fetchSpy = vi.spyOn(globalThis, "fetch");
+        fetchSpy.mockRejectedValueOnce(new TypeError("Load failed"));
+
+        await expect(fetchWithNetworkRetry("/test", { method: "GET", signal: controller.signal }, 2)).rejects.toThrow("Load failed");
+        expect(fetchSpy).toHaveBeenCalledTimes(1);
     });
 });

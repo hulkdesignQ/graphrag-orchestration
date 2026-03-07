@@ -31,12 +31,51 @@ async function refreshEasyAuthToken(): Promise<boolean> {
 }
 
 /**
- * Wrapper around fetch that automatically retries once on 401 after refreshing
- * the EasyAuth token. Invalidates the cached token before refreshing so the
- * retry uses a genuinely new token, not the stale one.
+ * Returns true for errors that are likely transient and worth retrying:
+ * - TypeError from fetch() (network break, DNS failure, CORS during outage)
+ * - HTTP 502, 503, 504 (upstream/gateway errors, often transient)
+ */
+function isRetryableError(error: unknown): boolean {
+    return error instanceof TypeError;
+}
+
+function isRetryableStatus(status: number): boolean {
+    return status === 502 || status === 503 || status === 504;
+}
+
+/**
+ * Fetch with automatic retry for transient network errors.
+ * Uses exponential backoff with jitter: ~1s, ~2s (max 2 retries).
+ * Respects AbortSignal — stops retrying if the request was cancelled.
+ */
+export async function fetchWithNetworkRetry(url: string, init: RequestInit, maxRetries = 2): Promise<Response> {
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+            const response = await fetch(url, init);
+            if (isRetryableStatus(response.status) && attempt < maxRetries && !init.signal?.aborted) {
+                await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt) + Math.random() * 500));
+                continue;
+            }
+            return response;
+        } catch (e) {
+            if (isRetryableError(e) && attempt < maxRetries && !init.signal?.aborted) {
+                await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt) + Math.random() * 500));
+                continue;
+            }
+            throw e;
+        }
+    }
+    // Unreachable, but satisfies TypeScript
+    return fetch(url, init);
+}
+
+/**
+ * Wrapper around fetch that:
+ * 1. Retries on transient network errors (TypeError) and 5xx with exponential backoff
+ * 2. Retries once on 401 after refreshing the EasyAuth token
  */
 export async function fetchWithAuthRetry(url: string, init: RequestInit): Promise<Response> {
-    const response = await fetch(url, init);
+    const response = await fetchWithNetworkRetry(url, init);
 
     if (response.status === 401 && isUsingAppServicesLogin) {
         // Invalidate stale cached token so refresh fetches a new one
@@ -50,7 +89,7 @@ export async function fetchWithAuthRetry(url: string, init: RequestInit): Promis
                 ...init,
                 headers: { ...freshHeaders, "Content-Type": "application/json" }
             };
-            return fetch(url, retryInit);
+            return fetchWithNetworkRetry(url, retryInit);
         }
         // Refresh failed — redirect to fresh login
         window.location.href = ".auth/login/aad?post_login_redirect_uri=" + encodeURIComponent(window.location.pathname + window.location.search);

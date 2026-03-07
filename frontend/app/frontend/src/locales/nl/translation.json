@@ -171,5 +171,12 @@
         "delete": "Verwijderen ({{count}})",
         "selectAll": "Alles selecteren",
         "refresh": "Vernieuwen"
+    },
+
+    "errors": {
+        "networkError": "Kan de server niet bereiken. Controleer je internetverbinding en probeer het opnieuw.",
+        "timeoutError": "Het verzoek duurde te lang. Probeer het opnieuw.",
+        "serverError": "Er is iets misgegaan aan onze kant. Probeer het over een moment opnieuw.",
+        "unknownError": "Er is een onverwachte fout opgetreden. Probeer het opnieuw."
     }
 }

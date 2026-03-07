@@ -171,5 +171,12 @@
         "delete": "Sil ({{count}})",
         "selectAll": "Tümünü seç",
         "refresh": "Yenile"
+    },
+
+    "errors": {
+        "networkError": "Sunucuya ulaşılamıyor. İnternet bağlantınızı kontrol edip tekrar deneyin.",
+        "timeoutError": "İstek çok uzun sürdü. Lütfen tekrar deneyin.",
+        "serverError": "Bizim tarafımızda bir sorun oluştu. Lütfen birazdan tekrar deneyin.",
+        "unknownError": "Beklenmeyen bir hata oluştu. Lütfen tekrar deneyin."
     }
 }

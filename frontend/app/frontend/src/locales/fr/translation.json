@@ -171,5 +171,12 @@
         "delete": "Supprimer ({{count}})",
         "selectAll": "Tout sélectionner",
         "refresh": "Actualiser"
+    },
+
+    "errors": {
+        "networkError": "Impossible de joindre le serveur. Vérifiez votre connexion internet et réessayez.",
+        "timeoutError": "La requête a pris trop de temps. Veuillez réessayer.",
+        "serverError": "Un problème est survenu de notre côté. Veuillez réessayer dans un instant.",
+        "unknownError": "Une erreur inattendue s'est produite. Veuillez réessayer."
     }
 }

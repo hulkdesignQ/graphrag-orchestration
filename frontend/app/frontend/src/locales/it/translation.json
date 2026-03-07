@@ -171,5 +171,12 @@
         "delete": "Elimina ({{count}})",
         "selectAll": "Seleziona tutto",
         "refresh": "Aggiorna"
+    },
+
+    "errors": {
+        "networkError": "Impossibile raggiungere il server. Controlla la connessione internet e riprova.",
+        "timeoutError": "La richiesta ha impiegato troppo tempo. Riprova.",
+        "serverError": "Qualcosa è andato storto da parte nostra. Riprova tra un momento.",
+        "unknownError": "Si è verificato un errore imprevisto. Riprova."
     }
 }

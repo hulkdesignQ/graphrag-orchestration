@@ -190,5 +190,12 @@
         "delete": "Delete ({{count}})",
         "selectAll": "Select All",
         "refresh": "Refresh"
+    },
+
+    "errors": {
+        "networkError": "Unable to reach the server. Please check your internet connection and try again.",
+        "timeoutError": "The request took too long. Please try again.",
+        "serverError": "Something went wrong on our end. Please try again in a moment.",
+        "unknownError": "An unexpected error occurred. Please try again."
     }
 }

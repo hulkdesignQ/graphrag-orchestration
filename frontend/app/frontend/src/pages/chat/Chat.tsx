@@ -21,6 +21,28 @@ import { useLogin, getToken, requireAccessControl } from "../../authConfig";
 import { useMsal } from "@azure/msal-react";
 import { LoginContext } from "../../loginContext";
 
+/**
+ * Map raw JS errors to user-friendly messages.
+ * TypeError is thrown by fetch() on network failures (Safari: "Load failed", Chrome: "Failed to fetch").
+ */
+function getUserFriendlyError(error: unknown, t: (key: string) => string): string {
+    if (error instanceof TypeError) {
+        return t("errors.networkError");
+    }
+    if (error instanceof DOMException && error.name === "TimeoutError") {
+        return t("errors.timeoutError");
+    }
+    if (error instanceof Error) {
+        const msg = error.message;
+        // Preserve already-friendly messages (rate limit with markdown link)
+        if (msg.startsWith("You've reached your daily query limit")) return msg;
+        if (msg.startsWith("Request failed with status")) return t("errors.serverError");
+        if (msg === "No response body") return t("errors.serverError");
+        return msg;
+    }
+    return t("errors.unknownError");
+}
+
 
 const Chat = () => {
     const [isHistoryPanelOpen, setIsHistoryPanelOpen] = useState(false);
@@ -560,7 +582,7 @@ const Chat = () => {
                                 <>
                                     <UserChatMessage message={lastQuestionRef.current} />
                                     <div className={styles.chatMessageGptMinWidth}>
-                                        <AnswerError error={error.toString()} onRetry={() => makeApiRequest(lastQuestionRef.current)} />
+                                        <AnswerError error={getUserFriendlyError(error, t)} onRetry={() => makeApiRequest(lastQuestionRef.current)} />
                                     </div>
                                 </>
                             ) : null}

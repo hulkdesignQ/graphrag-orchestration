@@ -33,7 +33,11 @@ i18nInstance.use(initReactI18next).init({
                 "tooltips.copied": "Copied!",
                 "tooltips.showSupportingContent": "Show supporting content",
                 "headerTexts.supportingContent": "Supporting content",
-                "headerTexts.citation": "Citation"
+                "headerTexts.citation": "Citation",
+                "errors.networkError": "Unable to reach the server. Please check your internet connection and try again.",
+                "errors.timeoutError": "The request took too long. Please try again.",
+                "errors.serverError": "Something went wrong on our end. Please try again in a moment.",
+                "errors.unknownError": "An unexpected error occurred. Please try again."
             }
         }
     },

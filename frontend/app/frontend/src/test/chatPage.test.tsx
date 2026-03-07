@@ -202,6 +202,41 @@ describe("Chat page integration", () => {
         });
     });
 
+    it("shows user-friendly message on network error (TypeError)", async () => {
+        mockChatApi.mockRejectedValue(new TypeError("Load failed"));
+
+        const user = userEvent.setup();
+        renderChat(true);
+
+        const textarea = screen.getByRole("textbox");
+        await user.type(textarea, "network break");
+        await user.click(screen.getByRole("button", { name: "Submit question" }));
+
+        await waitFor(() => {
+            expect(screen.getByText("Unable to reach the server. Please check your internet connection and try again.")).toBeInTheDocument();
+            expect(screen.getByText("Retry")).toBeInTheDocument();
+        });
+    });
+
+    it("shows user-friendly message on server error status", async () => {
+        mockChatApi.mockResolvedValue({
+            ok: false,
+            status: 500,
+            body: new ReadableStream(),
+        });
+
+        const user = userEvent.setup();
+        renderChat(true);
+
+        const textarea = screen.getByRole("textbox");
+        await user.type(textarea, "server error");
+        await user.click(screen.getByRole("button", { name: "Submit question" }));
+
+        await waitFor(() => {
+            expect(screen.getByText("Something went wrong on our end. Please try again in a moment.")).toBeInTheDocument();
+        });
+    });
+
     it("clear chat resets the conversation", async () => {
         const responseData = {
             message: { content: "Answer text", role: "assistant" },

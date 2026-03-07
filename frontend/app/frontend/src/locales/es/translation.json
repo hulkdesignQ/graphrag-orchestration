@@ -171,5 +171,12 @@
         "delete": "Eliminar ({{count}})",
         "selectAll": "Seleccionar todo",
         "refresh": "Actualizar"
+    },
+
+    "errors": {
+        "networkError": "No se puede conectar con el servidor. Comprueba tu conexión a internet e inténtalo de nuevo.",
+        "timeoutError": "La solicitud tardó demasiado. Inténtalo de nuevo.",
+        "serverError": "Algo salió mal en nuestro lado. Inténtalo de nuevo en un momento.",
+        "unknownError": "Se produjo un error inesperado. Inténtalo de nuevo."
     }
 }

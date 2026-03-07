@@ -174,5 +174,12 @@
         "delete": "Usuń ({{count}})",
         "selectAll": "Zaznacz wszystko",
         "refresh": "Odśwież"
+    },
+
+    "errors": {
+        "networkError": "Nie można połączyć się z serwerem. Sprawdź połączenie internetowe i spróbuj ponownie.",
+        "timeoutError": "Żądanie trwało zbyt długo. Spróbuj ponownie.",
+        "serverError": "Coś poszło nie tak po naszej stronie. Spróbuj ponownie za chwilę.",
+        "unknownError": "Wystąpił nieoczekiwany błąd. Spróbuj ponownie."
     }
 }
