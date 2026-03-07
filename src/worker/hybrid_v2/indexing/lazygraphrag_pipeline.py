@@ -190,14 +190,14 @@ class LazyGraphRAGIndexingPipeline:
         *,
         neo4j_store: Neo4jStoreV3,
         llm: Optional[Any],
-        embedder: Optional[Any],
+        section_embed_model: Optional[Any],
         voyage_service: Optional[Any] = None,
         config: Optional[LazyGraphRAGIndexingConfig] = None,
     ):
         self.neo4j_store = neo4j_store
         self.llm = llm
-        self.embedder = embedder
-        self.voyage_service = voyage_service  # VoyageEmbedService for independent entity embedding
+        self.section_embed_model = section_embed_model  # LlamaIndex wrapper for sections, communities, KVP
+        self.voyage_service = voyage_service  # VoyageEmbedService for entity + passage embedding
         self.config = config or LazyGraphRAGIndexingConfig()
 
         self._splitter = SentenceSplitter(
@@ -1429,13 +1429,10 @@ class LazyGraphRAGIndexingPipeline:
         # as its own document. The default aget_text_embedding_batch() wraps all
         # names as chunks of ONE document, causing contextual bleed that destroys
         # pairwise similarity (e.g., cos drops from 0.93→0.54 with 252 entities).
-        if entities and (self.voyage_service or self.embedder):
+        if entities and self.voyage_service:
             texts = [e.name for e in entities]
             try:
-                if self.voyage_service:
-                    embs = await self.voyage_service.aembed_independent_texts(texts)
-                else:
-                    embs = await self.embedder.aget_text_embedding_batch(texts)
+                embs = await self.voyage_service.aembed_independent_texts(texts)
                 for ent, emb in zip(entities, embs):
                     ent.embedding_v2 = emb
                 logger.info(f"openie_entity_embeddings: {len(embs)} entities embedded (independent)")
@@ -2372,13 +2369,10 @@ Return ONLY valid JSON (no markdown fences):
         entities = list(entities_by_id.values())
 
         # Embeddings for entities — name-only, independently embedded (HippoRAG 2)
-        if entities and (self.voyage_service or self.embedder):
+        if entities and self.voyage_service:
             texts = [e.name for e in entities]
             try:
-                if self.voyage_service:
-                    embs = await self.voyage_service.aembed_independent_texts(texts)
-                else:
-                    embs = await self.embedder.aget_text_embedding_batch(texts)
+                embs = await self.voyage_service.aembed_independent_texts(texts)
                 for ent, emb in zip(entities, embs):
                     ent.embedding_v2 = emb
             except Exception as e:
@@ -2488,13 +2482,10 @@ Return ONLY valid JSON (no markdown fences):
                 ))
 
         entities = list(entities_by_key.values())
-        if entities and (self.voyage_service or self.embedder):
+        if entities and self.voyage_service:
             texts = [e.name for e in entities]  # name-only, independently embedded
             try:
-                if self.voyage_service:
-                    embs = await self.voyage_service.aembed_independent_texts(texts)
-                else:
-                    embs = await self.embedder.aget_text_embedding_batch(texts)
+                embs = await self.voyage_service.aembed_independent_texts(texts)
                 for ent, emb in zip(entities, embs):
                     ent.embedding_v2 = emb
             except Exception as e:
@@ -3304,11 +3295,11 @@ Output:
 
         stats = {"communities_created": 0, "summaries_generated": 0, "embeddings_stored": 0}
 
-        # Guard: skip if LLM or embedder unavailable (both are Optional in pipeline)
-        if not self.llm or not self.embedder:
+        # Guard: skip if LLM or section_embed_model unavailable (both are Optional in pipeline)
+        if not self.llm or not self.section_embed_model:
             logger.warning(
-                "⏭️  Skipping community materialization: llm=%s, embedder=%s",
-                bool(self.llm), bool(self.embedder),
+                "⏭️  Skipping community materialization: llm=%s, section_embed_model=%s",
+                bool(self.llm), bool(self.section_embed_model),
             )
             return stats
 
@@ -3405,7 +3396,7 @@ Output:
             stats["summaries_generated"] += 1
 
         # 9d-9e) Embed summaries and store on Community nodes (batched)
-        if summaries_cache and self.embedder:
+        if summaries_cache and self.section_embed_model:
             logger.info("🔢 Step 9d: Embedding %d community summaries...", len(summaries_cache))
             community_ids_ordered = list(summaries_cache.keys())
             summary_texts = [
@@ -3413,7 +3404,7 @@ Output:
                 for cid in community_ids_ordered
             ]
             try:
-                embeddings = await self.embedder.aget_text_embedding_batch(summary_texts)
+                embeddings = await self.section_embed_model.aget_text_embedding_batch(summary_texts)
                 embed_updates = [
                     {"id": cid, "embedding": emb}
                     for cid, emb in zip(community_ids_ordered, embeddings)
@@ -3849,7 +3840,7 @@ SUMMARY: <summary>"""
         These embeddings capture what the section *contains* and are used for
         SEMANTICALLY_SIMILAR edge creation ("soft" thematic hops in PPR).
         
-        Stored in: Section.embedding (2048-dim Voyage via self.embedder)
+        Stored in: Section.embedding (2048-dim Voyage via self.section_embed_model)
         
         NOTE: This is distinct from structural_embedding (title + path only)
         which is used for Source 2 header matching. See _embed_section_structural().
@@ -3860,7 +3851,7 @@ SUMMARY: <summary>"""
         Returns:
             Stats dict with sections_embedded count
         """
-        if self.embedder is None:
+        if self.section_embed_model is None:
             logger.warning("section_embedding_skipped_no_embedder")
             return {"sections_embedded": 0, "skipped": "no_embedder"}
         
@@ -3902,7 +3893,7 @@ SUMMARY: <summary>"""
         
         # Generate embeddings
         try:
-            embeddings = await self.embedder.aget_text_embedding_batch(texts_to_embed)
+            embeddings = await self.section_embed_model.aget_text_embedding_batch(texts_to_embed)
         except Exception as e:
             logger.warning("section_embedding_failed", extra={"error": str(e)})
             return {"sections_embedded": 0, "error": str(e)}
@@ -4083,7 +4074,7 @@ SUMMARY: <summary>"""
         Returns:
             Stats dict with sections_embedded count
         """
-        if self.embedder is None:
+        if self.section_embed_model is None:
             logger.warning("section_structural_embedding_skipped_no_embedder")
             return {"sections_embedded": 0, "skipped": "no_embedder"}
         
@@ -4133,9 +4124,9 @@ SUMMARY: <summary>"""
                 combined = header_text
             texts_to_embed.append(combined[:600])  # Cap for embedding model
         
-        # Generate embeddings via Voyage (self.embedder is VoyageEmbedding in V2)
+        # Generate embeddings via Voyage (self.section_embed_model is VoyageEmbedding in V2)
         try:
-            embeddings = await self.embedder.aget_text_embedding_batch(texts_to_embed)
+            embeddings = await self.section_embed_model.aget_text_embedding_batch(texts_to_embed)
         except Exception as e:
             logger.warning("section_structural_embedding_failed", extra={"error": str(e)})
             return {"sections_embedded": 0, "error": str(e)}
@@ -4297,7 +4288,7 @@ SUMMARY: <summary>"""
         Returns:
             Stats dict with kvps_total, unique_keys, keys_embedded counts
         """
-        if self.embedder is None:
+        if self.section_embed_model is None:
             logger.warning("keyvalue_embedding_skipped_no_embedder")
             return {"kvps_total": 0, "unique_keys": 0, "keys_embedded": 0, "skipped": "no_embedder"}
         
@@ -4336,7 +4327,7 @@ SUMMARY: <summary>"""
         # Embed unique keys
         unique_keys = list(key_to_ids.keys())
         try:
-            embeddings = await self.embedder.aget_text_embedding_batch(unique_keys)
+            embeddings = await self.section_embed_model.aget_text_embedding_batch(unique_keys)
         except Exception as e:
             logger.warning("keyvalue_embedding_failed", extra={"error": str(e)})
             return {"kvps_total": len(kvps_to_embed), "unique_keys": len(unique_keys), "keys_embedded": 0, "error": str(e)}

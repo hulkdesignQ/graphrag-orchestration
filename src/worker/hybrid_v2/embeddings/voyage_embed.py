@@ -576,11 +576,17 @@ class VoyageEmbedService:
         Wraps embed_documents() in an async interface. This is required
         because the LazyGraphRAG pipeline uses async embedding calls.
         
-        For V2 contextual embeddings, treats all texts as chunks from a
-        single document, providing contextual awareness within the batch.
+        Treats all texts as chunks from a single document, providing
+        contextual awareness within the batch. Suitable for sections,
+        community summaries, and KVP keys where context is beneficial.
+        
+        WARNING: Do NOT use this for entity names — batching entity names
+        as chunks of one document causes contextual bleed that destroys
+        pairwise similarity (cos drops from 0.93→0.54). Use
+        embed_independent_texts() / aembed_independent_texts() instead.
         
         Args:
-            texts: List of text chunks to embed
+            texts: List of text chunks to embed (from the same document/context)
             show_progress: Ignored (kept for API compatibility)
             
         Returns:

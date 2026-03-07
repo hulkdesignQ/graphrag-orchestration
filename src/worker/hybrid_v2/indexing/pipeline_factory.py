@@ -65,7 +65,7 @@ def get_lazygraphrag_indexing_pipeline():
             _indexing_pipeline = LazyGraphRAGIndexingPipeline(
                 neo4j_store=store,
                 llm=llm_service.get_indexing_llm() if llm_service.llm is not None else None,
-                embedder=llm_service.embed_model,
+                section_embed_model=llm_service.embed_model,
                 config=config,
             )
 
@@ -108,11 +108,11 @@ def get_lazygraphrag_indexing_pipeline_v2():
                 embedding_dimensions=settings.VOYAGE_EMBEDDING_DIM,  # 2048
             )
 
-            # Get Voyage embedder — required, no fallback to OpenAI
-            embedder = None
+            # Get Voyage section embed model — required, no fallback to OpenAI
+            section_embed_model = None
             if is_voyage_v2_enabled():
                 voyage_service = get_voyage_embed_service()
-                embedder = voyage_service.get_llama_index_embed_model()
+                section_embed_model = voyage_service.get_llama_index_embed_model()
             else:
                 raise ValueError(
                     "Voyage V2 embeddings must be enabled for V2 pipeline. "
@@ -122,7 +122,7 @@ def get_lazygraphrag_indexing_pipeline_v2():
             _indexing_pipeline_v2 = LazyGraphRAGIndexingPipeline(
                 neo4j_store=store,
                 llm=llm_service.get_indexing_llm() if llm_service.llm is not None else None,
-                embedder=embedder,
+                section_embed_model=section_embed_model,
                 voyage_service=voyage_service if is_voyage_v2_enabled() else None,
                 config=config,
             )
