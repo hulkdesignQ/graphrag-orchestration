@@ -1108,6 +1108,7 @@ async def frontend_chat(
     body: FrontendChatRequest,
     group_id: str = Depends(get_group_id),
     user_id: str = Depends(get_user_id),
+    quota: dict = Depends(enforce_plan_limits),
 ):
     """
     Non-streaming chat endpoint for azure-search-openai-demo frontend.
@@ -1177,6 +1178,22 @@ async def frontend_chat(
                 f"Are there any related topics I should explore?",
             ]
         
+        # Fire-and-forget: write usage to Cosmos for dashboard
+        result_usage = result.get("usage", {})
+        route_used = result.get("route_used", approach)
+        task = asyncio.create_task(_write_cosmos_usage(
+            user_id=user_id,
+            route=route_used,
+            query_id=str(uuid.uuid4()),
+            tokens=result_usage.get("total_tokens", 0),
+            model=f"graphrag-{route_used.lower()}",
+            detected_language=result_usage.get("detected_language"),
+            was_translated=result_usage.get("was_translated", False),
+            translation_chars=result_usage.get("translation_chars", 0),
+        ))
+        _background_tasks.add(task)
+        task.add_done_callback(_background_tasks.discard)
+
         return FrontendChatResponse(
             message=ChatMessage(
                 role="assistant",
@@ -1301,9 +1318,19 @@ async def _frontend_stream_response(
         # Fire-and-forget Cosmos usage record (quota already tracked by enforce_plan_limits)
         try:
             route_used = result.get("route_used", approach)
+            result_usage = result.get("usage", {})
             query_id = str(uuid.uuid4())
             task = asyncio.create_task(
-                _write_cosmos_usage(user_id, route_used, query_id, 0, "stream")
+                _write_cosmos_usage(
+                    user_id=user_id,
+                    route=route_used,
+                    query_id=query_id,
+                    tokens=result_usage.get("total_tokens", 0),
+                    model=f"graphrag-{route_used.lower()}",
+                    detected_language=result_usage.get("detected_language"),
+                    was_translated=result_usage.get("was_translated", False),
+                    translation_chars=result_usage.get("translation_chars", 0),
+                )
             )
             _background_tasks.add(task)
             task.add_done_callback(_background_tasks.discard)

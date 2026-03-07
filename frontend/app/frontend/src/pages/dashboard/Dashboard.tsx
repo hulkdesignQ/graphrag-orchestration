@@ -1,4 +1,4 @@
-import { useEffect, useState, useContext } from "react";
+import { useEffect, useCallback, useState, useContext } from "react";
 import { Link } from "react-router-dom";
 import { useMsal } from "@azure/msal-react";
 import styles from "./Dashboard.module.css";
@@ -50,36 +50,46 @@ const Dashboard = () => {
         }
     };
 
+    const loadDashboard = useCallback(async () => {
+        try {
+            const token = client ? await getToken(client) : undefined;
+            const [profileData, usageData, planData] = await Promise.all([
+                fetchUserProfile(token),
+                fetchUsageStats(token),
+                fetchPlanInfo(token)
+            ]);
+            setProfile(profileData);
+            setUsage(usageData);
+            setPlans(planData);
+        } catch (e: any) {
+            const msg = e.message || "Failed to load dashboard";
+            if (msg.includes("401") || msg.toLowerCase().includes("expired") || msg.toLowerCase().includes("unauthorized")) {
+                setSessionExpired(true);
+            } else {
+                setError(msg);
+            }
+        } finally {
+            setLoading(false);
+        }
+    }, [client]);
+
     useEffect(() => {
         if (!loggedIn) {
             setLoading(false);
             return;
         }
 
-        const load = async () => {
-            try {
-                const token = client ? await getToken(client) : undefined;
-                const [profileData, usageData, planData] = await Promise.all([
-                    fetchUserProfile(token),
-                    fetchUsageStats(token),
-                    fetchPlanInfo(token)
-                ]);
-                setProfile(profileData);
-                setUsage(usageData);
-                setPlans(planData);
-            } catch (e: any) {
-                const msg = e.message || "Failed to load dashboard";
-                if (msg.includes("401") || msg.toLowerCase().includes("expired") || msg.toLowerCase().includes("unauthorized")) {
-                    setSessionExpired(true);
-                } else {
-                    setError(msg);
-                }
-            } finally {
-                setLoading(false);
+        loadDashboard();
+
+        // Re-fetch when user returns to this tab (e.g. after making queries)
+        const handleVisibility = () => {
+            if (document.visibilityState === "visible") {
+                loadDashboard();
             }
         };
-        load();
-    }, [loggedIn, client]);
+        document.addEventListener("visibilitychange", handleVisibility);
+        return () => document.removeEventListener("visibilitychange", handleVisibility);
+    }, [loggedIn, loadDashboard]);
 
     // --- Login required ---
     if (!loggedIn) {
