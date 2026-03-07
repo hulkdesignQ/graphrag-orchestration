@@ -272,7 +272,7 @@ class HippoRAG2Handler(BaseRouteHandler):
 
         # Config from env, with preset overrides
         triple_top_k = int(os.getenv("ROUTE7_TRIPLE_TOP_K", "15"))
-        dpr_top_k = int(os.getenv("ROUTE7_DPR_TOP_K", "50"))
+        dpr_top_k = int(os.getenv("ROUTE7_DPR_TOP_K", "-1"))  # -1=disabled: cross-encoder seeds outperform DPR at small scale
         dpr_sentence_top_k = int(os.getenv("ROUTE7_DPR_SENTENCE_TOP_K", "0"))
         ppr_damping = float(os.getenv("ROUTE7_DAMPING", "0.5"))
         passage_node_weight = float(os.getenv("ROUTE7_PASSAGE_NODE_WEIGHT", "0.05"))
@@ -1320,9 +1320,12 @@ class HippoRAG2Handler(BaseRouteHandler):
         Searches sentence_embeddings_v2 for sharp single-sentence matches.
         Returns sentence IDs as passage nodes for PPR.
 
-        When top_k=0 (default, upstream-aligned), queries the corpus size
+        When top_k=-1, DPR is disabled (cross-encoder seeds outperform at small scale).
+        When top_k=0 (upstream-aligned), queries the corpus size
         first so ALL passages are returned and seeded into PPR.
         """
+        if top_k < 0:
+            return []
         if not self.neo4j_driver:
             return []
 
@@ -1350,7 +1353,7 @@ class HippoRAG2Handler(BaseRouteHandler):
                 sentence_top_k = corpus_size
 
         sentence_cypher = """CYPHER 25
-        CALL (...) {
+        CALL {
             MATCH (s:Sentence)
             SEARCH s IN (VECTOR INDEX sentence_embeddings_v2 FOR $embedding WHERE s.group_id = $group_id LIMIT $sentence_top_k)
             SCORE AS score
@@ -1708,7 +1711,7 @@ class HippoRAG2Handler(BaseRouteHandler):
         group_ids = self.group_ids
 
         cypher = """CYPHER 25
-        CALL (...) {
+        CALL {
             MATCH (sent:Sentence)
             SEARCH sent IN (VECTOR INDEX sentence_embeddings_v2 FOR $embedding WHERE sent.group_id = $group_id LIMIT $top_k)
             SCORE AS score
@@ -1931,7 +1934,7 @@ class HippoRAG2Handler(BaseRouteHandler):
         threshold = float(os.getenv("ROUTE7_SEMANTIC_THRESHOLD", "0.2"))
 
         cypher = """CYPHER 25
-        CALL (...) {
+        CALL {
             MATCH (sent:Sentence)
             SEARCH sent IN (VECTOR INDEX sentence_embeddings_v2 FOR $embedding WHERE sent.group_id = $group_id LIMIT $top_k)
             SCORE AS score
