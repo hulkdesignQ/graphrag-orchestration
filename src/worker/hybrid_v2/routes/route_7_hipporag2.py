@@ -272,7 +272,7 @@ class HippoRAG2Handler(BaseRouteHandler):
 
         # Config from env, with preset overrides
         triple_top_k = int(os.getenv("ROUTE7_TRIPLE_TOP_K", "15"))
-        dpr_top_k = int(os.getenv("ROUTE7_DPR_TOP_K", "-1"))  # -1=disabled: cross-encoder seeds outperform DPR at small scale
+        dpr_top_k = int(os.getenv("ROUTE7_DPR_TOP_K", "50"))  # upstream default; set -1 to disable
         dpr_sentence_top_k = int(os.getenv("ROUTE7_DPR_SENTENCE_TOP_K", "0"))
         ppr_damping = float(os.getenv("ROUTE7_DAMPING", "0.5"))
         passage_node_weight = float(os.getenv("ROUTE7_PASSAGE_NODE_WEIGHT", "0.05"))
