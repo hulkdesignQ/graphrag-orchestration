@@ -170,7 +170,7 @@ module cosmosDb './core/database/cosmos-db.bicep' = {
   }
 }
 
-// Redis for async job queue
+// Azure Managed Redis for async job queue (Balanced B0 HA)
 module redis './core/cache/redis.bicep' = {
   name: 'redis-cache'
   scope: rg
@@ -178,8 +178,6 @@ module redis './core/cache/redis.bicep' = {
     cacheName: 'graphrag-redis-${uniqueString(rg.id)}'
     location: location
     tags: tags
-    sku: 'Basic'
-    capacity: 0
   }
 }
 
@@ -368,7 +366,7 @@ module graphragApi './core/host/container-app.bicep' = {
       }
       {
         name: 'REDIS_PORT'
-        value: string(redis.outputs.redisSslPort)
+        value: string(redis.outputs.redisPort)
       }
       {
         name: 'REDIS_PASSWORD'
@@ -575,7 +573,7 @@ var sharedEnvVars = concat([
   }
   {
     name: 'REDIS_PORT'
-    value: string(redis.outputs.redisSslPort)
+    value: string(redis.outputs.redisPort)
   }
   {
     name: 'REDIS_PASSWORD'
@@ -745,6 +743,8 @@ module graphragWorker './core/host/container-app-worker.bicep' = {
     memory: '2Gi'
     minReplicas: 1
     maxReplicas: 5
+    redisHost: redis.outputs.redisHostName
+    redisPort: redis.outputs.redisPort
     env: concat([
       {
         name: 'SERVICE_ROLE'

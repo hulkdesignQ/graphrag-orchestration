@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 def get_redis_url() -> str:
     """Build Redis URL from environment variables."""
     host = os.getenv("REDIS_HOST")
-    port = int(os.getenv("REDIS_PORT", "6380"))
+    port = int(os.getenv("REDIS_PORT", "10000"))
     password = os.getenv("REDIS_PASSWORD")
     
     if not host or not password:

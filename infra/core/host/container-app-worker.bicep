@@ -46,6 +46,12 @@ param minReplicas int = 1
 @description('Maximum replicas (default 5)')
 param maxReplicas int = 5
 
+@description('Redis host for KEDA scaler')
+param redisHost string = ''
+
+@description('Redis port for KEDA scaler')
+param redisPort int = 10000
+
 resource containerApp 'Microsoft.App/containerApps@2024-10-02-preview' = {
   name: name
   location: location
@@ -90,8 +96,10 @@ resource containerApp 'Microsoft.App/containerApps@2024-10-02-preview' = {
             custom: {
               type: 'redis'
               metadata: {
+                address: '${redisHost}:${redisPort}'
                 listName: 'graphrag_jobs'
                 listLength: '5'
+                enableTLS: 'true'
               }
               auth: [
                 {
