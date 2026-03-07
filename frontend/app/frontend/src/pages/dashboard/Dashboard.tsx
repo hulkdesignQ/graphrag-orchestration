@@ -219,8 +219,6 @@ const Dashboard = () => {
                         <thead>
                             <tr>
                                 <th>Time</th>
-                                <th>Route</th>
-                                <th>Model</th>
                                 <th>Tokens</th>
                                 <th>Credits</th>
                             </tr>
@@ -229,8 +227,6 @@ const Dashboard = () => {
                             {usage.recent_queries.slice(0, 10).map((q, i) => (
                                 <tr key={i}>
                                     <td>{q.timestamp ? new Date(q.timestamp).toLocaleString() : "—"}</td>
-                                    <td>{q.route || "—"}</td>
-                                    <td>{q.model || "—"}</td>
                                     <td>{q.total_tokens ?? "—"}</td>
                                     <td>{q.credits_used ?? "—"}</td>
                                 </tr>
