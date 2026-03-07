@@ -109,6 +109,10 @@ The honest score is 56/57. Potential approaches (not yet tested):
 | `0505455c` | docs: §53-§55 DPR fix, section-path, Q-D3 root cause |
 | `c0024cf0` | fix: restore DPR upstream default + full sweep in §53 |
 
+## Known Issue: All Sentences Have `chunk_id = NULL`
+
+Confirmed: all 202 Sentence nodes in `test-5pdfs-v2-fix2` have `chunk_id=NULL`. The `id` field (e.g., `doc_xxx_sent_33`) is used for identification. The DPR Cypher queries reference `s.id` not `s.chunk_id`. This may be relevant when investigating DPR's contribution — need to check if any DPR queries rely on `chunk_id` for joins or lookups.
+
 ## Environment Notes
 
 - API runs on port 8001 with `REQUIRE_AUTH=false ALLOW_LEGACY_GROUP_HEADER=true`
@@ -116,4 +120,4 @@ The honest score is 56/57. Potential approaches (not yet tested):
 - Benchmark: `python3 scripts/benchmark_route7_hipporag2.py --no-auth --group-id test-5pdfs-v2-fix2 --url http://localhost:8001 --repeats 3`
 - LLM eval: `python3 scripts/evaluate_route4_reasoning.py <benchmark.json>`
 - Neo4j Aura 5.27: `CALL {}` works, `CALL (...) {}` does NOT
-- Test group: `test-5pdfs-v2-fix2` (403 entities, 2555 relationships, 202 sentences)
+- Test group: `test-5pdfs-v2-fix2` (403 entities, 2555 relationships, 202 sentences, all `chunk_id=NULL`)
