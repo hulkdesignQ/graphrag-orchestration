@@ -10,16 +10,16 @@ See: https://learn.microsoft.com/en-us/azure/ai-services/translator/text-transla
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 from typing import Optional
 
 import aiohttp
+import structlog
 from azure.identity.aio import DefaultAzureCredential
 
 from src.core.config import settings
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 _TRANSLATOR_SCOPE = "https://cognitiveservices.azure.com/.default"
 _API_VERSION = "3.0"
