@@ -12558,27 +12558,30 @@ During investigation of the Q-D3 retrieval gap, we discovered that **Dense Passa
 
 **Fix:** Changed `CALL (...) {` → `CALL {` (deprecated but functional on Neo4j 5.x).
 
-### Experiment: DPR Enabled vs Disabled
+### Experiment: DPR + Cross-Encoder Sweep
 
-| Config | DPR Seeds | Semantic Seeds | Total Seeds | Score |
-|--------|-----------|----------------|-------------|-------|
-| DPR broken (baseline) | 0 | 20 | 20 | 56/57 |
-| DPR enabled (top_k=50) | ~50 | ~8 | ~58 | **53/57** |
-| DPR disabled (top_k=-1) | 0 | 20 | 20 | 56/57 |
+| Config | DPR Seeds | CE Seeds | Total Seeds | Score |
+|--------|-----------|----------|-------------|-------|
+| Pure upstream (DPR=all, no CE) | 405 | 0 | 405 | **51/57** |
+| DPR=50 + CE=20 | ~50 | ~8 | ~58 | **53/57** |
+| DPR=20 + CE=20 | 20 | ~16 | ~36 | **55/57** |
+| CE only (DPR=-1) | 0 | 20 | 20 | **56/57** |
 
 **Key findings:**
-1. DPR adds 50 loosely vector-matched passages as PPR seeds, overwhelming the 20 precise cross-encoder seeds
-2. Cross-encoder (voyage-rerank-2.5) sees query+passage bidirectionally — much more accurate than DPR's independent cosine
-3. With DPR enabled, Q-D3 dropped 2/3→1/3 and Q-D10 dropped 3/3→1/3 due to context dilution
-4. The 57/57 baseline was never using DPR — cross-encoder alone achieved it
+1. Pure upstream all-passage DPR seeding floods PPR with weak signals at small corpus scale (202 sentences)
+2. Cross-encoder (voyage-rerank-2.5) sees query+passage bidirectionally — more precise than DPR's independent cosine
+3. More DPR seeds → lower score: clear inverse relationship at this corpus size
+4. DPR=20 is the best hybrid balance — keeps DPR architecture without excessive dilution
+5. Cross-encoder seeds alone (DPR=-1) give highest score but deviates from upstream architecture
 
 ### Decision
 
-- **Default:** `ROUTE7_DPR_TOP_K=-1` (disabled)
-- **Rationale:** At small corpus scale (202 sentences), cross-encoder reranking over all passages is fast and more precise than DPR vector search
-- **Future:** DPR becomes relevant for large corpora where cross-encoder over all passages is too slow. Set `ROUTE7_DPR_TOP_K=50` (or `0` for all-passage seeding) to re-enable.
+- **Code default:** `ROUTE7_DPR_TOP_K=50` (upstream-aligned)
+- **Production override:** `ROUTE7_DPR_TOP_K=20` recommended for small corpora
+- **Disable sentinel:** Set to `-1` to disable DPR entirely (add `top_k < 0` early-return)
+- **Rationale:** Code default matches upstream HippoRAG 2; deployment config tunes for corpus scale. DPR becomes increasingly valuable as corpus grows and cross-encoder over all passages becomes too slow.
 
-### Commit: 890313e2
+### Commit: 8afaa52e
 
 ## §54 — Section-Path Cross-Encoder Enrichment Experiment (2026-03-07)
 
