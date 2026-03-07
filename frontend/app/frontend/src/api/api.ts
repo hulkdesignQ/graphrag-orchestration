@@ -135,6 +135,18 @@ export async function getSpeechApi(text: string): Promise<string | null> {
         .then(blob => (blob ? URL.createObjectURL(blob) : null));
 }
 
+export async function reportSpeechUsage(characters: number, detectedLanguage?: string): Promise<void> {
+    try {
+        await fetch("/speech/usage", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ characters, detected_language: detectedLanguage })
+        });
+    } catch {
+        // Fire-and-forget: don't block on tracking failures
+    }
+}
+
 /**
  * Build the /content/<filename> URL for a citation.
  * When documentUrl (full blob URL) is available, extract the filename from it

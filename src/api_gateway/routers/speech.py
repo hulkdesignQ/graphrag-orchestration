@@ -9,20 +9,61 @@ import asyncio
 import logging
 import os
 import time
+import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from typing import Optional
 
-from src.api_gateway.middleware.auth import get_group_id
+from src.api_gateway.middleware.auth import get_group_id, get_user_id
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["speech"])
 
+# Strong references for fire-and-forget background tasks (prevent GC)
+_background_tasks: set = set()
+
 
 class SpeechRequest(BaseModel):
     text: str
+
+
+class SpeechUsageReport(BaseModel):
+    """Client-side STT usage report."""
+    characters: int = Field(..., description="Characters recognized by STT")
+    detected_language: Optional[str] = Field(None, description="Language detected by STT")
+
+
+async def _write_speech_usage(user_id: str, usage_type: str, characters: int,
+                              detected_language: str | None = None) -> None:
+    """Fire-and-forget: write a speech usage record to Cosmos."""
+    try:
+        from src.core.services.cosmos_client import get_cosmos_client
+        from src.core.models.usage import UsageRecord
+        cosmos = get_cosmos_client()
+        if cosmos.endpoint and not cosmos._usage_container:
+            await asyncio.wait_for(cosmos.initialize(), timeout=10)
+        extra = {}
+        if usage_type == "tts":
+            extra["tts_characters"] = characters
+        else:
+            extra["stt_characters"] = characters
+        record = UsageRecord(
+            partition_id=user_id,
+            user_id=user_id,
+            usage_type="llm_completion",
+            model=f"azure-speech-{usage_type}",
+            total_tokens=0,
+            route=usage_type,
+            query_id=str(uuid.uuid4()),
+            detected_language=detected_language,
+            **extra,
+        )
+        await asyncio.wait_for(cosmos.write_usage_record(record), timeout=10)
+    except Exception as e:
+        logger.warning("speech_cosmos_usage_write_skipped: %s", repr(e))
 
 
 # Cache for speech token
@@ -81,6 +122,7 @@ async def speech(
     request: Request,
     body: SpeechRequest,
     group_id: str = Depends(get_group_id),
+    user_id: str = Depends(get_user_id),
 ):
     """Synthesize text to speech using Azure Speech Service."""
     speech_service_id = os.getenv("AZURE_SPEECH_SERVICE_ID")
@@ -114,6 +156,10 @@ async def speech(
         result = synthesizer.speak_text_async(body.text).get()
 
         if result.reason == ResultReason.SynthesizingAudioCompleted:
+            # Fire-and-forget: track TTS characters for dashboard
+            task = asyncio.create_task(_write_speech_usage(user_id, "tts", len(body.text)))
+            _background_tasks.add(task)
+            task.add_done_callback(_background_tasks.discard)
             return Response(content=result.audio_data, media_type="audio/mp3")
         elif result.reason == ResultReason.Canceled:
             details = result.cancellation_details
@@ -126,3 +172,20 @@ async def speech(
     except Exception as e:
         logger.exception("Exception in /speech")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.post("/speech/usage")
+async def report_speech_usage(
+    body: SpeechUsageReport,
+    user_id: str = Depends(get_user_id),
+):
+    """Report client-side STT usage for dashboard tracking.
+
+    Called by the frontend after speech recognition completes.
+    """
+    task = asyncio.create_task(
+        _write_speech_usage(user_id, "stt", body.characters, body.detected_language)
+    )
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    return {"status": "ok"}

@@ -15,7 +15,7 @@ import { Mic28Filled } from "@fluentui/react-icons";
 import { useTranslation } from "react-i18next";
 
 import styles from "./QuestionInput.module.css";
-import { getSpeechTokenApi, SpeechTokenResponse } from "../../api/api";
+import { getSpeechTokenApi, SpeechTokenResponse, reportSpeechUsage } from "../../api/api";
 import { SpeechInput } from "./SpeechInput";
 
 interface Props {
@@ -123,14 +123,19 @@ export const SpeechTranslationInput = ({ updateQuestion, onSpeechResult }: Props
                     // Extract detected language from the result
                     const autoDetectResult = sdk.AutoDetectSourceLanguageResult.fromResult(event.result);
                     const lang = autoDetectResult?.language;
-                    if (lang && lang !== "Unknown") {
-                        const langCode = lang.split("-")[0];
+                    const langCode = lang && lang !== "Unknown" ? lang.split("-")[0] : undefined;
+                    if (langCode) {
                         setDetectedLang(langCode);
-                        // Report speech metadata for dashboard stats
                         onSpeechResult?.({
                             detectedLanguage: langCode,
                             wasTranslated: langCode !== targetLang,
                         });
+                    }
+
+                    // Report STT usage for dashboard tracking
+                    const recognizedText = event.result.text || translated || "";
+                    if (recognizedText.length > 0) {
+                        reportSpeechUsage(recognizedText.length, langCode);
                     }
                 } else if (reason === sdk.ResultReason.NoMatch) {
                     console.warn("Speech not recognized");

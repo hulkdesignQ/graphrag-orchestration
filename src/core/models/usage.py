@@ -59,6 +59,13 @@ class UsageRecord(BaseModel):
     speech_detected_language: Optional[str] = Field(None, description="Language detected by Azure Speech SDK (e.g., 'ja')")
     was_speech_input: Optional[bool] = Field(None, description="Whether query originated from voice input with translation")
 
+    # Aggregated usage fields (per-query totals from TokenAccumulator)
+    rerank_tokens: Optional[int] = Field(None, description="Total reranker tokens in this query")
+    embed_tokens: Optional[int] = Field(None, description="Total embedding tokens in this query")
+    credits_used: Optional[int] = Field(None, description="Computed credits across all API calls")
+    tts_characters: Optional[int] = Field(None, description="Characters synthesized via TTS")
+    stt_characters: Optional[int] = Field(None, description="Characters recognized via STT")
+
     # Common fields
     route: Optional[str] = Field(None, description="Route used (route_2, route_3, route_4)")
     query_id: Optional[str] = Field(None, description="Associated query ID")

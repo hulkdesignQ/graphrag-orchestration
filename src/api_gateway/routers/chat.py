@@ -43,7 +43,10 @@ ASYNC_ROUTES = {"global", "drift"}
 async def _write_cosmos_usage(user_id: str, route: str, query_id: str, tokens: int, model: str,
                              detected_language: str | None = None, was_translated: bool = False,
                              translation_chars: int = 0,
-                             speech_detected_language: str | None = None) -> None:
+                             speech_detected_language: str | None = None,
+                             credits_used: int = 0,
+                             rerank_tokens: int = 0,
+                             embed_tokens: int = 0) -> None:
     """Fire-and-forget: write a UsageRecord to Cosmos for dashboard recent_queries."""
     try:
         from src.core.services.cosmos_client import get_cosmos_client
@@ -64,6 +67,9 @@ async def _write_cosmos_usage(user_id: str, route: str, query_id: str, tokens: i
             characters_translated=translation_chars if was_translated else None,
             speech_detected_language=speech_detected_language,
             was_speech_input=bool(speech_detected_language),
+            credits_used=credits_used,
+            rerank_tokens=rerank_tokens if rerank_tokens else None,
+            embed_tokens=embed_tokens if embed_tokens else None,
         )
         await asyncio.wait_for(cosmos.write_usage_record(record), timeout=10)
     except Exception as e:
@@ -607,6 +613,9 @@ async def chat_completions(
             detected_language=result_usage.get("detected_language"),
             was_translated=result_usage.get("was_translated", False),
             translation_chars=result_usage.get("translation_chars", 0),
+            credits_used=result_usage.get("credits_used", 0),
+            rerank_tokens=result_usage.get("rerank_tokens", 0),
+            embed_tokens=result_usage.get("embed_tokens", 0),
         ))
         _background_tasks.add(task)
         task.add_done_callback(_background_tasks.discard)
@@ -720,6 +729,9 @@ async def _execute_async_job(
             detected_language=result_usage.get("detected_language") if result_usage else None,
             was_translated=result_usage.get("was_translated", False) if result_usage else False,
             translation_chars=result_usage.get("translation_chars", 0) if result_usage else 0,
+            credits_used=result_usage.get("credits_used", 0) if result_usage else 0,
+            rerank_tokens=result_usage.get("rerank_tokens", 0) if result_usage else 0,
+            embed_tokens=result_usage.get("embed_tokens", 0) if result_usage else 0,
         ))
         _background_tasks.add(cosmos_task)
         cosmos_task.add_done_callback(_background_tasks.discard)
@@ -820,6 +832,9 @@ async def _stream_chat_response(
                 detected_language=result_usage.get("detected_language"),
                 was_translated=result_usage.get("was_translated", False),
                 translation_chars=result_usage.get("translation_chars", 0),
+                credits_used=result_usage.get("credits_used", 0),
+                rerank_tokens=result_usage.get("rerank_tokens", 0),
+                embed_tokens=result_usage.get("embed_tokens", 0),
             ))
             _background_tasks.add(task)
             task.add_done_callback(_background_tasks.discard)
@@ -1195,6 +1210,9 @@ async def frontend_chat(
             was_translated=result_usage.get("was_translated", False),
             translation_chars=result_usage.get("translation_chars", 0),
             speech_detected_language=overrides.speech_detected_language if overrides else None,
+            credits_used=result_usage.get("credits_used", 0),
+            rerank_tokens=result_usage.get("rerank_tokens", 0),
+            embed_tokens=result_usage.get("embed_tokens", 0),
         ))
         _background_tasks.add(task)
         task.add_done_callback(_background_tasks.discard)
@@ -1336,6 +1354,9 @@ async def _frontend_stream_response(
                     was_translated=result_usage.get("was_translated", False),
                     translation_chars=result_usage.get("translation_chars", 0),
                     speech_detected_language=overrides.speech_detected_language if overrides else None,
+                    credits_used=result_usage.get("credits_used", 0),
+                    rerank_tokens=result_usage.get("rerank_tokens", 0),
+                    embed_tokens=result_usage.get("embed_tokens", 0),
                 )
             )
             _background_tasks.add(task)

@@ -295,7 +295,7 @@ async def _fetch_user_usage(
                     "model": r.get("model", ""),
                     "route": r.get("route", ""),
                     "total_tokens": r.get("total_tokens", 0),
-                    "credits_used": r.get("total_tokens", 0),
+                    "credits_used": r.get("credits_used") or r.get("total_tokens", 0),
                     "detected_language": r.get("detected_language"),
                     "was_translated": r.get("was_translated", False),
                     "speech_detected_language": r.get("speech_detected_language"),
