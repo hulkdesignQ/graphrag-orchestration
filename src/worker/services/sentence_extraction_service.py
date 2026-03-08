@@ -1143,7 +1143,18 @@ def extract_sentences_from_di_units(
                 for row in table.get("rows", []):
                     if not isinstance(row, dict):
                         continue
-                    parts = [f"{h}: {row[h].strip()}" for h in headers if row.get(h, "").strip()]
+                    # Build row text matching _extract_table_row_sentences() format:
+                    # empty headers → bare value (no ": " prefix).
+                    # Iterate row dict items (preserves insertion order) to
+                    # handle __colN disambiguated duplicate headers correctly.
+                    parts = []
+                    for key, val in row.items():
+                        val = val.strip()
+                        if not val:
+                            continue
+                        # Strip __colN disambiguation suffix for display
+                        display_h = re.sub(r'__col\d+$', '', key)
+                        parts.append(f"{display_h}: {val}" if display_h else val)
                     if not parts:
                         continue
                     row_text = " | ".join(parts)

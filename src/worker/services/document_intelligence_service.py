@@ -441,15 +441,25 @@ class DocumentIntelligenceService:
             if cell.row_index == 0 and cell.column_index is not None:
                 headers[cell.column_index] = (cell.content or "").strip()
 
-        # Extract data rows
+        # Extract data rows — use (col_idx, header) pairs to preserve
+        # per-cell identity and avoid dict-key collision when two columns
+        # share the same header text.
         rows = []
         for row_idx in range(1, table.row_count or 0):
+            row_cells_sorted = sorted(
+                [c for c in table.cells if c.row_index == row_idx and c.column_index is not None],
+                key=lambda c: c.column_index,
+            )
             row_data = {}
-            for cell in table.cells:
-                if cell.row_index == row_idx and cell.column_index is not None:
-                    col_idx = cell.column_index
-                    if col_idx < len(headers):
-                        row_data[headers[col_idx]] = (cell.content or "").strip()
+            for cell in row_cells_sorted:
+                col_idx = cell.column_index
+                if col_idx < len(headers):
+                    key = headers[col_idx]
+                    content = (cell.content or "").strip()
+                    # Disambiguate duplicate headers by appending column index
+                    if key in row_data:
+                        key = f"{key}__col{col_idx}"
+                    row_data[key] = content
             
             if row_data:
                 rows.append(row_data)
@@ -1945,6 +1955,10 @@ class DocumentIntelligenceService:
                         ]
                         if chunk_sentences:
                             chunk_geometry["sentences"] = chunk_sentences
+                    # Propagate page_dimensions to all chunks so the frontend
+                    # can auto-normalise pre-fix raw-inch polygons.
+                    if geometry_metadata and geometry_metadata.get("page_dimensions"):
+                        chunk_geometry["page_dimensions"] = geometry_metadata["page_dimensions"]
                     # Store offset range for fallback geometry reconstruction
                     chunk_geometry["offset_range"] = [start_offset, end_offset]
 
@@ -2409,10 +2423,16 @@ class DocumentIntelligenceService:
                     # Build geometry metadata for this page
                     # Note: Store only page_dimensions and sentences, NOT word_geometries
                     page_geometry: Dict[str, Any] = {}
-                    if page_num == 1 and geometry_metadata:
-                        # First page gets page dimensions and all sentences
+                    if geometry_metadata:
                         page_geometry["page_dimensions"] = geometry_metadata.get("page_dimensions", [])
-                        page_geometry["sentences"] = geometry_metadata.get("sentences", [])
+                        # Filter geometry sentences to this page so each DI unit
+                        # carries only its own polygons (tables on page 2+ now work).
+                        page_sents = [
+                            s for s in geometry_metadata.get("sentences", [])
+                            if s.get("page") == page_num
+                        ]
+                        if page_sents:
+                            page_geometry["sentences"] = page_sents
 
                     # Create Document with structured table metadata for schema-aware extraction
                     # The 'tables' metadata enables direct field mapping without LLM parsing
