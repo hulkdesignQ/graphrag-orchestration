@@ -10,6 +10,49 @@
     background: #f5f5f5;
 }
 
+/* Main area: sidebar + content */
+.mainArea {
+    display: flex;
+    gap: 16px;
+    flex: 1 1 auto;
+    min-height: 0;
+}
+.contentArea {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    min-width: 0;
+}
+
+/* Breadcrumb */
+.breadcrumb {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: #777;
+    flex-shrink: 0;
+}
+.breadcrumbLink {
+    color: #0d8ab5;
+    cursor: pointer;
+    border: none;
+    background: none;
+    padding: 0;
+    font-size: 13px;
+}
+.breadcrumbLink:hover {
+    text-decoration: underline;
+}
+.breadcrumbSep {
+    color: #bbb;
+}
+.breadcrumbCurrent {
+    color: #333;
+    font-weight: 600;
+}
+
 /* ── Tab Bar ──────────────────────────────────────── */
 .tabBar {
     display: flex;
@@ -415,6 +458,9 @@
     .container {
         padding: 16px;
         gap: 12px;
+    }
+    .mainArea {
+        flex-direction: column;
     }
     .uploadZone {
         padding: 24px 16px;

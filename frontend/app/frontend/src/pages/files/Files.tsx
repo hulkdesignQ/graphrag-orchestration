@@ -2,10 +2,12 @@
  * Files Page
  *
  * Modern file management UI with:
+ * - Folder sidebar with create/rename/delete
  * - Drag-and-drop upload zone
  * - File list with selection, sorting, context actions
  * - Bulk operations toolbar
  * - Rename dialog
+ * - Shared Library tab (graceful when unconfigured)
  * - Responsive design
  */
 
@@ -23,10 +25,18 @@ import {
     getFileIcon,
     ACCEPTED_FILE_TYPES,
 } from "../../api/files";
+import {
+    listFoldersApi,
+    createFolderApi,
+    renameFolderApi,
+    deleteFolderApi,
+    Folder,
+} from "../../api/folders";
 import { UploadZone } from "../../components/FileManager/UploadZone";
 import { FileList } from "../../components/FileManager/FileList";
 import { FileToolbar } from "../../components/FileManager/FileToolbar";
 import { RenameDialog } from "../../components/FileManager/RenameDialog";
+import { FolderSidebar } from "../../components/FileManager/FolderSidebar";
 import { Toast } from "../../components/FileManager/Toast";
 import styles from "./Files.module.css";
 
@@ -45,6 +55,9 @@ const Files = () => {
     const [activeTab, setActiveTab] = useState<"my" | "shared">("my");
     const [files, setFiles] = useState<string[]>([]);
     const [globalFiles, setGlobalFiles] = useState<string[]>([]);
+    const [sharedAvailable, setSharedAvailable] = useState(true);
+    const [folders, setFolders] = useState<Folder[]>([]);
+    const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
     const [selected, setSelected] = useState<Set<string>>(new Set());
     const [sortBy, setSortBy] = useState<"name" | "ext">("name");
@@ -90,16 +103,35 @@ const Files = () => {
             setLoading(true);
             const result = await listGlobalFilesApi();
             setGlobalFiles(result);
+            setSharedAvailable(true);
         } catch (err: any) {
-            addToast("error", `Failed to load shared files: ${err.message}`);
+            setGlobalFiles([]);
+            setSharedAvailable(false);
         } finally {
             setLoading(false);
         }
-    }, [addToast]);
+    }, []);
+
+    // Load folders
+    const loadFolders = useCallback(async () => {
+        try {
+            const token = client ? await getToken(client) : undefined;
+            if (useLogin && !token) {
+                setFolders([]);
+                return;
+            }
+            const result = await listFoldersApi(token as string);
+            setFolders(result);
+        } catch (err: any) {
+            // Folders API may not be available — degrade silently
+            setFolders([]);
+        }
+    }, [client]);
 
     useEffect(() => {
         loadFiles();
-    }, [loadFiles]);
+        loadFolders();
+    }, [loadFiles, loadFolders]);
 
     useEffect(() => {
         if (activeTab === "shared") {
@@ -177,6 +209,54 @@ const Files = () => {
         [client, addToast, loadFiles]
     );
 
+    // Folder handlers
+    const handleCreateFolder = useCallback(
+        async (name: string, parentId: string | null) => {
+            try {
+                const token = client ? await getToken(client) : undefined;
+                if (useLogin && !token) throw new Error("Not authenticated");
+                await createFolderApi({ name, parent_folder_id: parentId }, token as string);
+                addToast("success", `Folder "${name}" created`);
+                await loadFolders();
+            } catch (err: any) {
+                addToast("error", `Create folder failed: ${err.message}`);
+            }
+        },
+        [client, addToast, loadFolders]
+    );
+
+    const handleRenameFolder = useCallback(
+        async (folderId: string, newName: string) => {
+            try {
+                const token = client ? await getToken(client) : undefined;
+                if (useLogin && !token) throw new Error("Not authenticated");
+                await renameFolderApi(folderId, newName, token as string);
+                addToast("success", `Folder renamed to "${newName}"`);
+                await loadFolders();
+            } catch (err: any) {
+                addToast("error", `Rename folder failed: ${err.message}`);
+            }
+        },
+        [client, addToast, loadFolders]
+    );
+
+    const handleDeleteFolder = useCallback(
+        async (folderId: string) => {
+            if (!window.confirm("Delete this folder? Files inside will be moved to All Files.")) return;
+            try {
+                const token = client ? await getToken(client) : undefined;
+                if (useLogin && !token) throw new Error("Not authenticated");
+                await deleteFolderApi(folderId, token as string, true);
+                addToast("success", "Folder deleted");
+                if (activeFolderId === folderId) setActiveFolderId(null);
+                await loadFolders();
+            } catch (err: any) {
+                addToast("error", `Delete folder failed: ${err.message}`);
+            }
+        },
+        [client, addToast, loadFolders, activeFolderId]
+    );
+
     // Selection helpers
     const toggleSelect = useCallback((filename: string) => {
         setSelected(prev => {
@@ -209,6 +289,10 @@ const Files = () => {
             return sortAsc ? cmp : -cmp;
         });
 
+    // Breadcrumb
+    const activeFolder = folders.find(f => f.id === activeFolderId);
+    const parentFolder = activeFolder?.parent_folder_id ? folders.find(f => f.id === activeFolder.parent_folder_id) : null;
+
     // Not logged in guard — only block when login is required and user hasn't signed in
     if (requireLogin && !loggedIn) {
         return (
@@ -234,12 +318,14 @@ const Files = () => {
                 >
                     My Files
                 </button>
-                <button
-                    className={`${styles.tab} ${activeTab === "shared" ? styles.tabActive : ""}`}
-                    onClick={() => setActiveTab("shared")}
-                >
-                    Shared Library
-                </button>
+                {sharedAvailable && (
+                    <button
+                        className={`${styles.tab} ${activeTab === "shared" ? styles.tabActive : ""}`}
+                        onClick={() => setActiveTab("shared")}
+                    >
+                        Shared Library
+                    </button>
+                )}
             </div>
 
             {/* Upload zone (drag & drop) — only for My Files */}
@@ -252,33 +338,71 @@ const Files = () => {
                 />
             )}
 
-            {/* Toolbar: search, sort, bulk actions */}
-            <FileToolbar
-                fileCount={filteredFiles.length}
-                selectedCount={isShared ? 0 : selected.size}
-                searchQuery={searchQuery}
-                onSearchChange={setSearchQuery}
-                sortBy={sortBy}
-                sortAsc={sortAsc}
-                onSortChange={(by) => {
-                    if (by === sortBy) setSortAsc(!sortAsc);
-                    else { setSortBy(by); setSortAsc(true); }
-                }}
-                onSelectAll={isShared ? () => {} : selectAll}
-                onSelectNone={isShared ? () => {} : selectNone}
-                onDeleteSelected={isShared ? () => {} : () => handleDelete(Array.from(selected))}
-                onRefresh={isShared ? loadGlobalFiles : loadFiles}
-            />
+            <div className={styles.mainArea}>
+                {/* Folder sidebar — only for My Files */}
+                {!isShared && (
+                    <FolderSidebar
+                        folders={folders}
+                        activeFolderId={activeFolderId}
+                        onSelectFolder={setActiveFolderId}
+                        onCreateFolder={handleCreateFolder}
+                        onRenameFolder={handleRenameFolder}
+                        onDeleteFolder={handleDeleteFolder}
+                    />
+                )}
 
-            {/* File list */}
-            <FileList
-                files={filteredFiles}
-                selected={isShared ? new Set<string>() : selected}
-                loading={loading}
-                onToggleSelect={isShared ? () => {} : toggleSelect}
-                onDelete={isShared ? () => {} : (f) => handleDelete([f])}
-                onRename={isShared ? () => {} : (f) => setRenameFile(f)}
-            />
+                <div className={styles.contentArea}>
+                    {/* Breadcrumb */}
+                    {!isShared && activeFolderId && (
+                        <div className={styles.breadcrumb}>
+                            <button className={styles.breadcrumbLink} onClick={() => setActiveFolderId(null)}>
+                                All Files
+                            </button>
+                            <span className={styles.breadcrumbSep}>›</span>
+                            {parentFolder && (
+                                <>
+                                    <button
+                                        className={styles.breadcrumbLink}
+                                        onClick={() => setActiveFolderId(parentFolder.id)}
+                                    >
+                                        {parentFolder.name}
+                                    </button>
+                                    <span className={styles.breadcrumbSep}>›</span>
+                                </>
+                            )}
+                            <span className={styles.breadcrumbCurrent}>{activeFolder?.name}</span>
+                        </div>
+                    )}
+
+                    {/* Toolbar: search, sort, bulk actions */}
+                    <FileToolbar
+                        fileCount={filteredFiles.length}
+                        selectedCount={isShared ? 0 : selected.size}
+                        searchQuery={searchQuery}
+                        onSearchChange={setSearchQuery}
+                        sortBy={sortBy}
+                        sortAsc={sortAsc}
+                        onSortChange={(by) => {
+                            if (by === sortBy) setSortAsc(!sortAsc);
+                            else { setSortBy(by); setSortAsc(true); }
+                        }}
+                        onSelectAll={isShared ? () => {} : selectAll}
+                        onSelectNone={isShared ? () => {} : selectNone}
+                        onDeleteSelected={isShared ? () => {} : () => handleDelete(Array.from(selected))}
+                        onRefresh={isShared ? loadGlobalFiles : () => { loadFiles(); loadFolders(); }}
+                    />
+
+                    {/* File list */}
+                    <FileList
+                        files={filteredFiles}
+                        selected={isShared ? new Set<string>() : selected}
+                        loading={loading}
+                        onToggleSelect={isShared ? () => {} : toggleSelect}
+                        onDelete={isShared ? () => {} : (f) => handleDelete([f])}
+                        onRename={isShared ? () => {} : (f) => setRenameFile(f)}
+                    />
+                </div>
+            </div>
 
             {/* Rename dialog — only for My Files */}
             {!isShared && renameFile && (

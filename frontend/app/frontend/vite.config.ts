@@ -40,9 +40,11 @@ export default defineConfig({
             "/delete_uploaded": "http://localhost:8000",
             "/delete_uploaded_bulk": "http://localhost:8000",
             "/list_uploaded": "http://localhost:8000",
+            "/list_global": "http://localhost:8000",
             "/rename_uploaded": "http://localhost:8000",
             "/move_uploaded": "http://localhost:8000",
             "/copy_uploaded": "http://localhost:8000",
+            "/folders": "http://localhost:8000",
             "/chat_history": "http://localhost:8000",
             "/file_metadata": "http://localhost:8000"
         }

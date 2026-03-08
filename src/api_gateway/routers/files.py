@@ -288,8 +288,13 @@ async def list_global(request: Request):
     except TimeoutError:
         raise HTTPException(status_code=504, detail="Global file listing timed out")
     except Exception as e:
+        # Gracefully handle missing container (e.g. B2C deployments without shared library)
+        error_name = type(e).__name__
+        if "ResourceNotFound" in error_name or "ContainerNotFound" in str(e):
+            logger.info("Global blob container '%s' not found — shared library disabled", global_blob_manager.container)
+            return []
         logger.exception("Failed to list global files: %s", e)
-        raise HTTPException(status_code=502, detail=f"Storage error: {type(e).__name__}: {e}")
+        raise HTTPException(status_code=502, detail=f"Storage error: {error_name}: {e}")
 
 
 @router.post("/rename_uploaded")
