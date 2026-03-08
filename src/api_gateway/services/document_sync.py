@@ -137,12 +137,12 @@ class DocumentSyncService:
             await asyncio.wait_for(cosmos.write_usage_record(record), timeout=10)
             logger.info(
                 "doc_sync_cosmos_usage_written",
-                extra={"user_id": user_id, "filename": filename},
+                extra={"user_id": user_id, "file_name": filename},
             )
         except Exception as e:
             logger.warning(
                 "doc_sync_cosmos_usage_failed",
-                extra={"user_id": user_id, "filename": filename, "error": str(e)},
+                extra={"user_id": user_id, "file_name": filename, "error": str(e)},
             )
 
     async def on_file_uploaded(
@@ -174,7 +174,7 @@ class DocumentSyncService:
                 "doc_sync_upload_indexed",
                 extra={
                     "group_id": group_id,
-                    "filename": filename,
+                    "file_name": filename,
                     "stats": stats,
                 },
             )
@@ -191,7 +191,7 @@ class DocumentSyncService:
                 "doc_sync_upload_failed",
                 extra={
                     "group_id": group_id,
-                    "filename": filename,
+                    "file_name": filename,
                     "error": str(e),
                 },
             )
@@ -210,7 +210,7 @@ class DocumentSyncService:
                 "doc_sync_delete_complete",
                 extra={
                     "group_id": group_id,
-                    "filename": filename,
+                    "file_name": filename,
                     "success": result.success,
                     "chunks_deleted": result.chunks_deleted,
                 },
@@ -220,7 +220,7 @@ class DocumentSyncService:
                 "doc_sync_delete_failed",
                 extra={
                     "group_id": group_id,
-                    "filename": filename,
+                    "file_name": filename,
                     "error": str(e),
                 },
             )
@@ -297,7 +297,7 @@ class DocumentSyncService:
                 "doc_sync_move_complete",
                 extra={
                     "group_id": group_id,
-                    "filename": filename,
+                    "file_name": filename,
                     "new_source": new_blob_url,
                 },
             )
@@ -306,7 +306,7 @@ class DocumentSyncService:
                 "doc_sync_move_failed",
                 extra={
                     "group_id": group_id,
-                    "filename": filename,
+                    "file_name": filename,
                     "error": str(e),
                 },
             )
