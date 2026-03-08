@@ -72,7 +72,7 @@ export const UploadZone = ({ onUpload, uploading, progress, acceptedTypes, uploa
                 <>
                     <p className={styles.uploadText}>
                         {uploadTotal && uploadTotal > 1
-                            ? t("files.uploadingProgress", { current: (uploadedCount ?? 0) + 1, total: uploadTotal })
+                            ? t("files.uploadingProgress", { current: Math.min((uploadedCount ?? 0) + 1, uploadTotal), total: uploadTotal })
                             : t("files.uploading")}
                     </p>
                     <div className={styles.progressBarOuter}>
