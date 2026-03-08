@@ -1,6 +1,6 @@
 """Triple Embedding Store + Recognition Memory Filter for HippoRAG 2.
 
-Implements two key HippoRAG 2 innovations:
+Implements key HippoRAG 2 innovations:
 
 1. **Query-to-triple linking**: At index time, all KG triples (subject, predicate,
    object) are loaded from Neo4j and embedded as concatenated strings. At query time,
@@ -8,9 +8,13 @@ Implements two key HippoRAG 2 innovations:
    find the top-K most relevant triples. This replaces HippoRAG 1's NER-to-node
    linking.
 
-2. **Recognition memory filter**: An LLM filters the top-K retrieved triples,
-   keeping only those judged relevant to the query. This is inspired by human
-   recognition memory — "identifying information with the help of external stimuli."
+2. **MMR diversity filter** (default): Selects a diverse subset of reranked triples
+   using Maximal Marginal Relevance — balancing relevance scores against inter-triple
+   similarity to eliminate redundant facts (e.g., five variants of "warrants 90 days").
+
+3. **Recognition memory filter** (legacy): An LLM filters the top-K retrieved triples,
+   keeping only those judged relevant to the query. Inspired by human recognition
+   memory. Selectable via ROUTE7_RECOGNITION_MEMORY_MODE=llm.
 
 Reference: HippoRAG 2 (ICML '25) — https://arxiv.org/abs/2502.14802
 """
@@ -220,6 +224,104 @@ class TripleEmbeddingStore:
             (self._triples[i], float(scores[i]))
             for i in top_indices
         ]
+
+
+def mmr_diversity_filter(
+    candidate_triples: List[Tuple[Triple, float]],
+    max_facts: int | None = None,
+    lambda_param: float | None = None,
+) -> List[Tuple[Triple, float]]:
+    """Maximal Marginal Relevance filter — replaces LLM recognition memory.
+
+    Selects a diverse subset of triples that balances relevance (reranker score)
+    against redundancy (cosine similarity to already-selected triples).
+
+    At each step, picks the triple maximizing:
+        score(t) = λ × relevance(t) − (1−λ) × max_sim(t, selected)
+
+    This naturally deduplicates near-identical triples (e.g., five variants of
+    "warrants labor for 90 days") while keeping the most relevant diverse facts.
+
+    Args:
+        candidate_triples: List of (Triple, score) from reranker, sorted desc.
+        max_facts: Maximum triples to select. Defaults to ROUTE7_RECOGNITION_MEMORY_MAX_FACTS.
+        lambda_param: Relevance vs diversity tradeoff (0–1). Higher = more relevance.
+                      Defaults to ROUTE7_MMR_LAMBDA (0.7).
+
+    Returns:
+        List of (Triple, score) tuples, length ≤ max_facts.
+    """
+    if not candidate_triples:
+        return []
+
+    if max_facts is None:
+        max_facts = int(os.getenv("ROUTE7_RECOGNITION_MEMORY_MAX_FACTS", "7"))
+    if lambda_param is None:
+        lambda_param = float(os.getenv("ROUTE7_MMR_LAMBDA", "0.7"))
+
+    # Build embedding matrix from candidate triples
+    embeddings = []
+    for triple, _ in candidate_triples:
+        if triple.embedding is not None:
+            embeddings.append(triple.embedding)
+        else:
+            # Fallback: zero vector (triple will be scored purely on relevance)
+            embeddings.append([0.0] * 2048)
+
+    emb_matrix = np.array(embeddings, dtype=np.float32)
+    norms = np.linalg.norm(emb_matrix, axis=1, keepdims=True)
+    norms = np.where(norms == 0, 1.0, norms)
+    emb_matrix = emb_matrix / norms
+
+    # Normalize relevance scores to [0, 1]
+    scores = np.array([s for _, s in candidate_triples], dtype=np.float32)
+    s_min, s_max = scores.min(), scores.max()
+    if s_max > s_min:
+        norm_scores = (scores - s_min) / (s_max - s_min)
+    else:
+        norm_scores = np.ones_like(scores)
+
+    # Greedy MMR selection
+    n = len(candidate_triples)
+    selected_indices: List[int] = []
+    remaining = set(range(n))
+
+    for _ in range(min(max_facts, n)):
+        best_idx = -1
+        best_mmr = -float("inf")
+
+        for idx in remaining:
+            relevance = norm_scores[idx]
+
+            if selected_indices:
+                # Max cosine similarity to any already-selected triple
+                sims = emb_matrix[idx] @ emb_matrix[selected_indices].T
+                max_sim = float(np.max(sims))
+            else:
+                max_sim = 0.0
+
+            mmr = lambda_param * relevance - (1 - lambda_param) * max_sim
+            if mmr > best_mmr:
+                best_mmr = mmr
+                best_idx = idx
+
+        if best_idx < 0:
+            break
+
+        selected_indices.append(best_idx)
+        remaining.discard(best_idx)
+
+    result = [candidate_triples[i] for i in selected_indices]
+
+    logger.info(
+        "mmr_diversity_filter",
+        candidates=len(candidate_triples),
+        selected=len(result),
+        max_facts=max_facts,
+        lambda_param=lambda_param,
+        top_triple=result[0][0].triple_text[:60] if result else "",
+    )
+    return result
 
 
 async def recognition_memory_filter(

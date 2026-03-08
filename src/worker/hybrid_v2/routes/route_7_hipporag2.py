@@ -321,7 +321,7 @@ class HippoRAG2Handler(BaseRouteHandler):
         triple_rerank_enabled = os.getenv(
             "ROUTE7_TRIPLE_RERANK", "1"
         ).strip().lower() in {"1", "true", "yes"}
-        triple_candidates_k = int(os.getenv("ROUTE7_TRIPLE_CANDIDATES_K", "50"))
+        triple_candidates_k = int(os.getenv("ROUTE7_TRIPLE_CANDIDATES_K", "500"))
 
         # PPR coverage fixes (ref: standard PageRank literature)
         ppr_dangling = os.getenv(
@@ -1199,20 +1199,68 @@ class HippoRAG2Handler(BaseRouteHandler):
         query_embedding: List[float],
         top_k: int = 5,
     ) -> List[Tuple]:
-        """Embed query, match against triple embeddings, LLM-filter survivors.
+        """Three-stage triple funnel: instructed cosine → reranker → MMR.
 
-        Returns list of (Triple, score) tuples with cosine similarity scores.
+        Returns list of (Triple, score) tuples with relevance scores.
+
+        Pipeline:
+          Stage 1: Instructed voyage-context-3 cosine search (N → 500 candidates)
+          Stage 2: Voyage rerank-2.5 cross-encoder (500 → 15 precision-ranked)
+          Stage 3: MMR diversity filter (15 → ≤7 deduplicated facts)
+
+        When ROUTE7_TRIPLE_SEARCH_INSTRUCTION is set (default: enabled), the
+        cosine search uses an instruction-prefixed query embedding via
+        voyage-context-3.  This steers the embedding toward temporal/numeric
+        semantics, dramatically improving recall for enumeration queries like
+        "list all day-based timeframes" where bare cosine matches literal
+        words (e.g. "windows" in "time windows") instead of the intent.
         """
-        from ..retrievers.triple_store import recognition_memory_filter
+        from ..retrievers.triple_store import mmr_diversity_filter, recognition_memory_filter
+
+        # --- Instructed embedding for triple cosine search ----------------
+        triple_instruction = os.getenv(
+            "ROUTE7_TRIPLE_SEARCH_INSTRUCTION",
+            "Identify every fact mentioning a numeric time period, duration, "
+            "fee, obligation, condition, or named entity relevant to this query. "
+            "Query: ",
+        ).strip()
+
+        if triple_instruction:
+            import voyageai
+            from src.core.config import settings
+
+            instructed_text = f"{triple_instruction}{query}"
+            try:
+                vc = voyageai.Client(api_key=settings.VOYAGE_API_KEY)
+                loop = asyncio.get_running_loop()
+                result = await loop.run_in_executor(
+                    None,
+                    lambda: vc.contextualized_embed(
+                        inputs=[[instructed_text]],
+                        model=settings.VOYAGE_MODEL_NAME,
+                        input_type="query",
+                        output_dimension=settings.VOYAGE_EMBEDDING_DIM,
+                    ),
+                )
+                search_embedding = result.results[0].embeddings[0]
+                logger.debug(
+                    "route7_triple_instructed_embedding",
+                    instruction_len=len(triple_instruction),
+                )
+            except Exception as e:
+                logger.warning("route7_triple_instructed_embed_failed", error=str(e))
+                search_embedding = query_embedding
+        else:
+            search_embedding = query_embedding
 
         # Stage 1: Widen cosine search when triple reranking is enabled
         triple_rerank = os.getenv(
             "ROUTE7_TRIPLE_RERANK", "1"
         ).strip().lower() in {"1", "true", "yes"}
-        candidates_k = int(os.getenv("ROUTE7_TRIPLE_CANDIDATES_K", "50"))
+        candidates_k = int(os.getenv("ROUTE7_TRIPLE_CANDIDATES_K", "500"))
         fetch_k = candidates_k if triple_rerank else top_k
 
-        candidates = self._triple_store.search(query_embedding, top_k=fetch_k)
+        candidates = self._triple_store.search(search_embedding, top_k=fetch_k)
 
         if not candidates:
             logger.info("route7_no_triple_candidates", query=query[:60])
@@ -1228,13 +1276,20 @@ class HippoRAG2Handler(BaseRouteHandler):
         if triple_rerank and len(candidates) > top_k:
             candidates = await self._rerank_triples(query, candidates, top_k=top_k)
 
-        # Stage 3: LLM recognition memory filter
-        llm_client = getattr(self.pipeline.disambiguator, "llm", None)
-        if not llm_client:
-            logger.warning("route7_no_llm_for_recognition_memory")
-            return list(candidates)
+        # Stage 3: Diversity filter (MMR or legacy LLM recognition memory)
+        recognition_mode = os.getenv("ROUTE7_RECOGNITION_MEMORY_MODE", "mmr").strip().lower()
 
-        surviving = await recognition_memory_filter(llm_client, query, candidates)
+        if recognition_mode == "mmr":
+            from ..retrievers.triple_store import mmr_diversity_filter
+            surviving = mmr_diversity_filter(candidates)
+        else:
+            # Legacy LLM-based recognition memory filter
+            llm_client = getattr(self.pipeline.disambiguator, "llm", None)
+            if not llm_client:
+                logger.warning("route7_no_llm_for_recognition_memory")
+                return list(candidates)
+            surviving = await recognition_memory_filter(llm_client, query, candidates)
+
         return surviving
 
     async def _rerank_triples(
