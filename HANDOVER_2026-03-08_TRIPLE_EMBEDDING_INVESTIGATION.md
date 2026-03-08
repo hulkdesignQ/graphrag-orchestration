@@ -120,6 +120,44 @@ Note: The baseline 57/57 used the fallback path (store bug → no precomputed em
 7. **Triple deduplication at indexing** — Many triples are near-duplicates (e.g., 5+ warranty variants with different subjects but identical predicates). Deduplicating at index time would reduce noise and make cosine/reranker stages more efficient.
 8. **Per-document triple embedding** — The rejected contextualized approach hurt global retrieval, but a hybrid approach (embed both contextualized AND bare) could serve different query types.
 
+## Dashboard Zero-Data Investigation (Ongoing)
+
+### Problem
+The B2C dashboard at `evidoc.hulkdesign.com` shows **"Queries Today: 0", "Queries This Month: 0"** despite the user actively querying (credits_used_month = 85). Storage and document counts display correctly.
+
+### Root Cause Narrowed
+- **Credits are recorded by `HybridPipeline.query()` → `record_credits()`** — runs IN the API gateway process, works fine (85 credits)
+- **Query counters are recorded by `enforce_plan_limits` → `record_query()`** — also runs in API gateway, same Redis, same pipeline pattern — but counters stay at 0
+- **Cosmos DB usage records (`recent_queries`)** — also empty, meaning `_write_cosmos_usage()` fire-and-forget is also failing silently
+- Both `record_query()` and `record_credits()` use the same `aioredis.Redis` singleton with `pipeline(transaction=True)` and the same user_id (JWT `oid`)
+
+### Fixes Deployed
+| Commit | Fix |
+|--------|-----|
+| `a6b8d3ce` | Added `/dashboard/health` diagnostic endpoint + Redis/Cosmos checks in `/health/detailed` |
+| `f942809d` | Made `/dashboard/health` auth-optional, fixed Cosmos attribute name (`_container` → `_usage_container`) |
+| `e3b2ba6b` | Added `"dashboard"` to SPA catch-all exclusion list |
+| `34f63418` | Added `/dashboard/diag/query-recording` write+read test endpoint, fixed `app.state.auth_type` bug, added trace logging |
+
+### `app.state.auth_type` Bug (Fixed)
+`app.state.auth_type` was never set in `main.py`. The dashboard reads it to determine `billing_type` ("b2b" vs "b2c"). The `AUTH_TYPE` env var was only passed to `JWTAuthMiddleware` constructor, never stored on `app.state`. Result: B2C app always showed `billing_type: "b2b"`. Fixed in `34f63418`.
+
+### Diagnostic Endpoint: `/dashboard/diag/query-recording`
+Tests the full write+read cycle from the API gateway:
+1. Redis PING
+2. `get_usage(user_id)` — read BEFORE
+3. `record_query(user_id)` — write (same code path as `enforce_plan_limits`)
+4. `get_usage(user_id)` — read AFTER
+5. Verify increment
+6. Raw key inspection (`quota:{oid}:daily:YYYYMMDD`, `quota:{oid}:monthly:YYYYMM`, `quota:{oid}:credits:YYYYMM`)
+
+**Next step**: User deploys latest, hits `/dashboard/diag/query-recording` from browser, and shares the JSON response. This will definitively show whether `record_query()` works from the API gateway or not.
+
+### Hypotheses Still Open
+1. **`record_query()` works but `enforce_plan_limits` never calls it** — e.g., exception before reaching `check_and_consume()`, or `user_id` is None/wrong
+2. **Redis transaction mode issue** — `record_query()` uses `pipeline(transaction=True)` which wraps in MULTI/EXEC. Possibly the Redis instance doesn't support transactions (cluster mode?)
+3. **Cosmos `_write_cosmos_usage()` fire-and-forget silently fails** — exceptions caught and logged but logs not visible in current deployment
+
 ## Key Learnings
 
 1. **`.env` overrides are invisible** — `load_dotenv()` in `main.py` means `.env` values ALWAYS override code defaults. Multiple sessions changed code defaults without checking `.env`, creating phantom regressions.
