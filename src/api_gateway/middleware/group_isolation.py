@@ -50,7 +50,7 @@ class GroupIsolationMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         # Skip isolation check for health/metrics/docs/admin/SPA endpoints
         skip_paths = ["/health", "/health/detailed", "/metrics", "/docs", "/redoc", "/admin", "/openapi.json",
-                      "/auth_setup", "/redirect", "/config", "/favicon.ico"]
+                      "/auth_setup", "/redirect", "/config", "/favicon.ico", "/dashboard/health"]
         skip_prefixes = ["/api/v1/openapi.json", "/api/v1/graphrag/health", "/assets/"]
         
         path = request.url.path

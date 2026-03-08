@@ -105,9 +105,9 @@ async def detailed_health_check() -> Dict[str, Any]:
     try:
         from src.core.services.cosmos_client import get_cosmos_client
         cosmos = get_cosmos_client()
-        if not cosmos._container:
+        if not cosmos._usage_container:
             await asyncio.wait_for(cosmos.ensure_initialized(), timeout=5)
-        if cosmos._container:
+        if cosmos._usage_container:
             health_status["components"]["cosmos_db"] = {"status": "healthy"}
         else:
             health_status["components"]["cosmos_db"] = {

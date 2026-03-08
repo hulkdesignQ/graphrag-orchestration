@@ -891,8 +891,6 @@ async def list_users(
 @router.get("/health")
 async def dashboard_health(
     request: Request,
-    user: Dict[str, Any] = Depends(get_current_user),
-    group_id: str = Depends(get_group_id),
 ):
     """
     Diagnostic endpoint that tests each dashboard data backend.
@@ -900,8 +898,13 @@ async def dashboard_health(
     Returns connectivity status for Redis, Cosmos DB, and Blob Storage,
     plus which env vars are present.  Use this to debug "dashboard shows
     zeros" issues without reading container logs.
+
+    Auth-optional: uses JWT user if available, otherwise tests with a
+    placeholder so infra connectivity can be verified without a token.
     """
-    user_id = user.get("oid", "")
+    user = getattr(request.state, "user", None) or {}
+    user_id = user.get("oid", "diagnostic-probe")
+    group_id = getattr(request.state, "group_id", None) or "diagnostic-probe"
     results: Dict[str, Any] = {
         "user_id_present": bool(user_id),
         "group_id": group_id,
@@ -931,10 +934,10 @@ async def dashboard_health(
     cosmos_status: Dict[str, Any] = {"status": "unknown"}
     try:
         cosmos = get_cosmos_client()
-        if not cosmos._container:
+        if not cosmos._usage_container:
             await asyncio.wait_for(cosmos.ensure_initialized(), timeout=5)
 
-        if cosmos._container:
+        if cosmos._usage_container:
             records = await asyncio.wait_for(
                 cosmos.query_usage(partition_id=user_id, usage_type="llm_completion", limit=1),
                 timeout=5,

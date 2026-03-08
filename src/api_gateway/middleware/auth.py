@@ -61,7 +61,7 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
     # Paths that never require auth
     SKIP_AUTH_PATHS = {
         "/health", "/config", "/docs", "/openapi.json", "/redoc",
-        "/auth_setup", "/redirect", "/favicon.ico",
+        "/auth_setup", "/redirect", "/favicon.ico", "/dashboard/health",
     }
 
     def _is_static_request(self, path: str) -> bool:
