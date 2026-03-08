@@ -286,9 +286,12 @@ for CA_NAME in "$CONTAINER_APP_API" "$CONTAINER_APP_API_B2C" "$CONTAINER_APP_WOR
 done
 
 # ── RBAC role assignments for managed identity ──────────────────────────
-# The container apps need:
-#   - Storage Blob Data Contributor on the storage account (user-content + content)
-#   - Cosmos DB Built-in Data Contributor on Cosmos (for usage tracking)
+# All container apps need these roles for Managed Identity (DefaultAzureCredential):
+#   - Cognitive Services User on Document Intelligence (OCR extraction)
+#   - Storage Blob Data Contributor on storage account (user-content + content)
+#   - AcrPull on container registry (image pull)
+#   - Cognitive Services OpenAI User on Azure OpenAI (LLM calls)
+#   - Cosmos DB Contributor on Cosmos (usage tracking)
 # These are idempotent — safe to re-run.
 echo ""
 echo "🔐 Ensuring RBAC role assignments..."
@@ -296,6 +299,52 @@ STORAGE_RESOURCE_ID=$(az storage account show \
     --name "$STORAGE_ACCOUNT" \
     --resource-group "$AZURE_RESOURCE_GROUP" \
     --query "id" -o tsv 2>/dev/null || echo "")
+
+# Resolve Document Intelligence resource ID from endpoint
+DI_RESOURCE_NAME=""
+if [ -n "$AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT" ]; then
+    DI_RESOURCE_NAME=$(echo "$AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT" | sed -n 's|https://\([^.]*\)\..*|\1|p')
+elif [ -n "$AZURE_CONTENT_UNDERSTANDING_ENDPOINT" ]; then
+    DI_RESOURCE_NAME=$(echo "$AZURE_CONTENT_UNDERSTANDING_ENDPOINT" | sed -n 's|https://\([^.]*\)\..*|\1|p')
+fi
+DI_RESOURCE_ID=""
+if [ -n "$DI_RESOURCE_NAME" ]; then
+    DI_RESOURCE_ID=$(az cognitiveservices account show \
+        --name "$DI_RESOURCE_NAME" \
+        --resource-group "$AZURE_RESOURCE_GROUP" \
+        --query "id" -o tsv 2>/dev/null || echo "")
+fi
+
+ACR_RESOURCE_ID=$(az acr show \
+    --name "$CONTAINER_REGISTRY_NAME" \
+    --resource-group "$AZURE_RESOURCE_GROUP" \
+    --query "id" -o tsv 2>/dev/null || echo "")
+
+# Find OpenAI accounts in the resource group
+OPENAI_RESOURCE_IDS=$(az cognitiveservices account list \
+    --resource-group "$AZURE_RESOURCE_GROUP" \
+    --query "[?kind=='OpenAI'].id" -o tsv 2>/dev/null || echo "")
+
+COSMOS_RESOURCE_ID=$(az cosmosdb list \
+    --resource-group "$AZURE_RESOURCE_GROUP" \
+    --query "[0].id" -o tsv 2>/dev/null || echo "")
+
+assign_role() {
+    local principal_id="$1"
+    local role_name="$2"
+    local scope="$3"
+    local label="$4"
+    local ca_name="$5"
+    if [ -z "$scope" ]; then return; fi
+    az role assignment create \
+        --assignee-object-id "$principal_id" \
+        --assignee-principal-type ServicePrincipal \
+        --role "$role_name" \
+        --scope "$scope" \
+        --only-show-errors 2>/dev/null && \
+        echo "  ✅ $label on $ca_name" || \
+        echo "  ℹ️  $label already assigned or insufficient permissions for $ca_name"
+}
 
 for CA_NAME in "$CONTAINER_APP_API" "$CONTAINER_APP_API_B2C" "$CONTAINER_APP_WORKER"; do
     if [ "$CA_NAME" = "$CONTAINER_APP_API_B2C" ] && [ "${SKIP_B2C:-}" = "true" ]; then continue; fi
@@ -316,17 +365,25 @@ for CA_NAME in "$CONTAINER_APP_API" "$CONTAINER_APP_API_B2C" "$CONTAINER_APP_WOR
         continue
     fi
 
-    # Storage Blob Data Contributor (ba92f5b4-2d11-453d-a403-e96b0029c9fe)
-    if [ -n "$STORAGE_RESOURCE_ID" ]; then
-        az role assignment create \
-            --assignee-object-id "$PRINCIPAL_ID" \
-            --assignee-principal-type ServicePrincipal \
-            --role "Storage Blob Data Contributor" \
-            --scope "$STORAGE_RESOURCE_ID" \
-            --only-show-errors 2>/dev/null && \
-            echo "✅ Storage Blob Data Contributor on $CA_NAME" || \
-            echo "ℹ️  Storage Blob role already assigned or insufficient permissions for $CA_NAME"
-    fi
+    echo "🔑 Assigning roles for $CA_NAME ($PRINCIPAL_ID)..."
+
+    # 1. Cognitive Services User on Document Intelligence (OCR/extraction)
+    assign_role "$PRINCIPAL_ID" "Cognitive Services User" "$DI_RESOURCE_ID" "Cognitive Services User (DI)" "$CA_NAME"
+
+    # 2. Storage Blob Data Contributor (upload/download blobs)
+    assign_role "$PRINCIPAL_ID" "Storage Blob Data Contributor" "$STORAGE_RESOURCE_ID" "Storage Blob Data Contributor" "$CA_NAME"
+
+    # 3. AcrPull (pull container images)
+    assign_role "$PRINCIPAL_ID" "AcrPull" "$ACR_RESOURCE_ID" "AcrPull" "$CA_NAME"
+
+    # 4. Cognitive Services OpenAI User (LLM inference)
+    for OPENAI_ID in $OPENAI_RESOURCE_IDS; do
+        OPENAI_SHORT=$(basename "$OPENAI_ID")
+        assign_role "$PRINCIPAL_ID" "Cognitive Services OpenAI User" "$OPENAI_ID" "OpenAI User ($OPENAI_SHORT)" "$CA_NAME"
+    done
+
+    # 5. Cosmos DB Contributor (usage tracking)
+    assign_role "$PRINCIPAL_ID" "Contributor" "$COSMOS_RESOURCE_ID" "Cosmos DB Contributor" "$CA_NAME"
 done
 echo ""
 
