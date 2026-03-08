@@ -11,6 +11,10 @@ The prompt receives three evidence streams:
   2. Section headings     — structural heading context (title + summary)
   3. Sentence evidence    — direct vector search on source sentences
 
+When ROUTE6_COMMUNITY_EXTRACT=1 (default), the community MAP phase
+fetches actual source sentences via Community→Entity→MENTIONS→Sentence
+graph traversal, aligning with Microsoft's LazyGraphRAG MAP design.
+
 Design rationale documented in:
   ANALYSIS_ROUTE3_LAZYGRAPHRAG_DEVIATION_AND_ROUTE6_PLAN_2026-02-19.md
 """
@@ -63,30 +67,33 @@ You are a document analysis assistant. Answer the query using the evidence below
 """
 
 # ─────────────────────────────────────────────────────────────────
-# COMMUNITY KEY-POINT EXTRACTION PROMPT  (lightweight MAP)
+# COMMUNITY KEY-POINT EXTRACTION PROMPT  (Microsoft-aligned MAP)
 # ─────────────────────────────────────────────────────────────────
-# Single LLM call replaces upstream's N-call MAP phase.
-# Input:  {query}, {community_summaries}
+# Fetches actual source sentences via Community→Entity→MENTIONS→Sentence
+# graph traversal, then extracts query-relevant claims from SOURCE TEXT
+# (not from abstract community summaries).
+# Input:  {query}, {community_source_text}
 # Output: JSON array of key points with importance scores.
 
 COMMUNITY_EXTRACT_PROMPT = """\
-You are an analyst. Given the user query and a set of thematic community summaries from a knowledge graph, extract ONLY the specific facts, terms, conditions, or data points from the summaries that are directly relevant to answering the query.
+You are an analyst. Given the user query and source passages from community-grouped documents, extract ONLY the specific facts, terms, conditions, or data points that are directly relevant to answering the query.
 
 **Query**: {query}
 
-**Community Summaries**:
-{community_summaries}
+**Source Passages** (grouped by community theme, labelled by document):
+{community_source_text}
 
 **Instructions**:
-1. For each community, identify specific facts relevant to the query. Ignore irrelevant information.
+1. Read ALL source passages across ALL communities. Extract specific facts relevant to the query.
 2. Each key point must be a concrete, specific fact — not a vague theme description.
-3. Score each point 0-100 for importance to answering the query.
-4. If a community has no relevant facts for this query, skip it entirely.
-5. Preserve exact terminology: names, amounts, dates, legal terms, conditions.
+3. Preserve exact terminology: names, amounts, dates, legal terms, conditions, section references.
+4. Score each point 0-100 for importance to answering the query.
+5. If a community has no relevant facts for this query, skip it entirely.
+6. Include facts from EVERY document that contains relevant information — do not focus on just one.
 
 Respond with ONLY a JSON object:
 {{"points": [
-    {{"description": "specific fact or detail", "score": importance_0_to_100, "community": "community title"}},
+    {{"description": "specific fact or detail from source text", "score": importance_0_to_100, "community": "community title"}},
     ...
 ]}}
 """

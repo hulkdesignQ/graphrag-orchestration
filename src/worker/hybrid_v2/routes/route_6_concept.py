@@ -513,8 +513,9 @@ class ConceptSearchHandler(BaseRouteHandler):
             Synthesized response text.
         """
         # Format community summaries as thematic context
-        # Feature 1b: When ROUTE6_COMMUNITY_EXTRACT is enabled, replace raw
-        # summaries with LLM-extracted key points (lightweight MAP).
+        # Feature 1b: When ROUTE6_COMMUNITY_EXTRACT is enabled, fetch actual
+        # source sentences per community and extract query-relevant claims
+        # (Microsoft-aligned MAP phase).
         community_extract = os.getenv(
             "ROUTE6_COMMUNITY_EXTRACT", "1"
         ).strip().lower() in {"1", "true", "yes"}
@@ -882,34 +883,163 @@ class ConceptSearchHandler(BaseRouteHandler):
         return filtered_communities, filtered_scores
 
     # ==================================================================
-    # Feature 1b: Community Key-Point Extraction (lightweight MAP)
+    # Feature 1b: Community Source-Text MAP (Microsoft-aligned)
     # ==================================================================
+
+    async def _fetch_community_source_sentences(
+        self,
+        communities: List[Dict[str, Any]],
+        max_per_community: int = 50,
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """Fetch source sentences for matched communities via graph traversal.
+
+        Traverses Community → BELONGS_TO → Entity → MENTIONS → Sentence
+        to retrieve the actual document text that belongs to each community.
+        This aligns with Microsoft's LazyGraphRAG MAP phase which extracts
+        claims from source text, not from abstract community summaries.
+
+        Args:
+            communities: Matched community dicts (must have 'id' field).
+            max_per_community: Max sentences per community (dedup'd).
+
+        Returns:
+            Dict mapping community_id → list of sentence dicts with
+            text, document_title, section_path, sentence_id.
+        """
+        if not self.neo4j_driver:
+            logger.warning("route6_community_source_no_neo4j_driver")
+            return {}
+
+        community_ids = [c.get("id") for c in communities if c.get("id")]
+        if not community_ids:
+            return {}
+
+        group_ids = self.group_ids
+        folder_id = self.folder_id
+
+        folder_filter_clause = (
+            "WITH s, doc, c_id\n"
+            "        WHERE $folder_id IS NULL OR doc IS NULL"
+            " OR (doc)-[:IN_FOLDER]->(:Folder {id: $folder_id})\n"
+        )
+
+        cypher = f"""
+        UNWIND $community_ids AS c_id
+        MATCH (c:Community {{id: c_id}})
+        WHERE c.group_id IN $group_ids
+        MATCH (c)<-[:BELONGS_TO]-(e:Entity)
+        WHERE e.group_id IN $group_ids
+        MATCH (e)<-[:MENTIONS]-(s:Sentence)
+        WHERE s.group_id IN $group_ids AND s.text IS NOT NULL
+        OPTIONAL MATCH (s)-[:IN_DOCUMENT]->(doc:Document)
+
+        {folder_filter_clause}
+        WITH c_id, s, doc
+        RETURN DISTINCT c_id AS community_id,
+               s.id AS sentence_id,
+               s.text AS text,
+               s.section_path AS section_path,
+               s.page AS page,
+               doc.title AS document_title
+        ORDER BY c_id, s.page, s.id
+        """
+
+        try:
+            loop = asyncio.get_running_loop()
+            driver = self.neo4j_driver
+
+            def _run():
+                with retry_session(driver, read_only=True) as session:
+                    records = session.run(
+                        cypher,
+                        community_ids=community_ids,
+                        group_ids=group_ids,
+                        folder_id=folder_id,
+                    )
+                    return [dict(r) for r in records]
+
+            results = await loop.run_in_executor(self._executor, _run)
+        except Exception as e:
+            logger.warning("route6_community_source_query_failed", error=str(e))
+            return {}
+
+        # Group by community, dedup by sentence_id, cap per community
+        grouped: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+        seen: Dict[str, set] = defaultdict(set)
+        for r in results:
+            cid = r["community_id"]
+            sid = r["sentence_id"]
+            if sid in seen[cid]:
+                continue
+            seen[cid].add(sid)
+            if len(grouped[cid]) < max_per_community:
+                grouped[cid].append(r)
+
+        total = sum(len(v) for v in grouped.values())
+        logger.info(
+            "route6_community_source_fetched",
+            num_communities=len(grouped),
+            total_sentences=total,
+        )
+        return dict(grouped)
 
     async def _extract_community_key_points(
         self,
         query: str,
         communities: List[Dict[str, Any]],
     ) -> str:
-        """Extract query-relevant key points from community summaries in a single LLM call.
+        """Extract query-relevant key points from community SOURCE TEXT.
 
-        Replaces upstream GraphRAG's N-call MAP phase with 1 call.
-        Returns a formatted string of scored key points for synthesis,
-        or falls back to raw summaries on failure.
+        Aligned with Microsoft's LazyGraphRAG MAP phase:
+        1. For each matched community, fetch actual source sentences
+           via Community → Entity → MENTIONS → Sentence graph traversal.
+        2. Pass source sentences (not abstract summaries) to the LLM.
+        3. Extract query-relevant claims with importance scores.
+
+        Falls back to raw summaries if source fetch fails.
         """
-        # Format communities for the extraction prompt
-        summary_lines = []
+        # Fetch source sentences for each matched community
+        source_map = await self._fetch_community_source_sentences(communities)
+
+        # Build per-community source text blocks
+        community_blocks = []
         for i, c in enumerate(communities, 1):
             title = c.get("title", f"Theme {i}")
-            summary = c.get("summary", "").strip()
-            if summary:
-                summary_lines.append(f"{i}. **{title}**: {summary}")
-        if not summary_lines:
+            cid = c.get("id", "")
+            sentences = source_map.get(cid, [])
+
+            if sentences:
+                # Format source sentences grouped by document
+                by_doc: Dict[str, List[str]] = defaultdict(list)
+                for s in sentences:
+                    doc = s.get("document_title", "Unknown")
+                    text = s.get("text", "").strip()
+                    if text:
+                        by_doc[doc].append(text)
+
+                doc_sections = []
+                for doc_title, texts in by_doc.items():
+                    joined = " ".join(texts)
+                    doc_sections.append(f"  [{doc_title}]: {joined}")
+                source_text = "\n".join(doc_sections)
+                community_blocks.append(
+                    f"--- Community {i}: {title} ---\n{source_text}"
+                )
+            else:
+                # Fallback: use the abstract summary if no source text
+                summary = c.get("summary", "").strip()
+                if summary:
+                    community_blocks.append(
+                        f"--- Community {i}: {title} ---\n  {summary}"
+                    )
+
+        if not community_blocks:
             return "(No thematic context available)"
 
-        summaries_text = "\n".join(summary_lines)
+        source_text_block = "\n\n".join(community_blocks)
         prompt = COMMUNITY_EXTRACT_PROMPT.format(
             query=query,
-            community_summaries=summaries_text,
+            community_source_text=source_text_block,
         )
 
         try:
@@ -919,14 +1049,14 @@ class ConceptSearchHandler(BaseRouteHandler):
             points = parsed.get("points", [])
             if not points:
                 logger.info("route6_community_extract_no_points")
-                return summaries_text  # fallback to raw
+                # Fallback: format raw summaries
+                return self._format_raw_summaries(communities)
 
-            # Sort by score descending, format as compact key points
+            # Sort by score descending, filter low-importance
             points = sorted(points, key=lambda p: p.get("score", 0), reverse=True)
-            # Filter out low-importance points (score < 20)
             points = [p for p in points if p.get("score", 0) >= 20]
             if not points:
-                return summaries_text
+                return self._format_raw_summaries(communities)
 
             formatted = []
             for p in points:
@@ -945,10 +1075,21 @@ class ConceptSearchHandler(BaseRouteHandler):
 
         except (json.JSONDecodeError, ValueError) as e:
             logger.warning("route6_community_extract_parse_error", error=str(e))
-            return summaries_text  # fallback to raw
+            return self._format_raw_summaries(communities)
         except Exception as e:
             logger.warning("route6_community_extract_failed", error=str(e))
-            return summaries_text  # fallback to raw
+            return self._format_raw_summaries(communities)
+
+    @staticmethod
+    def _format_raw_summaries(communities: List[Dict[str, Any]]) -> str:
+        """Format communities as raw summary text (fallback)."""
+        lines = []
+        for i, c in enumerate(communities, 1):
+            title = c.get("title", f"Theme {i}")
+            summary = c.get("summary", "").strip()
+            if summary:
+                lines.append(f"{i}. **{title}**: {summary}")
+        return "\n".join(lines) if lines else "(No thematic context available)"
 
     # ==================================================================
     # Feature 2: Community Children Traversal
