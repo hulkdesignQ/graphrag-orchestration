@@ -307,6 +307,7 @@
         "creditsUsed": "Credits Used",
         "documents": "Documents",
         "storageUsed": "Storage Used",
+        "dataDegraded": "Some usage data may be temporarily unavailable. Stats shown may be incomplete.",
         "dailyLimit": "of {{limit}} daily limit",
         "monthlyLimit": "of {{limit}} monthly limit",
         "monthlyCredits": "of {{limit}} monthly credits",

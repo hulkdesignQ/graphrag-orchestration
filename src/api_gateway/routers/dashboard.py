@@ -107,6 +107,8 @@ class UsageStatsResponse(BaseModel):
     # Recent activity
     recent_queries: List[Dict[str, Any]] = []
     top_topics: List[Dict[str, Any]] = []
+    # Data availability flag — true when one or more backends failed
+    data_degraded: bool = False
 
 
 class SystemMetricsResponse(BaseModel):
@@ -255,16 +257,19 @@ async def _fetch_user_usage(
     user_id = user.get("oid", "")
 
     # ── Phase 1: Redis (fast, needed for plan limits) ────────────────────
+    redis_degraded = False
     try:
         enforcer = await asyncio.wait_for(get_quota_enforcer(), timeout=5)
         plan_tier, usage = await asyncio.gather(
             asyncio.wait_for(enforcer.get_plan(user_id), timeout=2),
             asyncio.wait_for(enforcer.get_usage(user_id), timeout=2),
         )
-    except Exception:
+    except Exception as e:
+        logger.warning("dashboard_usage_redis_failed", user_id=user_id, error=str(e))
         enforcer = None
         plan_tier = PlanTier.FREE
         usage = {"queries_today": 0, "queries_this_month": 0}
+        redis_degraded = True
 
     is_admin = any(r.lower() == "admin" for r in user.get("roles", []))
     if is_admin and plan_tier == PlanTier.FREE:
@@ -273,8 +278,12 @@ async def _fetch_user_usage(
     limits = PLAN_DEFINITIONS[plan_tier]
 
     # ── Phase 2: Blob stats + Cosmos + credits in parallel ───────────────
+    blob_degraded = False
+    cosmos_degraded = False
+
     async def _blob_stats() -> tuple[int, float, int]:
         """Returns (personal_count, storage_gb, global_count)."""
+        nonlocal blob_degraded
         blob_mgr = getattr(request.app.state, "user_blob_manager", None)
         personal_count, storage_gb = 0, 0.0
         if blob_mgr:
@@ -283,8 +292,11 @@ async def _fetch_user_usage(
                     count, size_bytes = await blob_mgr.get_blob_stats(group_id)
                     personal_count = count
                     storage_gb = round(size_bytes / (1024 ** 3), 4)
-            except (TimeoutError, Exception):
-                logger.warning("usage_blob_count_failed", group_id=group_id)
+            except (TimeoutError, Exception) as e:
+                logger.warning("usage_blob_count_failed", group_id=group_id, error=str(e))
+                blob_degraded = True
+        else:
+            logger.debug("usage_blob_manager_not_initialized", group_id=group_id)
 
         global_count = 0
         global_mgr = getattr(request.app.state, "global_blob_manager", None)
@@ -297,13 +309,14 @@ async def _fetch_user_usage(
                     async for blob in container_client.list_blobs():
                         if "/" not in blob.name:
                             global_count += 1
-            except (TimeoutError, Exception):
-                logger.warning("usage_global_blob_count_failed")
+            except (TimeoutError, Exception) as e:
+                logger.warning("usage_global_blob_count_failed", error=str(e))
 
         return personal_count, storage_gb, global_count
 
     async def _recent_queries() -> tuple[list, int, float]:
         """Fetch recent queries and (fallback) doc count from Cosmos."""
+        nonlocal cosmos_degraded
         queries: list = []
         doc_count = 0
         doc_storage = 0.0
@@ -340,8 +353,9 @@ async def _fetch_user_usage(
             doc_count = len(doc_ids)
             total_pages = sum(r.get("pages_analyzed", 0) for r in doc_records)
             doc_storage = round(total_pages * 0.0001, 4)
-        except Exception:
-            logger.warning("dashboard_usage_fetch_failed", user_id=user_id)
+        except Exception as e:
+            logger.warning("dashboard_usage_fetch_failed", user_id=user_id, error=str(e))
+            cosmos_degraded = True
         return queries, doc_count, doc_storage
 
     async def _credits() -> dict:
@@ -389,6 +403,7 @@ async def _fetch_user_usage(
         speech_queries_month=speech_queries_month,
         recent_queries=recent_queries,
         top_topics=[],
+        data_degraded=redis_degraded or blob_degraded or cosmos_degraded,
     )
 
 
@@ -459,7 +474,9 @@ async def get_dashboard_all(
     try:
         async with asyncio.timeout(15):
             result = await _fetch_dashboard_all(request, user, group_id)
-            _set_cached_dashboard(user_id, result)
+            # Don't cache degraded responses so the next request retries fresh
+            if not result.usage.data_degraded:
+                _set_cached_dashboard(user_id, result)
             return result
     except TimeoutError:
         logger.warning("dashboard_all_timeout", user_id=user_id)
@@ -474,16 +491,19 @@ async def _fetch_dashboard_all(
     user_id = user.get("oid", "")
 
     # ── Phase 1: Single Redis init + parallel plan/usage fetch ───────────
+    redis_degraded = False
     try:
         enforcer = await asyncio.wait_for(get_quota_enforcer(), timeout=5)
         plan_tier, redis_usage = await asyncio.gather(
             asyncio.wait_for(enforcer.get_plan(user_id), timeout=5),
             asyncio.wait_for(enforcer.get_usage(user_id), timeout=5),
         )
-    except Exception:
+    except Exception as e:
+        logger.warning("dashboard_all_redis_failed", user_id=user_id, error=str(e))
         enforcer = None
         plan_tier = PlanTier.FREE
         redis_usage = {"queries_today": 0, "queries_this_month": 0}
+        redis_degraded = True
 
     is_admin = any(r.lower() == "admin" for r in user.get("roles", []))
     if is_admin and plan_tier == PlanTier.FREE:
@@ -526,17 +546,25 @@ async def _fetch_dashboard_all(
     )
 
     # ── Phase 3: Blob + Cosmos + credits in parallel ─────────────────────
+    blob_degraded = False
+    cosmos_degraded = False
+
     async def _blob_stats() -> tuple[int, float, int]:
+        nonlocal blob_degraded
+
         async def _personal() -> tuple[int, float]:
+            nonlocal blob_degraded
             blob_mgr = getattr(request.app.state, "user_blob_manager", None)
             if not blob_mgr:
+                logger.debug("usage_blob_manager_not_initialized", group_id=group_id)
                 return 0, 0.0
             try:
                 async with asyncio.timeout(5):
                     count, size_bytes = await blob_mgr.get_blob_stats(group_id)
                     return count, round(size_bytes / (1024 ** 3), 4)
-            except (TimeoutError, Exception):
-                logger.warning("usage_blob_count_failed", group_id=group_id)
+            except (TimeoutError, Exception) as e:
+                logger.warning("usage_blob_count_failed", group_id=group_id, error=str(e))
+                blob_degraded = True
                 return 0, 0.0
 
         async def _global() -> int:
@@ -553,8 +581,8 @@ async def _fetch_dashboard_all(
                         if "/" not in blob.name:
                             count += 1
                     return count
-            except (TimeoutError, Exception):
-                logger.warning("usage_global_blob_count_failed")
+            except (TimeoutError, Exception) as e:
+                logger.warning("usage_global_blob_count_failed", error=str(e))
                 return 0
 
         (personal_count, storage_gb), global_count = await asyncio.gather(
@@ -563,6 +591,7 @@ async def _fetch_dashboard_all(
         return personal_count, storage_gb, global_count
 
     async def _recent_queries() -> tuple[list, int, float]:
+        nonlocal cosmos_degraded
         queries: list = []
         doc_count = 0
         doc_storage = 0.0
@@ -594,8 +623,9 @@ async def _fetch_dashboard_all(
             doc_count = len(doc_ids)
             total_pages = sum(r.get("pages_analyzed", 0) for r in doc_records)
             doc_storage = round(total_pages * 0.0001, 4)
-        except Exception:
-            logger.warning("dashboard_usage_fetch_failed", user_id=user_id)
+        except Exception as e:
+            logger.warning("dashboard_usage_fetch_failed", user_id=user_id, error=str(e))
+            cosmos_degraded = True
         return queries, doc_count, doc_storage
 
     async def _credits() -> dict:
@@ -641,6 +671,7 @@ async def _fetch_dashboard_all(
         speech_queries_month=speech_queries_month,
         recent_queries=recent_queries,
         top_topics=[],
+        data_degraded=redis_degraded or blob_degraded or cosmos_degraded,
     )
 
     # ── Phase 4: Plans (pure computation, no I/O — reuses plan_tier) ─────

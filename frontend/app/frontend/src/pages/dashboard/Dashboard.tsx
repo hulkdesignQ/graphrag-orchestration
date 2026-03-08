@@ -156,6 +156,11 @@ const Dashboard = () => {
             </div>
 
             {/* Stats */}
+            {usage.data_degraded && (
+                <div className={styles.degradedBanner}>
+                    ⚠️ {t("dashboard.dataDegraded")}
+                </div>
+            )}
             <div className={styles.statsGrid}>
                 <div className={styles.statCard}>
                     <span className={styles.statLabel}>{t("dashboard.queriesToday")}</span>

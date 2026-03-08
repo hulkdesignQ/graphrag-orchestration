@@ -288,6 +288,15 @@
     color: #dc3545;
 }
 
+.degradedBanner {
+    padding: 0.6rem 1rem;
+    background: #fff3cd;
+    border: 1px solid #ffc107;
+    border-radius: 0.5rem;
+    color: #856404;
+    font-size: 0.85rem;
+}
+
 .loginRequired {
     display: flex;
     flex-direction: column;

@@ -64,6 +64,7 @@ export interface UsageStats {
     speech_queries_month: number;
     recent_queries: Array<Record<string, any>>;
     top_topics: Array<Record<string, any>>;
+    data_degraded?: boolean;
 }
 
 export interface SystemMetrics {
