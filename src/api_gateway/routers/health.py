@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException, Header, Request
 from typing import Dict, Any
+import asyncio
 import os
 import structlog
 
@@ -84,6 +85,43 @@ async def detailed_health_check() -> Dict[str, Any]:
         }
         health_status["status"] = "degraded"
     
+    # Check Redis connectivity
+    try:
+        from src.core.services.quota_enforcer import get_quota_enforcer
+        enforcer = await asyncio.wait_for(get_quota_enforcer(), timeout=5)
+        pong = await asyncio.wait_for(enforcer._redis.ping(), timeout=3)
+        health_status["components"]["redis"] = {
+            "status": "healthy" if pong else "no_pong",
+        }
+    except Exception as e:
+        logger.error("redis_health_check_failed", error=str(e))
+        health_status["components"]["redis"] = {
+            "status": "unhealthy",
+            "error": "connection_failed",
+        }
+        health_status["status"] = "degraded"
+
+    # Check Cosmos DB connectivity
+    try:
+        from src.core.services.cosmos_client import get_cosmos_client
+        cosmos = get_cosmos_client()
+        if not cosmos._container:
+            await asyncio.wait_for(cosmos.ensure_initialized(), timeout=5)
+        if cosmos._container:
+            health_status["components"]["cosmos_db"] = {"status": "healthy"}
+        else:
+            health_status["components"]["cosmos_db"] = {
+                "status": "not_configured",
+                "message": "Container not initialized — check COSMOS_DB_ENDPOINT",
+            }
+    except Exception as e:
+        logger.error("cosmos_health_check_failed", error=str(e))
+        health_status["components"]["cosmos_db"] = {
+            "status": "unhealthy",
+            "error": "connection_failed",
+        }
+        health_status["status"] = "degraded"
+
     return health_status
 
 

@@ -882,3 +882,132 @@ async def list_users(
             "limit": limit,
             "offset": offset,
         }
+
+
+# ============================================================================
+# Dashboard Health / Diagnostics
+# ============================================================================
+
+@router.get("/health")
+async def dashboard_health(
+    request: Request,
+    user: Dict[str, Any] = Depends(get_current_user),
+    group_id: str = Depends(get_group_id),
+):
+    """
+    Diagnostic endpoint that tests each dashboard data backend.
+
+    Returns connectivity status for Redis, Cosmos DB, and Blob Storage,
+    plus which env vars are present.  Use this to debug "dashboard shows
+    zeros" issues without reading container logs.
+    """
+    user_id = user.get("oid", "")
+    results: Dict[str, Any] = {
+        "user_id_present": bool(user_id),
+        "group_id": group_id,
+        "backends": {},
+        "env_vars": {},
+    }
+
+    # ── Redis ────────────────────────────────────────────────────────────
+    redis_status: Dict[str, Any] = {"status": "unknown"}
+    try:
+        enforcer = await asyncio.wait_for(get_quota_enforcer(), timeout=5)
+        pong = await asyncio.wait_for(enforcer._redis.ping(), timeout=3)
+        redis_status["status"] = "healthy" if pong else "no_pong"
+
+        # Read current counters to verify data path
+        usage = await asyncio.wait_for(enforcer.get_usage(user_id), timeout=3)
+        redis_status["queries_today"] = usage["queries_today"]
+        redis_status["queries_this_month"] = usage["queries_this_month"]
+        redis_status["daily_key"] = enforcer._daily_key(user_id)
+        redis_status["monthly_key"] = enforcer._monthly_key(user_id)
+    except Exception as e:
+        redis_status["status"] = "unhealthy"
+        redis_status["error"] = str(e)
+    results["backends"]["redis"] = redis_status
+
+    # ── Cosmos DB ────────────────────────────────────────────────────────
+    cosmos_status: Dict[str, Any] = {"status": "unknown"}
+    try:
+        cosmos = get_cosmos_client()
+        if not cosmos._container:
+            await asyncio.wait_for(cosmos.ensure_initialized(), timeout=5)
+
+        if cosmos._container:
+            records = await asyncio.wait_for(
+                cosmos.query_usage(partition_id=user_id, usage_type="llm_completion", limit=1),
+                timeout=5,
+            )
+            cosmos_status["status"] = "healthy"
+            cosmos_status["sample_record_count"] = len(records)
+        else:
+            cosmos_status["status"] = "not_initialized"
+            cosmos_status["message"] = "Cosmos container is None after ensure_initialized"
+    except Exception as e:
+        cosmos_status["status"] = "unhealthy"
+        cosmos_status["error"] = str(e)
+    results["backends"]["cosmos"] = cosmos_status
+
+    # ── Blob Storage (personal) ──────────────────────────────────────────
+    blob_status: Dict[str, Any] = {"status": "unknown"}
+    blob_mgr = getattr(request.app.state, "user_blob_manager", None)
+    if blob_mgr:
+        try:
+            count, size_bytes = await asyncio.wait_for(
+                blob_mgr.get_blob_stats(group_id), timeout=5
+            )
+            blob_status["status"] = "healthy"
+            blob_status["documents_count"] = count
+            blob_status["storage_bytes"] = size_bytes
+        except Exception as e:
+            blob_status["status"] = "unhealthy"
+            blob_status["error"] = str(e)
+    else:
+        blob_status["status"] = "not_initialized"
+        blob_status["message"] = "user_blob_manager is None — check AZURE_USERSTORAGE_* env vars"
+    results["backends"]["blob_storage"] = blob_status
+
+    # ── Global Blob Storage ──────────────────────────────────────────────
+    global_blob_status: Dict[str, Any] = {"status": "unknown"}
+    global_mgr = getattr(request.app.state, "global_blob_manager", None)
+    if global_mgr:
+        try:
+            container_client = global_mgr.blob_service_client.get_container_client(
+                global_mgr.container
+            )
+            count = 0
+            async for blob in container_client.list_blobs():
+                count += 1
+                if count >= 3:
+                    break
+            global_blob_status["status"] = "healthy"
+            global_blob_status["sample_blob_count"] = count
+        except Exception as e:
+            global_blob_status["status"] = "unhealthy"
+            global_blob_status["error"] = str(e)
+    else:
+        global_blob_status["status"] = "not_initialized"
+        global_blob_status["message"] = "global_blob_manager is None"
+    results["backends"]["global_blob_storage"] = global_blob_status
+
+    # ── Environment variable presence (no values) ────────────────────────
+    env_keys = [
+        "REDIS_HOST", "REDIS_PORT", "REDIS_PASSWORD",
+        "COSMOS_DB_ENDPOINT", "COSMOS_DB_DATABASE_NAME", "COSMOS_DB_USAGE_CONTAINER",
+        "AZURE_USERSTORAGE_ACCOUNT", "AZURE_USERSTORAGE_CONTAINER",
+        "USE_USER_UPLOAD",
+        "AZURE_STORAGE_ACCOUNT", "AZURE_STORAGE_CONTAINER",
+    ]
+    results["env_vars"] = {k: bool(os.getenv(k)) for k in env_keys}
+
+    # ── Overall status ───────────────────────────────────────────────────
+    statuses = [v["status"] for v in results["backends"].values()]
+    if all(s == "healthy" for s in statuses):
+        results["overall"] = "healthy"
+    elif any(s == "unhealthy" for s in statuses):
+        results["overall"] = "unhealthy"
+    else:
+        results["overall"] = "degraded"
+
+    return results
