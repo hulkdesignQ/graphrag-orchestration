@@ -313,6 +313,9 @@ class HippoRAG2Handler(BaseRouteHandler):
         if prompt_variant is None:
             prompt_variant = os.getenv("ROUTE7_PROMPT_VARIANT", "v3_keypoints") or None
 
+        # Synthesis max_tokens cap (only local_search preset sets this)
+        synthesis_max_tokens: Optional[int] = preset.get("max_tokens")
+
         # Phase 2 feature flags
         structural_seeds_enabled = os.getenv(
             "ROUTE7_STRUCTURAL_SEEDS", "0"
@@ -864,6 +867,7 @@ class HippoRAG2Handler(BaseRouteHandler):
             pre_fetched_chunks=pre_fetched_chunks,
             graph_structural_header=graph_structural_header,
             language=language,
+            max_tokens=synthesis_max_tokens,
         )
 
         timings_ms["step_5_synthesis_ms"] = int((time.perf_counter() - t0) * 1000)

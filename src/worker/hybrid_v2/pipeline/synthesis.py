@@ -123,6 +123,7 @@ class EvidenceSynthesizer:
         doc_scope_enabled: Optional[bool] = None,
         graph_structural_header: Optional[str] = None,
         language: Optional[str] = None,
+        max_tokens: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Generate a comprehensive response with evidence citations.
@@ -347,6 +348,7 @@ class EvidenceSynthesizer:
             prompt_variant=prompt_variant,
             synthesis_model=synthesis_model,
             language=language,
+            max_tokens=max_tokens,
         )
         
         # Step 4b: Post-process v1_concise — strip any residual bracket
@@ -2222,6 +2224,7 @@ Response:"""
         prompt_variant: Optional[str] = None,
         synthesis_model: Optional[str] = None,
         language: Optional[str] = None,
+        max_tokens: Optional[int] = None,
     ) -> str:
         """Generate the final response with citation requirements."""
         
@@ -2260,10 +2263,13 @@ Response:"""
             # DRIFT mode: Use multi-question synthesis prompt
             prompt = self._get_drift_synthesis_prompt(query, context, sub_questions, prompt_variant=prompt_variant)
         else:
-            # v1_concise always uses the summary/extraction prompt builder
-            # regardless of response_type (Route 2 fact extraction).
+            # When an explicit prompt variant is set (v1_concise, v2_table,
+            # v3_keypoints), always route through _get_summary_prompt() which
+            # is the only builder that supports variants.  Without this,
+            # response_type="detailed_report" (the API default) would silently
+            # ignore the variant and use the verbose report prompt instead.
             effective_variant = (prompt_variant or "").lower().strip()
-            if effective_variant == "v1_concise":
+            if effective_variant and effective_variant != "v0":
                 prompt = self._get_summary_prompt(query, context, prompt_variant=prompt_variant)
             else:
                 prompts = {
@@ -2278,7 +2284,10 @@ Response:"""
             prompt += f"\n\nIMPORTANT: Respond entirely in {language}."
         
         try:
-            response = await llm.acomplete(prompt)
+            acomplete_kwargs: Dict[str, Any] = {}
+            if max_tokens is not None:
+                acomplete_kwargs["max_tokens"] = max_tokens
+            response = await llm.acomplete(prompt, **acomplete_kwargs)
             return response.text.strip()
         except Exception as e:
             logger.error("response_generation_failed", error=str(e))
