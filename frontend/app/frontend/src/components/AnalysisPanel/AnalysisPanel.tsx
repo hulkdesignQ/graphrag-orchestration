@@ -27,6 +27,10 @@ interface Props {
 /**
  * Build SentenceHighlight[] from structured citations by extracting polygon data
  * from the `sentences` array on each citation.
+ *
+ * Handles two polygon formats that may arrive from the backend:
+ *   1. Flat arrays (paragraph sentences): [[x1,y1,x2,y2,...], ...]
+ *   2. Legacy dict format (pre-fix table rows): [{"page":N,"polygon":[...]}, ...]
  */
 function buildHighlights(citations: StructuredCitation[]): SentenceHighlight[] {
     const highlights: SentenceHighlight[] = [];
@@ -35,7 +39,14 @@ function buildHighlights(citations: StructuredCitation[]): SentenceHighlight[] {
         const sentenceSpans = sc.sentences;
         if (Array.isArray(sentenceSpans)) {
             for (const span of sentenceSpans) {
-                const polygons: number[][] = span.polygons ?? [];
+                const rawPolygons: any[] = span.polygons ?? [];
+                if (rawPolygons.length === 0) continue;
+
+                // Normalize: accept both flat number arrays and {polygon:[...]} dicts
+                const polygons: number[][] = rawPolygons
+                    .map((p: any) => (Array.isArray(p) ? p : Array.isArray(p?.polygon) ? p.polygon : null))
+                    .filter((p: number[] | null): p is number[] => p != null && p.length >= 8);
+
                 if (polygons.length > 0) {
                     highlights.push({
                         text: span.text ?? sc.sentence_text ?? sc.text_preview ?? "",

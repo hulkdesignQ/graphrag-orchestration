@@ -705,6 +705,7 @@ class DocumentIntelligenceService:
     def _extract_table_row_sentences(
         self,
         result: AnalyzeResult,
+        page_dimensions: Optional[List[PageDimensions]] = None,
     ) -> List[Dict[str, Any]]:
         """Extract sentence-like structures from table rows.
         
@@ -712,18 +713,38 @@ class DocumentIntelligenceService:
         that should be searchable as sentences. Each table row is converted to a
         sentence with format: "HEADER1: value1 | HEADER2: value2 | ..."
         
+        Polygon coordinates are normalized to [0, 1] (matching paragraph sentence
+        format) so the frontend HighlightOverlay can render them directly.
+        
         Args:
             result: AnalyzeResult from Document Intelligence
+            page_dimensions: Page sizes for coordinate normalization
             
         Returns:
             List of sentence dicts with text, page, confidence, and polygons from cells
         """
         sentences: List[Dict[str, Any]] = []
         tables = getattr(result, "tables", None) or []
+
+        # Build page dimension lookup for polygon normalization
+        dim_by_page: Dict[int, PageDimensions] = {}
+        if page_dimensions:
+            dim_by_page = {d.page_number: d for d in page_dimensions}
         
         for table_idx, table in enumerate(tables):
             if not table.cells:
                 continue
+
+            # Try to derive a content offset from the table's first cell span
+            # so geometry-distribution filtering works for non-first sections.
+            table_offset = -1
+            for cell in table.cells:
+                cell_spans = getattr(cell, "spans", None) or []
+                if cell_spans:
+                    first_offset = getattr(cell_spans[0], "offset", None)
+                    if first_offset is not None:
+                        if table_offset < 0 or first_offset < table_offset:
+                            table_offset = first_offset
             
             # Extract headers (row 0)
             num_cols = table.column_count or 0
@@ -740,9 +761,10 @@ class DocumentIntelligenceService:
                 
                 # Build sentence text from row data
                 text_parts = []
-                polygons = []
+                polygons: List[List[float]] = []
                 page_number = 1
                 confidences = []
+                row_offset = -1
                 
                 for cell in sorted(row_cells, key=lambda c: c.column_index or 0):
                     col_idx = cell.column_index or 0
@@ -756,8 +778,16 @@ class DocumentIntelligenceService:
                         text_parts.append(f"{header}: {content}")
                     else:
                         text_parts.append(content)
+
+                    # Track earliest cell offset for this row
+                    cell_spans = getattr(cell, "spans", None) or []
+                    if cell_spans and row_offset < 0:
+                        cell_off = getattr(cell_spans[0], "offset", None)
+                        if cell_off is not None:
+                            row_offset = cell_off
                     
-                    # Extract polygon geometry from cell's bounding_regions
+                    # Extract polygon geometry from cell's bounding_regions,
+                    # normalized to [0, 1] to match paragraph sentence format.
                     cell_regions = getattr(cell, "bounding_regions", None) or []
                     for region in cell_regions:
                         region_page = getattr(region, "page_number", 1) or 1
@@ -768,11 +798,18 @@ class DocumentIntelligenceService:
                         if region_polygon:
                             # Convert to list if needed
                             poly_list = list(region_polygon) if hasattr(region_polygon, "__iter__") else []
-                            if poly_list:
-                                polygons.append({
-                                    "page": region_page,
-                                    "polygon": poly_list,
-                                })
+                            if poly_list and len(poly_list) >= 8:
+                                # Normalize to [0, 1] using page dimensions
+                                page_dim = dim_by_page.get(region_page)
+                                page_w = (page_dim.width if page_dim else 0) or 1
+                                page_h = (page_dim.height if page_dim else 0) or 1
+                                normalized: List[float] = []
+                                for i, coord in enumerate(poly_list[:8]):
+                                    if i % 2 == 0:  # x coordinate
+                                        normalized.append(coord / page_w)
+                                    else:  # y coordinate
+                                        normalized.append(coord / page_h)
+                                polygons.append(normalized)
                     
                     # Track confidence if available
                     cell_conf = getattr(cell, "confidence", None)
@@ -787,10 +824,14 @@ class DocumentIntelligenceService:
                 
                 # Calculate average confidence
                 avg_confidence = sum(confidences) / len(confidences) if confidences else 0.9
+
+                # Use row-level offset (or table-level fallback) so geometry
+                # distribution to non-first DI sections works correctly.
+                effective_offset = row_offset if row_offset >= 0 else table_offset
                 
                 sentences.append({
                     "text": row_text,
-                    "offset": -1,  # Table rows don't have content offsets
+                    "offset": effective_offset,
                     "length": len(row_text),
                     "page": page_number,
                     "confidence": avg_confidence,
@@ -2234,7 +2275,7 @@ class DocumentIntelligenceService:
                 sentences_with_geometry = self._extract_sentences_with_geometry(result, word_index, content)
                 
                 # Extract sentence-like structures from table rows (invoices, price lists, etc.)
-                table_row_sentences = self._extract_table_row_sentences(result)
+                table_row_sentences = self._extract_table_row_sentences(result, page_dimensions)
                 
                 # Merge paragraph sentences and table row sentences
                 all_sentences = sentences_with_geometry + table_row_sentences
