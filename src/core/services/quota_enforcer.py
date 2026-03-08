@@ -117,33 +117,31 @@ class QuotaEnforcer:
         Atomically increment daily and monthly counters.
 
         Returns (daily_count, monthly_count) after increment.
+
+        Raises on Redis failure — callers decide whether to fail-open
+        (for request flow) or retry (for backup recording).
         """
         now = datetime.utcnow()
         dk = self._daily_key(user_id, now)
         mk = self._monthly_key(user_id, now)
 
-        try:
-            pipe = self._redis.pipeline(transaction=True)
-            pipe.incr(dk)
-            pipe.expire(dk, _DAILY_TTL)
-            pipe.incr(mk)
-            pipe.expire(mk, _MONTHLY_TTL)
-            results = await pipe.execute()
+        pipe = self._redis.pipeline(transaction=True)
+        pipe.incr(dk)
+        pipe.expire(dk, _DAILY_TTL)
+        pipe.incr(mk)
+        pipe.expire(mk, _MONTHLY_TTL)
+        results = await pipe.execute()
 
-            daily = int(results[0])
-            monthly = int(results[2])
+        daily = int(results[0])
+        monthly = int(results[2])
 
-            logger.debug(
-                "quota_recorded",
-                user_id=user_id,
-                daily=daily,
-                monthly=monthly,
-            )
-            return daily, monthly
-
-        except Exception as e:
-            logger.warning("quota_record_failed", user_id=user_id, error=str(e))
-            return 0, 0  # fail-open
+        logger.debug(
+            "quota_recorded",
+            user_id=user_id,
+            daily=daily,
+            monthly=monthly,
+        )
+        return daily, monthly
 
     async def get_usage(self, user_id: str) -> Dict[str, int]:
         """
@@ -340,10 +338,17 @@ class QuotaEnforcer:
             return await self.check_limits(user_id)
 
         # Within limits — consume a query unit
-        new_daily, new_monthly = await self.record_query(user_id)
+        query_recorded = False
+        try:
+            new_daily, new_monthly = await self.record_query(user_id)
+            query_recorded = True
+        except Exception as e:
+            logger.warning("quota_record_in_consume_failed", user_id=user_id, error=str(e))
+            new_daily, new_monthly = 0, 0
 
         return {
             "allowed": True,
+            "query_recorded": query_recorded,
             "reason": None,
             "plan": plan.value,
             "daily_used": new_daily,
@@ -447,7 +452,7 @@ async def enforce_plan_limits(
 
         # Stash quota info for response header injection
         request.state.quota = result
-        request.state.query_recorded = True
+        request.state.query_recorded = result.get("query_recorded", False)
         return result
 
     except HTTPException:

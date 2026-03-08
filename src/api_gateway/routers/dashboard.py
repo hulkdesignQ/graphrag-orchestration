@@ -477,8 +477,8 @@ async def _fetch_dashboard_all(
     try:
         enforcer = await asyncio.wait_for(get_quota_enforcer(), timeout=5)
         plan_tier, redis_usage = await asyncio.gather(
-            asyncio.wait_for(enforcer.get_plan(user_id), timeout=2),
-            asyncio.wait_for(enforcer.get_usage(user_id), timeout=2),
+            asyncio.wait_for(enforcer.get_plan(user_id), timeout=5),
+            asyncio.wait_for(enforcer.get_usage(user_id), timeout=5),
         )
     except Exception:
         enforcer = None

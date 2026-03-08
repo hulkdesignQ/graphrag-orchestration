@@ -46,16 +46,25 @@ async def _ensure_query_recorded(user_id: str, query_recorded: bool) -> None:
     This is a backup path so the dashboard's "Queries Today / This Month"
     counters stay accurate even when the pre-request quota check hit a
     transient Redis error (fail-open).
+
+    Retries up to 3 times with exponential backoff for transient failures.
     """
     if query_recorded:
         return
-    try:
-        from src.core.services.quota_enforcer import get_quota_enforcer
-        enforcer = await asyncio.wait_for(get_quota_enforcer(), timeout=5)
-        await asyncio.wait_for(enforcer.record_query(user_id), timeout=5)
-        logger.info("backup_query_recorded", user_id=user_id)
-    except Exception as e:
-        logger.warning("backup_query_record_failed", user_id=user_id, error=str(e))
+    max_attempts = 3
+    for attempt in range(1, max_attempts + 1):
+        try:
+            from src.core.services.quota_enforcer import get_quota_enforcer
+            enforcer = await asyncio.wait_for(get_quota_enforcer(), timeout=5)
+            await asyncio.wait_for(enforcer.record_query(user_id), timeout=5)
+            logger.info("backup_query_recorded", user_id=user_id, attempt=attempt)
+            return
+        except Exception as e:
+            if attempt < max_attempts:
+                logger.debug("backup_query_record_retrying", user_id=user_id, attempt=attempt, error=str(e))
+                await asyncio.sleep(min(2 ** (attempt - 1), 4))
+            else:
+                logger.warning("backup_query_record_failed", user_id=user_id, attempts=max_attempts, error=str(e))
 
 
 async def _write_cosmos_usage(user_id: str, route: str, query_id: str, tokens: int, model: str,
