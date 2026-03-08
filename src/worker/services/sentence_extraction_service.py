@@ -1122,7 +1122,19 @@ def extract_sentences_from_di_units(
                     "index_in_section": idx_in_section,
                 }
                 # Attach DI polygon geometry for pixel-accurate highlighting
-                if unit_geometry_sentences:
+                # Primary: direct paragraph polygons (reliable text-containment lookup)
+                _para_polys = meta.get("_paragraph_polygons", [])
+                _poly_matched = False
+                if _para_polys:
+                    for pp in _para_polys:
+                        if sent_text in pp.get("text", ""):
+                            sent_dict["polygons"] = [pp["polygon"]]
+                            if pp.get("page"):
+                                sent_dict["page"] = pp["page"]
+                            _poly_matched = True
+                            break
+                # Fallback: legacy word-geometry text matching (for pre-fix data)
+                if not _poly_matched and unit_geometry_sentences:
                     geo = _match_geometry_for_sentence(sent_text, unit_geometry_sentences)
                     if geo and geo.get("polygons"):
                         sent_dict["polygons"] = geo["polygons"]

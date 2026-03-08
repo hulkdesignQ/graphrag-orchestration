@@ -407,6 +407,51 @@ class DocumentIntelligenceService:
         
         return path
 
+    def _extract_paragraph_polygons(
+        self,
+        paragraphs: List[Any],
+        page_dimensions_serial: Optional[List[Dict[str, Any]]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Extract normalized bounding-region polygons for each DI paragraph.
+
+        Returns ``[{"text": ..., "polygon": [x1,y1,...,x4,y4], "page": N}]``
+        so that downstream sentence extraction can attach polygons to every
+        wtpsplit sentence via simple text-containment lookup — bypassing the
+        fragile word-level-geometry + text-matching pipeline entirely.
+        """
+        dim_by_page: Dict[int, Dict[str, Any]] = {}
+        if page_dimensions_serial:
+            dim_by_page = {d.get("page") or d.get("page_number") or 0: d for d in page_dimensions_serial}
+
+        result: List[Dict[str, Any]] = []
+        for para in paragraphs:
+            content = (getattr(para, "content", None) or "").strip()
+            if not content:
+                continue
+            regions = getattr(para, "bounding_regions", None) or []
+            if not regions:
+                continue
+            region = regions[0]
+            page_num = getattr(region, "page_number", 1) or 1
+            raw_poly = getattr(region, "polygon", None)
+            if not raw_poly:
+                continue
+            poly_list = list(raw_poly) if hasattr(raw_poly, "__iter__") else []
+            if len(poly_list) < 8:
+                continue
+            dim = dim_by_page.get(page_num, {})
+            pw = (dim.get("width") or 0) or 1
+            ph = (dim.get("height") or 0) or 1
+            normalized: List[float] = []
+            for i, coord in enumerate(poly_list[:8]):
+                normalized.append(coord / pw if i % 2 == 0 else coord / ph)
+            result.append({
+                "text": content,
+                "polygon": normalized,
+                "page": page_num,
+            })
+        return result
+
     def _extract_table_metadata(
         self,
         table: DocumentTable,
@@ -1938,6 +1983,11 @@ class DocumentIntelligenceService:
                     )
                     for t in tbls
                 ]
+                # Direct paragraph-level polygons (bypasses word-level geometry text matching)
+                _para_polygons = self._extract_paragraph_polygons(
+                    paras,
+                    page_dimensions_serial=(geometry_metadata or {}).get("page_dimensions"),
+                )
                 
                 # Get KVPs associated with this section
                 section_kvps = kvps_by_section.get(section_idx, [])
@@ -2059,6 +2109,8 @@ class DocumentIntelligenceService:
                             **({"end_offset": end_offset} if end_offset is not None else {}),
                             # Word geometry for pixel-accurate highlighting
                             **(chunk_geometry if chunk_geometry else {}),
+                            # Direct paragraph polygons (unified pipeline)
+                            **({"_paragraph_polygons": _para_polygons} if _para_polygons else {}),
                             # Document-level metadata (included in first emitted unit)
                             **({"barcodes": barcodes} if is_first_unit and barcodes else {}),
                             **({"languages": languages} if is_first_unit and languages else {}),
@@ -2471,6 +2523,11 @@ class DocumentIntelligenceService:
                         )
                         for t in page_tables
                     ]
+                    # Direct paragraph-level polygons (bypasses word-level geometry text matching)
+                    _page_para_polygons = self._extract_paragraph_polygons(
+                        page_paragraphs,
+                        page_dimensions_serial=(geometry_metadata or {}).get("page_dimensions"),
+                    )
 
                     # Build geometry metadata for this page
                     # Note: Store only page_dimensions and sentences, NOT word_geometries
@@ -2505,6 +2562,8 @@ class DocumentIntelligenceService:
                                 "paragraph_count": len(page_paragraphs),
                                 # Word geometry for pixel-accurate highlighting
                                 **page_geometry,
+                                # Direct paragraph polygons (unified pipeline)
+                                **({"_paragraph_polygons": _page_para_polygons} if _page_para_polygons else {}),
                                 # Document-level metadata (first unit only)
                                 **({"languages": page_languages} if is_first_page_unit and page_languages else {}),
                                 **({"barcodes": page_barcodes} if is_first_page_unit and page_barcodes else {}),
