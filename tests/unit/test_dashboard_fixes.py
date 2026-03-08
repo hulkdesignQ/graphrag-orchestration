@@ -80,6 +80,8 @@ class TestUserBlobManager:
         b = MagicMock()
         b.name = name
         b.size = size
+        b.is_directory = False
+        b.metadata = {}
         return b
 
     @pytest.mark.asyncio
@@ -97,7 +99,7 @@ class TestUserBlobManager:
 
         mock_container = AsyncMock()
 
-        async def fake_list_blobs(name_starts_with=None):
+        async def fake_list_blobs(name_starts_with=None, **kwargs):
             for b in blobs:
                 if b.name.startswith(name_starts_with or ""):
                     yield b
@@ -110,6 +112,8 @@ class TestUserBlobManager:
             mgr.blob_service_client = MagicMock()
             mgr.blob_service_client.get_container_client.return_value = mock_container
 
+            from src.api_gateway.services.user_blob_manager import _blob_list_cache
+            _blob_list_cache.clear()
             result = await mgr.list_blobs("grp1")
 
         assert len(result) == 5, f"Expected 5 files, got {len(result)}: {result}"
@@ -125,12 +129,12 @@ class TestUserBlobManager:
         blobs = [
             self._make_blob("grp1/a.pdf"),
             self._make_blob("grp1/b.docx"),
-            self._make_blob("grp1/subdir/c.txt"),  # subdirectory – excluded
+            self._make_blob("grp1/subdir/c.txt"),  # subdirectory – now included in stats
         ]
 
         mock_container = AsyncMock()
 
-        async def fake_list_blobs(name_starts_with=None):
+        async def fake_list_blobs(name_starts_with=None, **kwargs):
             for b in blobs:
                 if b.name.startswith(name_starts_with or ""):
                     yield b
@@ -145,7 +149,7 @@ class TestUserBlobManager:
 
             count = await mgr.count_blobs("grp1")
 
-        assert count == 2, f"Expected 2 top-level blobs, got {count}"
+        assert count == 3, f"Expected 3 blobs (all files incl. subdirs), got {count}"
 
     @pytest.mark.asyncio
     async def test_get_storage_used_bytes(self):
@@ -161,7 +165,7 @@ class TestUserBlobManager:
 
         mock_container = AsyncMock()
 
-        async def fake_list_blobs(name_starts_with=None):
+        async def fake_list_blobs(name_starts_with=None, **kwargs):
             for b in blobs:
                 if b.name.startswith(name_starts_with or ""):
                     yield b
