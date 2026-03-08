@@ -846,6 +846,8 @@ def _match_geometry_for_sentence(
         return None
 
     norm_sent = " ".join(sent_text.lower().split())
+    # Collapse whitespace around punctuation so "SUBTOTAL : val" == "SUBTOTAL: val"
+    norm_sent = re.sub(r"\s*([:|])\s*", r"\1 ", norm_sent).strip()
     if len(norm_sent) < 5:
         return None
 
@@ -857,6 +859,7 @@ def _match_geometry_for_sentence(
         if not geo_text:
             continue
         norm_geo = " ".join(geo_text.lower().split())
+        norm_geo = re.sub(r"\s*([:|])\s*", r"\1 ", norm_geo).strip()
 
         # Quick containment check (covers 90%+ of cases)
         if norm_sent in norm_geo or norm_geo in norm_sent:

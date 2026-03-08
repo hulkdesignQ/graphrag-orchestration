@@ -25,16 +25,48 @@ interface Props {
 }
 
 /**
+ * Detect whether polygon coordinates are raw DI values (inches) rather than
+ * normalised [0,1].  Any coordinate > 1.0 is a clear signal — normalised
+ * values never exceed 1.
+ */
+function needsNormalization(polygon: number[]): boolean {
+    return polygon.some(v => v > 1.0);
+}
+
+/**
+ * Normalise a raw-inch polygon to [0,1] using page dimensions.
+ * Falls back to standard US-Letter (8.5 × 11 in) if dims are unavailable.
+ */
+function normalizePolygon(polygon: number[], pageW: number, pageH: number): number[] {
+    const out: number[] = [];
+    for (let i = 0; i < polygon.length; i++) {
+        out.push(i % 2 === 0 ? polygon[i] / pageW : polygon[i] / pageH);
+    }
+    return out;
+}
+
+/**
  * Build SentenceHighlight[] from structured citations by extracting polygon data
  * from the `sentences` array on each citation.
  *
  * Handles two polygon formats that may arrive from the backend:
  *   1. Flat arrays (paragraph sentences): [[x1,y1,x2,y2,...], ...]
  *   2. Legacy dict format (pre-fix table rows): [{"page":N,"polygon":[...]}, ...]
+ *
+ * Also handles pre-fix data where coordinates are raw DI inches instead of
+ * normalised [0,1] — detected via any coord > 1.0, then normalised using
+ * page_dimensions from the citation (or US-Letter fallback).
  */
 function buildHighlights(citations: StructuredCitation[]): SentenceHighlight[] {
     const highlights: SentenceHighlight[] = [];
     for (const sc of citations) {
+        // Resolve page dimensions for raw-inch → [0,1] normalisation
+        const dims = sc.page_dimensions;
+        // Find first page dim entry (or fallback to US-Letter 8.5×11 inches)
+        const pageDim = Array.isArray(dims) && dims.length > 0 ? dims[0] : null;
+        const pageW: number = (pageDim?.width as number) || 8.5;
+        const pageH: number = (pageDim?.height as number) || 11;
+
         // If the structured citation has sentence-level polygon data, use it.
         const sentenceSpans = sc.sentences;
         if (Array.isArray(sentenceSpans)) {
@@ -42,10 +74,20 @@ function buildHighlights(citations: StructuredCitation[]): SentenceHighlight[] {
                 const rawPolygons: any[] = span.polygons ?? [];
                 if (rawPolygons.length === 0) continue;
 
-                // Normalize: accept both flat number arrays and {polygon:[...]} dicts
-                const polygons: number[][] = rawPolygons
+                // Extract: accept both flat number arrays and {polygon:[...]} dicts
+                let polygons: number[][] = rawPolygons
                     .map((p: any) => (Array.isArray(p) ? p : Array.isArray(p?.polygon) ? p.polygon : null))
                     .filter((p: number[] | null): p is number[] => p != null && p.length >= 8);
+
+                // Auto-normalise raw-inch coordinates from pre-fix indexed data
+                if (polygons.length > 0 && needsNormalization(polygons[0])) {
+                    // Use per-span page to pick correct dimensions if available
+                    const spanPage = span.page ?? sc.page_number ?? 1;
+                    const spanDim = Array.isArray(dims) ? dims.find((d: any) => d.page === spanPage || d.page_number === spanPage) : null;
+                    const w = (spanDim?.width as number) || pageW;
+                    const h = (spanDim?.height as number) || pageH;
+                    polygons = polygons.map(poly => normalizePolygon(poly, w, h));
+                }
 
                 if (polygons.length > 0) {
                     highlights.push({

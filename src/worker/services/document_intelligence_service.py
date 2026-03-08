@@ -435,11 +435,11 @@ class DocumentIntelligenceService:
                 "caption": caption_text,
             }
 
-        # Extract headers (row 0)
+        # Extract headers (row 0) — .strip() must match _extract_table_row_sentences()
         headers = [""] * (table.column_count or 0)
         for cell in table.cells:
             if cell.row_index == 0 and cell.column_index is not None:
-                headers[cell.column_index] = cell.content or ""
+                headers[cell.column_index] = (cell.content or "").strip()
 
         # Extract data rows
         rows = []
@@ -449,7 +449,7 @@ class DocumentIntelligenceService:
                 if cell.row_index == row_idx and cell.column_index is not None:
                     col_idx = cell.column_index
                     if col_idx < len(headers):
-                        row_data[headers[col_idx]] = cell.content or ""
+                        row_data[headers[col_idx]] = (cell.content or "").strip()
             
             if row_data:
                 rows.append(row_data)
