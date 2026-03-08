@@ -2,8 +2,9 @@
 
 import logging
 import os
+import re
 import time
-from typing import IO, Tuple
+from typing import IO, Optional, Tuple
 
 from azure.core.credentials_async import AsyncTokenCredential
 from azure.storage.blob.aio import BlobServiceClient
@@ -12,13 +13,45 @@ logger = logging.getLogger(__name__)
 
 # In-memory TTL cache for blob stats: group_id → (timestamp, count, total_bytes)
 _blob_stats_cache: dict[str, Tuple[float, int, int]] = {}
-# In-memory TTL cache for blob file listings: group_id → (timestamp, [filenames])
+# In-memory TTL cache for blob file listings: cache_key → (timestamp, [filenames])
 _blob_list_cache: dict[str, Tuple[float, list[str]]] = {}
 _BLOB_CACHE_TTL = 60  # seconds
 
+# Pattern for safe folder names: alphanumeric, spaces, hyphens, underscores, dots
+_SAFE_FOLDER_RE = re.compile(r'^[\w\s.\-]+$')
+
+
+def sanitize_folder_name(folder: str | None) -> str | None:
+    """Validate and sanitize a folder name to prevent path traversal."""
+    if not folder:
+        return None
+    folder = folder.strip().strip("/")
+    if not folder:
+        return None
+    if ".." in folder or "/" in folder or "\\" in folder:
+        raise ValueError(f"Invalid folder name: {folder}")
+    if not _SAFE_FOLDER_RE.match(folder):
+        raise ValueError(f"Folder name contains invalid characters: {folder}")
+    return folder
+
+
+def _is_directory_blob(blob) -> bool:
+    """Check if a blob entry is an ADLS Gen2 directory (not a real file)."""
+    if getattr(blob, "is_directory", False):
+        return True
+    metadata = getattr(blob, "metadata", None)
+    if metadata and metadata.get("hdi_isfolder") == "true":
+        return True
+    return False
+
 
 class UserBlobManager:
-    """Manages user-uploaded files in Azure Blob Storage (no ADLS/HNS required)."""
+    """Manages user-uploaded files in Azure Blob Storage.
+
+    Supports optional folder prefixes: blobs are stored at
+    ``{group_id}/{filename}`` (root) or ``{group_id}/{folder}/{filename}``.
+    On ADLS Gen2 (HNS) accounts, directory entries are filtered out of listings.
+    """
 
     def __init__(self, endpoint: str, container: str, credential: AsyncTokenCredential):
         self.credential = credential
@@ -29,28 +62,53 @@ class UserBlobManager:
             max_single_put_size=4 * 1024 * 1024,
         )
 
-    async def list_blobs(self, group_id: str) -> list[str]:
-        """List top-level blob filenames for a group, with 60s TTL cache."""
-        now = time.monotonic()
-        cached = _blob_list_cache.get(group_id)
-        if cached and (now - cached[0]) < _BLOB_CACHE_TTL:
-            return list(cached[1])  # return a copy
+    def _blob_path(self, group_id: str, filename: str, folder: str | None = None) -> str:
+        """Build the full blob path, optionally scoped to a folder."""
+        if folder:
+            return f"{group_id}/{folder}/{filename}"
+        return f"{group_id}/{filename}"
 
-        prefix = f"{group_id}/"
+    async def list_blobs(self, group_id: str, folder: str | None = None) -> list[str]:
+        """List blob filenames for a group, optionally scoped to a folder.
+
+        Args:
+            group_id: Tenant/user partition key.
+            folder: If provided, list only blobs inside ``{group_id}/{folder}/``.
+                    If None, list only root-level (un-foldered) blobs.
+
+        Returns:
+            Plain filenames (no folder prefix).
+        """
+        folder = sanitize_folder_name(folder)
+        cache_key = f"{group_id}:{folder or ''}"
+        now = time.monotonic()
+        cached = _blob_list_cache.get(cache_key)
+        if cached and (now - cached[0]) < _BLOB_CACHE_TTL:
+            return list(cached[1])
+
+        if folder:
+            prefix = f"{group_id}/{folder}/"
+        else:
+            prefix = f"{group_id}/"
         container_client = self.blob_service_client.get_container_client(self.container)
         files = []
-        async for blob in container_client.list_blobs(name_starts_with=prefix):
+        async for blob in container_client.list_blobs(name_starts_with=prefix, include=["metadata"]):
+            if _is_directory_blob(blob):
+                continue
             name = blob.name[len(prefix):]
-            # Only top-level files, skip subdirectories
+            # Only immediate children, skip deeper nesting
             if "/" in name:
+                continue
+            # Skip empty names (the directory marker itself)
+            if not name:
                 continue
             files.append(name)
 
-        _blob_list_cache[group_id] = (now, files)
-        return list(files)  # return a copy
+        _blob_list_cache[cache_key] = (now, files)
+        return list(files)
 
     async def get_blob_stats(self, group_id: str) -> Tuple[int, int]:
-        """Single-pass: count top-level blobs and sum all sizes, with TTL cache."""
+        """Single-pass: count blobs and sum all sizes, with TTL cache."""
         now = time.monotonic()
         cached = _blob_stats_cache.get(group_id)
         if cached and (now - cached[0]) < _BLOB_CACHE_TTL:
@@ -60,19 +118,25 @@ class UserBlobManager:
         container_client = self.blob_service_client.get_container_client(self.container)
         count = 0
         total_bytes = 0
-        async for blob in container_client.list_blobs(name_starts_with=prefix):
-            total_bytes += blob.size or 0
+        async for blob in container_client.list_blobs(name_starts_with=prefix, include=["metadata"]):
+            if _is_directory_blob(blob):
+                continue
             name = blob.name[len(prefix):]
-            if "/" not in name:
-                count += 1
+            if not name:
+                continue
+            total_bytes += blob.size or 0
+            count += 1
 
         _blob_stats_cache[group_id] = (now, count, total_bytes)
         return count, total_bytes
 
     def invalidate_blob_cache(self, group_id: str) -> None:
-        """Invalidate cached stats and file list after mutations so next read is fresh."""
+        """Invalidate cached stats and ALL per-folder file lists after mutations."""
         _blob_stats_cache.pop(group_id, None)
-        _blob_list_cache.pop(group_id, None)
+        # Clear all cache entries for this group (root + any folder)
+        keys_to_remove = [k for k in _blob_list_cache if k.startswith(f"{group_id}:")]
+        for k in keys_to_remove:
+            del _blob_list_cache[k]
 
     async def count_blobs(self, group_id: str) -> int:
         """Count top-level blobs for a group (for dashboard document count)."""
@@ -84,24 +148,27 @@ class UserBlobManager:
         _, total_bytes = await self.get_blob_stats(group_id)
         return total_bytes
 
-    async def upload_blob(self, file: IO, filename: str, group_id: str) -> str:
-        blob_name = f"{group_id}/{filename}"
+    async def upload_blob(self, file: IO, filename: str, group_id: str, folder: str | None = None) -> str:
+        folder = sanitize_folder_name(folder)
+        blob_name = self._blob_path(group_id, filename, folder)
         container_client = self.blob_service_client.get_container_client(self.container)
         blob_client = container_client.get_blob_client(blob_name)
         await blob_client.upload_blob(file, overwrite=True)
         self.invalidate_blob_cache(group_id)
         return blob_client.url
 
-    async def remove_blob(self, filename: str, group_id: str) -> None:
-        blob_name = f"{group_id}/{filename}"
+    async def remove_blob(self, filename: str, group_id: str, folder: str | None = None) -> None:
+        folder = sanitize_folder_name(folder)
+        blob_name = self._blob_path(group_id, filename, folder)
         container_client = self.blob_service_client.get_container_client(self.container)
         blob_client = container_client.get_blob_client(blob_name)
         await blob_client.delete_blob(delete_snapshots="include")
         self.invalidate_blob_cache(group_id)
 
-    async def rename_blob(self, old_filename: str, new_filename: str, group_id: str) -> str:
-        old_blob = f"{group_id}/{old_filename}"
-        new_blob = f"{group_id}/{new_filename}"
+    async def rename_blob(self, old_filename: str, new_filename: str, group_id: str, folder: str | None = None) -> str:
+        folder = sanitize_folder_name(folder)
+        old_blob = self._blob_path(group_id, old_filename, folder)
+        new_blob = self._blob_path(group_id, new_filename, folder)
         container_client = self.blob_service_client.get_container_client(self.container)
         src_client = container_client.get_blob_client(old_blob)
         dst_client = container_client.get_blob_client(new_blob)
@@ -131,9 +198,10 @@ class UserBlobManager:
         self.invalidate_blob_cache(group_id)
         return dst_client.url
 
-    async def download_blob(self, filename: str, group_id: str) -> "tuple[bytes, dict] | None":
-        """Download a blob from {group_id}/{filename}. Returns (content, properties) or None."""
-        blob_name = f"{group_id}/{filename}"
+    async def download_blob(self, filename: str, group_id: str, folder: str | None = None) -> "tuple[bytes, dict] | None":
+        """Download a blob. Returns (content, properties) or None."""
+        folder = sanitize_folder_name(folder)
+        blob_name = self._blob_path(group_id, filename, folder)
         container_client = self.blob_service_client.get_container_client(self.container)
         blob_client = container_client.get_blob_client(blob_name)
         try:

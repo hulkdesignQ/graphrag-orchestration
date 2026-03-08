@@ -74,6 +74,9 @@ const Files = () => {
     const [toasts, setToasts] = useState<ToastMessage[]>([]);
     const toastIdRef = useRef(0);
 
+    // Track active folder name via ref (avoids callback dependency on `folders` state)
+    const activeFolderNameRef = useRef<string | undefined>(undefined);
+
     // Toast helper
     const addToast = useCallback((type: ToastMessage["type"], text: string) => {
         const id = ++toastIdRef.current;
@@ -94,7 +97,7 @@ const Files = () => {
                 setFiles([]);
                 return;
             }
-            const result = await listFilesApi(token as string);
+            const result = await listFilesApi(token as string, activeFolderNameRef.current);
             setFiles(result);
         } catch (err: any) {
             addToast("error", `Failed to load files: ${err.message}`);
@@ -137,6 +140,15 @@ const Files = () => {
         loadFiles();
         loadFolders();
     }, [loadFiles, loadFolders]);
+
+    // Re-fetch files when folder selection changes
+    useEffect(() => {
+        activeFolderNameRef.current = activeFolderId
+            ? folders.find(f => f.id === activeFolderId)?.name
+            : undefined;
+        loadFiles();
+        setSelected(new Set());
+    }, [activeFolderId]); // eslint-disable-line react-hooks/exhaustive-deps
 
     useEffect(() => {
         if (activeTab === "shared") {
@@ -223,10 +235,11 @@ const Files = () => {
             try {
                 const token = client ? await getToken(client) : undefined;
                 if (useLogin && !token) throw new Error("Not authenticated");
+                const folderName = activeFolderNameRef.current;
                 if (filenames.length === 1) {
-                    await deleteFileApi(filenames[0], token as string);
+                    await deleteFileApi(filenames[0], token as string, folderName);
                 } else {
-                    await bulkDeleteFilesApi(filenames, token as string);
+                    await bulkDeleteFilesApi(filenames, token as string, folderName);
                 }
                 addToast("success", t("files.filesDeleted", { count: filenames.length }));
                 await loadFiles();
@@ -248,7 +261,7 @@ const Files = () => {
             try {
                 const token = client ? await getToken(client) : undefined;
                 if (useLogin && !token) throw new Error("Not authenticated");
-                await renameFileApi(oldName, newName, token as string);
+                await renameFileApi(oldName, newName, token as string, activeFolderNameRef.current);
                 addToast("success", t("files.renamedTo", { name: newName }));
                 setRenameFile(null);
                 await loadFiles();

@@ -26,15 +26,18 @@ router = APIRouter(tags=["files"])
 
 class DeleteFileRequest(BaseModel):
     filename: str
+    folder: Optional[str] = None
 
 
 class BulkDeleteRequest(BaseModel):
     filenames: List[str]
+    folder: Optional[str] = None
 
 
 class RenameFileRequest(BaseModel):
     old_filename: str
     new_filename: str
+    folder: Optional[str] = None
 
 
 class MoveFileRequest(BaseModel):
@@ -115,6 +118,32 @@ def _validate_upload(f: UploadFile) -> None:
         )
 
 
+# ==================== Folder Helpers ====================
+
+
+async def _resolve_folder_name(group_id: str, folder_id: str) -> str | None:
+    """Resolve a folder UUID to its display name via Neo4j.
+
+    Returns the folder name, or None if the folder doesn't exist.
+    """
+    try:
+        from src.worker.services import GraphService
+        graph_service = GraphService()
+        if not graph_service.driver:
+            logger.warning("Neo4j unavailable — cannot resolve folder name for %s", folder_id)
+            return None
+        with graph_service.driver.session() as session:
+            result = session.run(
+                "MATCH (f:Folder {id: $fid, group_id: $gid}) RETURN f.name AS name",
+                fid=folder_id, gid=group_id,
+            )
+            record = result.single()
+            return record["name"] if record else None
+    except Exception as e:
+        logger.warning("Failed to resolve folder name for %s: %s", folder_id, e)
+        return None
+
+
 # ==================== Endpoints ====================
 
 @router.post("/upload")
@@ -129,8 +158,8 @@ async def upload_files(
     """Upload one or more files. Supports multi-file upload.
     
     If folder_id is provided, documents are indexed into that folder's
-    root folder partition (isolated knowledge graph). Blob storage path
-    remains {auth_group_id}/{filename}.
+    root folder partition (isolated knowledge graph) and stored under
+    the folder's blob prefix: ``{group_id}/{folder_name}/{filename}``.
     """
     from src.api_gateway.services.folder_resolver import resolve_neo4j_group_id
 
@@ -139,13 +168,19 @@ async def upload_files(
     doc_sync = _get_doc_sync(request)
     neo4j_gid = await resolve_neo4j_group_id(group_id, folder_id)
 
+    # Resolve folder name for blob storage path
+    folder_name: str | None = None
+    if folder_id:
+        folder_name = await _resolve_folder_name(group_id, folder_id)
+        if not folder_name:
+            logger.warning("Could not resolve folder_id=%s — uploading to root", folder_id)
+
     results = []
     for f in file:
         try:
             _validate_upload(f)
             safe_filename = _sanitize_filename(f.filename)
-            # Blob storage uses auth_group_id (security boundary)
-            file_url = await blob_manager.upload_blob(f, safe_filename, group_id)
+            file_url = await blob_manager.upload_blob(f, safe_filename, group_id, folder=folder_name)
             if ingester:
                 from prepdocslib.listfilestrategy import File as IngesterFile
 
@@ -195,7 +230,7 @@ async def delete_uploaded(
     blob_manager = _get_blob_manager(request)
     ingester = _get_ingester(request)
 
-    await blob_manager.remove_blob(body.filename, group_id)
+    await blob_manager.remove_blob(body.filename, group_id, folder=body.folder)
     if ingester:
         await ingester.remove_file(body.filename, group_id)
 
@@ -226,7 +261,7 @@ async def delete_uploaded_bulk(
     successful_filenames = []
     for filename in body.filenames:
         try:
-            await blob_manager.remove_blob(filename, group_id)
+            await blob_manager.remove_blob(filename, group_id, folder=body.folder)
             if ingester:
                 await ingester.remove_file(filename, group_id)
             results.append({"filename": filename, "status": "success"})
@@ -260,14 +295,19 @@ async def delete_uploaded_bulk(
 @router.get("/list_uploaded")
 async def list_uploaded(
     request: Request,
+    folder: Optional[str] = None,
     group_id: str = Depends(get_group_id),
     user_id: str = Depends(get_user_id),
 ):
-    """List the uploaded documents for the current group."""
+    """List uploaded documents, optionally scoped to a folder.
+    
+    Args:
+        folder: Folder name to scope listing. If omitted, lists root-level files.
+    """
     blob_manager = _get_blob_manager(request)
     try:
         async with asyncio.timeout(30):
-            files = await blob_manager.list_blobs(group_id)
+            files = await blob_manager.list_blobs(group_id, folder=folder)
     except TimeoutError:
         logger.error("list_uploaded_timeout for group_id=%s", group_id)
         raise HTTPException(status_code=504, detail="File listing timed out")
@@ -323,7 +363,7 @@ async def rename_uploaded(
 
     try:
         # Step 1: Rename in ADLS
-        new_url = await blob_manager.rename_blob(body.old_filename, body.new_filename, group_id)
+        new_url = await blob_manager.rename_blob(body.old_filename, body.new_filename, group_id, folder=body.folder)
 
         # Step 2: Update search index (if available)
         if ingester:

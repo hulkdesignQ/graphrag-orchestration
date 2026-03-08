@@ -108,23 +108,23 @@ export async function uploadFilesApi(
 
 // ======================== Delete ========================
 
-export async function deleteFileApi(filename: string, idToken: string): Promise<FileOperationResponse> {
+export async function deleteFileApi(filename: string, idToken: string, folder?: string): Promise<FileOperationResponse> {
     const headers = await getHeaders(idToken);
     const response = await fetchWithAuthRetry("/delete_uploaded", {
         method: "POST",
         headers: { ...headers, "Content-Type": "application/json" },
-        body: JSON.stringify({ filename }),
+        body: JSON.stringify({ filename, ...(folder ? { folder } : {}) }),
     });
     if (!response.ok) throw new Error(`Delete failed: ${response.statusText}`);
     return response.json();
 }
 
-export async function bulkDeleteFilesApi(filenames: string[], idToken: string): Promise<FileOperationResponse> {
+export async function bulkDeleteFilesApi(filenames: string[], idToken: string, folder?: string): Promise<FileOperationResponse> {
     const headers = await getHeaders(idToken);
     const response = await fetchWithAuthRetry("/delete_uploaded_bulk", {
         method: "POST",
         headers: { ...headers, "Content-Type": "application/json" },
-        body: JSON.stringify({ filenames }),
+        body: JSON.stringify({ filenames, ...(folder ? { folder } : {}) }),
     });
     if (!response.ok) throw new Error(`Bulk delete failed: ${response.statusText}`);
     return response.json();
@@ -132,8 +132,9 @@ export async function bulkDeleteFilesApi(filenames: string[], idToken: string): 
 
 // ======================== List ========================
 
-export async function listFilesApi(idToken: string): Promise<string[]> {
-    const response = await fetchWithAuthRetry("/list_uploaded", {
+export async function listFilesApi(idToken: string, folder?: string): Promise<string[]> {
+    const params = folder ? `?folder=${encodeURIComponent(folder)}` : "";
+    const response = await fetchWithAuthRetry(`/list_uploaded${params}`, {
         method: "GET",
         headers: await getHeaders(idToken),
     });
@@ -172,13 +173,14 @@ export async function listGlobalFilesApi(): Promise<string[]> {
 export async function renameFileApi(
     oldFilename: string,
     newFilename: string,
-    idToken: string
+    idToken: string,
+    folder?: string
 ): Promise<FileOperationResponse> {
     const headers = await getHeaders(idToken);
     const response = await fetchWithAuthRetry("/rename_uploaded", {
         method: "POST",
         headers: { ...headers, "Content-Type": "application/json" },
-        body: JSON.stringify({ old_filename: oldFilename, new_filename: newFilename }),
+        body: JSON.stringify({ old_filename: oldFilename, new_filename: newFilename, ...(folder ? { folder } : {}) }),
     });
     if (!response.ok) throw new Error(`Rename failed: ${response.statusText}`);
     return response.json();
