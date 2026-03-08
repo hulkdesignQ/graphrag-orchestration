@@ -407,16 +407,25 @@ class DocumentIntelligenceService:
         
         return path
 
-    def _extract_table_metadata(self, table: DocumentTable) -> Dict[str, Any]:
+    def _extract_table_metadata(
+        self,
+        table: DocumentTable,
+        page_dimensions_serial: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
         """
         Extract structured table metadata for PropertyGraphIndex.
         
+        Cell-level polygons are extracted and normalized directly into each
+        row dict (``_polygons``, ``_page``) so that downstream sentence
+        extraction can attach them **without** relying on the fragile
+        geometry-text-matching pipeline.
+
         Returns:
             {
                 "row_count": int,
                 "column_count": int,
                 "headers": List[str],
-                "rows": List[Dict[str, str]],
+                "rows": List[Dict[str, str | Any]],
                 "caption": str  (table caption from DI, empty if none)
             }
         """
@@ -435,6 +444,11 @@ class DocumentIntelligenceService:
                 "caption": caption_text,
             }
 
+        # Build page dimension lookup for polygon normalization
+        dim_by_page: Dict[int, Dict[str, Any]] = {}
+        if page_dimensions_serial:
+            dim_by_page = {d["page_number"]: d for d in page_dimensions_serial if "page_number" in d}
+
         # Extract headers (row 0) — .strip() must match _extract_table_row_sentences()
         headers = [""] * (table.column_count or 0)
         for cell in table.cells:
@@ -450,7 +464,9 @@ class DocumentIntelligenceService:
                 [c for c in table.cells if c.row_index == row_idx and c.column_index is not None],
                 key=lambda c: c.column_index,
             )
-            row_data = {}
+            row_data: Dict[str, Any] = {}
+            row_polygons: List[List[float]] = []
+            row_page: Optional[int] = None
             for cell in row_cells_sorted:
                 col_idx = cell.column_index
                 if col_idx < len(headers):
@@ -460,8 +476,34 @@ class DocumentIntelligenceService:
                     if key in row_data:
                         key = f"{key}__col{col_idx}"
                     row_data[key] = content
+
+                # ── Direct polygon extraction from cell bounding_regions ──
+                cell_regions = getattr(cell, "bounding_regions", None) or []
+                for region in cell_regions:
+                    region_page = getattr(region, "page_number", 1) or 1
+                    if row_page is None:
+                        row_page = region_page
+                    region_polygon = getattr(region, "polygon", None)
+                    if region_polygon:
+                        poly_list = list(region_polygon) if hasattr(region_polygon, "__iter__") else []
+                        if poly_list and len(poly_list) >= 8:
+                            page_dim = dim_by_page.get(region_page, {})
+                            page_w = (page_dim.get("width") or 0) or 1
+                            page_h = (page_dim.get("height") or 0) or 1
+                            normalized: List[float] = []
+                            for i, coord in enumerate(poly_list[:8]):
+                                if i % 2 == 0:
+                                    normalized.append(coord / page_w)
+                                else:
+                                    normalized.append(coord / page_h)
+                            row_polygons.append(normalized)
             
             if row_data:
+                # Attach cell-level polygon data directly to row metadata
+                if row_polygons:
+                    row_data["_polygons"] = row_polygons
+                if row_page is not None:
+                    row_data["_page"] = row_page
                 rows.append(row_data)
 
         return {
@@ -1889,7 +1931,13 @@ class DocumentIntelligenceService:
                 if not text:
                     return
 
-                tables_metadata = [self._extract_table_metadata(t) for t in tbls]
+                tables_metadata = [
+                    self._extract_table_metadata(
+                        t,
+                        page_dimensions_serial=(geometry_metadata or {}).get("page_dimensions"),
+                    )
+                    for t in tbls
+                ]
                 
                 # Get KVPs associated with this section
                 section_kvps = kvps_by_section.get(section_idx, [])
@@ -2417,7 +2465,11 @@ class DocumentIntelligenceService:
                     # Extract metadata
                     section_path = self._build_section_hierarchy(page_paragraphs)
                     tables_metadata = [
-                        self._extract_table_metadata(t) for t in page_tables
+                        self._extract_table_metadata(
+                            t,
+                            page_dimensions_serial=(geometry_metadata or {}).get("page_dimensions"),
+                        )
+                        for t in page_tables
                     ]
 
                     # Build geometry metadata for this page

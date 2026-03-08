@@ -1149,6 +1149,8 @@ def extract_sentences_from_di_units(
                     # handle __colN disambiguated duplicate headers correctly.
                     parts = []
                     for key, val in row.items():
+                        if key.startswith("_"):
+                            continue
                         val = val.strip()
                         if not val:
                             continue
@@ -1181,13 +1183,41 @@ def extract_sentences_from_di_units(
                         "parent_text": "",
                         "index_in_section": idx_in_section,
                     }
-                    # Attach DI polygon geometry for table row highlighting
-                    if unit_geometry_sentences:
+                    # ── Direct polygon passthrough from DI cell data ──
+                    # Polygons stored directly in table metadata bypass the
+                    # fragile geometry-distribution + text-matching pipeline.
+                    row_polygons = row.get("_polygons")
+                    row_page = row.get("_page")
+                    if row_polygons:
+                        row_dict["polygons"] = row_polygons
+                        if row_page:
+                            row_dict["page"] = row_page
+                        logger.debug(
+                            "table_row_direct_polygons",
+                            doc_id=doc_id,
+                            row_text=row_text[:60],
+                            polygon_count=len(row_polygons),
+                        )
+                    elif unit_geometry_sentences:
+                        # Fallback: fuzzy text matching against geometry sentences
                         geo = _match_geometry_for_sentence(row_text, unit_geometry_sentences)
                         if geo and geo.get("polygons"):
                             row_dict["polygons"] = geo["polygons"]
                             if geo.get("page"):
                                 row_dict["page"] = geo["page"]
+                        else:
+                            logger.warning(
+                                "table_row_no_polygon_match",
+                                doc_id=doc_id,
+                                row_text=row_text[:80],
+                                geometry_count=len(unit_geometry_sentences),
+                            )
+                    else:
+                        logger.warning(
+                            "table_row_no_geometry_data",
+                            doc_id=doc_id,
+                            row_text=row_text[:80],
+                        )
                     if unit_page_dimensions:
                         row_dict["page_dimensions"] = unit_page_dimensions
                     all_sentences.append(row_dict)

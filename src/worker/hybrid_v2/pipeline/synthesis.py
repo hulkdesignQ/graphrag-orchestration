@@ -3246,7 +3246,7 @@ BEGIN ANALYSIS:"""
                     if rows and isinstance(rows, list):
                         for r_idx, row in enumerate(rows, 1):
                             if isinstance(row, dict):
-                                row_vals = [str(row.get(h, "")) for h in headers] if headers else list(row.values())
+                                row_vals = [str(row.get(h, "")) for h in headers] if headers else [str(v) for k, v in row.items() if not str(k).startswith("_")]
                                 combined_context_parts.append(f"  Row {r_idx}: | {' | '.join(row_vals)} |")
                             elif isinstance(row, list):
                                 combined_context_parts.append(f"  Row {r_idx}: | {' | '.join(str(v) for v in row)} |")
@@ -3520,7 +3520,7 @@ BEGIN ANALYSIS:"""
                         for j, row in enumerate(rows, 1):
                             if isinstance(row, dict):
                                 # Show all columns in the row
-                                row_str = ", ".join(f"{k}={v}" for k, v in row.items())
+                                row_str = ", ".join(f"{k}={v}" for k, v in row.items() if not str(k).startswith("_"))
                                 parts.append(f"  Row {j}: {row_str}")
         
         return "\n".join(parts)

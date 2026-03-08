@@ -381,7 +381,7 @@ class SchemaAwareExtractor:
             
             # Show first few rows as examples
             for j, row in enumerate(rows[:5]):
-                row_str = ", ".join([f"{k}: {v}" for k, v in row.items() if v])
+                row_str = ", ".join([f"{k}: {v}" for k, v in row.items() if v and not str(k).startswith("_")])
                 lines.append(f"  Row {j + 1}: {row_str}")
             
             if len(rows) > 5:
