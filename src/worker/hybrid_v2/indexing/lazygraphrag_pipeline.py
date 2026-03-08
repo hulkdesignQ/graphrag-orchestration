@@ -4416,14 +4416,12 @@ SUMMARY: <summary>"""
         ]
 
         voyage_svc = get_voyage_embed_service()
-        embeddings: list[list[float]] = []
-        batch_size = 128
-        for i in range(0, len(texts), batch_size):
-            batch = texts[i : i + batch_size]
-            batch_emb = await asyncio.get_event_loop().run_in_executor(
-                None, lambda b=batch: voyage_svc.embed_documents(b)
-            )
-            embeddings.extend(batch_emb)
+        # Embed all triples in a single call so bin-packing groups ~600
+        # triples per context window, matching the TripleEmbeddingStore
+        # fallback behaviour that produced the best retrieval diversity.
+        embeddings: list[list[float]] = await asyncio.get_event_loop().run_in_executor(
+            None, lambda: voyage_svc.embed_documents(texts)
+        )
 
         stored = await asyncio.get_event_loop().run_in_executor(
             None,

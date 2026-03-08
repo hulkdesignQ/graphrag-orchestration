@@ -255,7 +255,7 @@ def mmr_diversity_filter(
         return []
 
     if max_facts is None:
-        max_facts = int(os.getenv("ROUTE7_RECOGNITION_MEMORY_MAX_FACTS", "4"))
+        max_facts = int(os.getenv("ROUTE7_RECOGNITION_MEMORY_MAX_FACTS", "7"))
     if lambda_param is None:
         lambda_param = float(os.getenv("ROUTE7_MMR_LAMBDA", "0.7"))
 
@@ -353,7 +353,7 @@ async def recognition_memory_filter(
         return []
 
     if max_facts is None:
-        max_facts = int(os.getenv("ROUTE7_RECOGNITION_MEMORY_MAX_FACTS", "4"))
+        max_facts = int(os.getenv("ROUTE7_RECOGNITION_MEMORY_MAX_FACTS", "7"))
 
     # Build fact list in upstream format: {"fact": [["s","p","o"], ...]}
     fact_list = []
