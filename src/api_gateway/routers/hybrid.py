@@ -35,6 +35,7 @@ from src.worker.hybrid_v2.router.main import DeploymentProfile, QueryRoute
 from src.worker.hybrid_v2.indexing import DualIndexService, get_hipporag_service
 from src.api_gateway.middleware.auth import get_group_id
 from src.core.config import settings
+from src.core.services.quota_enforcer import enforce_plan_limits
 from src.core.services.redis_service import (
     get_redis_service,
     RedisService,
@@ -515,7 +516,12 @@ async def flush_pipeline_cache(
 
 
 @router.post("/query", response_model=HybridQueryResponse)
-async def hybrid_query(request: Request, body: HybridQueryRequest, group_id: str = Depends(get_group_id)):
+async def hybrid_query(
+    request: Request,
+    body: HybridQueryRequest,
+    group_id: str = Depends(get_group_id),
+    quota: dict = Depends(enforce_plan_limits),
+):
     """
     Execute a query through the hybrid pipeline with auto-routing.
     
@@ -580,6 +586,7 @@ async def hybrid_query(request: Request, body: HybridQueryRequest, group_id: str
             success=True,
             group_id=group_id,
             user_id=user.get("oid", "") if user else "",
+            skip_record_query=getattr(request.state, "query_recorded", False),
             metadata={
                 "response_type": body.response_type,
                 "forced": body.force_route is not None,

@@ -40,6 +40,24 @@ _background_tasks: set = set()
 ASYNC_ROUTES = {"global", "drift"}
 
 
+async def _ensure_query_recorded(user_id: str, query_recorded: bool) -> None:
+    """Record the query count in Redis if enforce_plan_limits failed to do so.
+
+    This is a backup path so the dashboard's "Queries Today / This Month"
+    counters stay accurate even when the pre-request quota check hit a
+    transient Redis error (fail-open).
+    """
+    if query_recorded:
+        return
+    try:
+        from src.core.services.quota_enforcer import get_quota_enforcer
+        enforcer = await asyncio.wait_for(get_quota_enforcer(), timeout=5)
+        await asyncio.wait_for(enforcer.record_query(user_id), timeout=5)
+        logger.info("backup_query_recorded", user_id=user_id)
+    except Exception as e:
+        logger.warning("backup_query_record_failed", user_id=user_id, error=str(e))
+
+
 async def _write_cosmos_usage(user_id: str, route: str, query_id: str, tokens: int, model: str,
                              detected_language: str | None = None, was_translated: bool = False,
                              translation_chars: int = 0,
@@ -572,8 +590,9 @@ async def chat_completions(
     
     if body.stream:
         # Return streaming response with NDJSON thoughts
+        query_recorded = getattr(request.state, "query_recorded", False)
         return StreamingResponse(
-            _stream_chat_response(body, group_id, user_id),
+            _stream_chat_response(body, group_id, user_id, query_recorded),
             media_type="text/event-stream",
             headers=quota_response_headers(quota),
         )
@@ -622,6 +641,9 @@ async def chat_completions(
         ))
         _background_tasks.add(task)
         task.add_done_callback(_background_tasks.discard)
+
+        # Backup: record query count if enforce_plan_limits failed
+        await _ensure_query_recorded(user_id, getattr(request.state, "query_recorded", False))
 
         return JSONResponse(
             content=chat_resp.model_dump(),
@@ -752,6 +774,7 @@ async def _stream_chat_response(
     request: ChatRequest,
     group_id: str,
     user_id: str,
+    query_recorded: bool = True,
 ) -> AsyncGenerator[str, None]:
     """
     Generate streaming chat response with NDJSON thoughts.
@@ -841,6 +864,9 @@ async def _stream_chat_response(
             ))
             _background_tasks.add(task)
             task.add_done_callback(_background_tasks.discard)
+
+            # Backup: record query count if enforce_plan_limits failed
+            await _ensure_query_recorded(user_id, query_recorded)
             
         except Exception as e:
             logger.error("streaming_query_failed", error=str(e))
@@ -1220,6 +1246,9 @@ async def frontend_chat(
         _background_tasks.add(task)
         task.add_done_callback(_background_tasks.discard)
 
+        # Backup: record query count if enforce_plan_limits failed
+        await _ensure_query_recorded(user_id, getattr(request.state, "query_recorded", False))
+
         return FrontendChatResponse(
             message=ChatMessage(
                 role="assistant",
@@ -1289,7 +1318,8 @@ async def frontend_chat_stream(
     )
 
     return StreamingResponse(
-        _frontend_stream_response(query, approach, group_id, user_id, body.session_state, overrides, force_route_str),
+        _frontend_stream_response(query, approach, group_id, user_id, body.session_state, overrides, force_route_str,
+                                  query_recorded=getattr(request.state, "query_recorded", False)),
         media_type="text/event-stream",
         headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
     )
@@ -1303,6 +1333,7 @@ async def _frontend_stream_response(
     session_state: Optional[Any],
     overrides: Optional[FrontendChatOverrides],
     force_route: Optional[str] = None,
+    query_recorded: bool = True,
 ) -> AsyncGenerator[str, None]:
     """
     Generate streaming response in azure-search-openai-demo format.
@@ -1367,6 +1398,9 @@ async def _frontend_stream_response(
         except Exception as e:
             logger.warning("stream_cosmos_usage_failed", error=str(e))
         
+        # Backup: record query count if enforce_plan_limits failed
+        await _ensure_query_recorded(user_id, query_recorded)
+
         # Extract context data
         thoughts = result.get("thoughts", [])
 

@@ -164,8 +164,10 @@ class InstrumentationHooks:
             self._query_buffer.append(metrics)
             
             # --- Redis: increment daily/monthly query counters ---
+            # Skip if caller indicates the query was already recorded (e.g. by
+            # enforce_plan_limits) to avoid double-counting.
             user_id = kwargs.get("user_id") or kwargs.get("group_id", "")
-            if user_id:
+            if user_id and not kwargs.get("skip_record_query"):
                 try:
                     from src.core.services.quota_enforcer import get_quota_enforcer
                     enforcer = await asyncio.wait_for(get_quota_enforcer(), timeout=15)

@@ -447,13 +447,17 @@ async def enforce_plan_limits(
 
         # Stash quota info for response header injection
         request.state.quota = result
+        request.state.query_recorded = True
         return result
 
     except HTTPException:
         raise  # Re-raise 429
     except Exception as e:
         # Fail-open: Redis down → allow the request
+        # NOTE: record_query() was NOT called — downstream code should
+        # use request.state.query_recorded to detect this and retry.
         logger.error("quota_enforcement_failed_open", user_id=user_id, error=str(e))
+        request.state.query_recorded = False
         fallback = {
             "allowed": True,
             "reason": None,
