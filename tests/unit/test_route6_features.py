@@ -413,11 +413,15 @@ class TestStreamingSynthesis:
         """stream_execute() returns an async generator."""
         handler = _make_handler()
 
-        # Mock all retrieval methods
+        # Mock all retrieval methods — provide one community so the
+        # negative-detection guard ("not found") is bypassed and
+        # _stream_synthesize is actually reached.
         handler._retrieve_sentence_evidence = AsyncMock(return_value=[])
         handler._retrieve_section_headings = AsyncMock(return_value=[])
         handler._retrieve_entity_document_map = AsyncMock(return_value={})
-        handler.pipeline.community_matcher.match_communities = AsyncMock(return_value=[])
+        handler.pipeline.community_matcher.match_communities = AsyncMock(
+            return_value=[(_make_community("c1", "Test", "Test summary"), 0.9)]
+        )
 
         # Mock streaming synthesis
         async def mock_stream(*args, **kwargs):
