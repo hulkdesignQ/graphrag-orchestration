@@ -98,8 +98,10 @@ describe("Files page integration", () => {
         const searchInput = screen.getByPlaceholderText(/search/i);
         await user.type(searchInput, "report");
 
-        expect(screen.getByText("report.pdf")).toBeInTheDocument();
-        expect(screen.queryByText("data.xlsx")).not.toBeInTheDocument();
+        await waitFor(() => {
+            expect(screen.getByText("report.pdf")).toBeInTheDocument();
+            expect(screen.queryByText("data.xlsx")).not.toBeInTheDocument();
+        });
     });
 
     it("opens rename dialog when rename is clicked", async () => {

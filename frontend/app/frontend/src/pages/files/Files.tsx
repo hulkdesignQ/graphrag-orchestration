@@ -144,10 +144,11 @@ const Files = () => {
         }
     }, [activeTab, loadGlobalFiles]);
 
-    // Upload handler — uploads files one-by-one with per-file progress
+    // Upload handler — bounded-parallel uploads (max 3 concurrent)
     const handleUpload = useCallback(
         async (fileList: File[]) => {
             if (fileList.length === 0) return;
+            const CONCURRENCY = 3;
             try {
                 setUploading(true);
                 setUploadProgress(0);
@@ -156,24 +157,44 @@ const Files = () => {
                 const token = client ? await getToken(client) : undefined;
                 if (useLogin && !token) throw new Error("Not authenticated");
 
+                let completed = 0;
                 let successCount = 0;
-                let lastError: string | null = null;
+                const fileProgress = new Float32Array(fileList.length); // per-file 0..1
 
-                for (let i = 0; i < fileList.length; i++) {
-                    setUploadedCount(i);
-                    setUploadProgress(Math.round((i / fileList.length) * 100));
+                const updateOverallProgress = () => {
+                    const sum = fileProgress.reduce((a, b) => a + b, 0);
+                    setUploadProgress(Math.round((sum / fileList.length) * 100));
+                    setUploadedCount(completed);
+                };
+
+                const uploadOne = async (index: number) => {
                     try {
-                        await uploadFilesApi([fileList[i]], token as string, (loaded, total) => {
-                            const fileProgress = loaded / total;
-                            const overall = (i + fileProgress) / fileList.length;
-                            setUploadProgress(Math.round(overall * 100));
+                        await uploadFilesApi([fileList[index]], token as string, (loaded, total) => {
+                            fileProgress[index] = loaded / total;
+                            updateOverallProgress();
                         }, activeFolderId ?? undefined);
+                        fileProgress[index] = 1;
+                        completed++;
                         successCount++;
+                        updateOverallProgress();
                     } catch (err: any) {
-                        lastError = err.message;
-                        addToast("error", t("files.uploadFailed", { message: `${fileList[i].name}: ${err.message}` }));
+                        fileProgress[index] = 1;
+                        completed++;
+                        updateOverallProgress();
+                        addToast("error", t("files.uploadFailed", { message: `${fileList[index].name}: ${err.message}` }));
                     }
-                }
+                };
+
+                // Process files with bounded concurrency
+                let nextIndex = 0;
+                const runWorker = async () => {
+                    while (nextIndex < fileList.length) {
+                        const idx = nextIndex++;
+                        await uploadOne(idx);
+                    }
+                };
+                const workers = Array.from({ length: Math.min(CONCURRENCY, fileList.length) }, () => runWorker());
+                await Promise.all(workers);
 
                 setUploadProgress(100);
                 if (successCount > 0) {
