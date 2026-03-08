@@ -94,6 +94,7 @@ class InstrumentationHooks:
         user_id: Optional[str] = None,
         success: bool = True,
         metadata: Optional[Dict[str, Any]] = None,
+        skip_record_query: bool = False,
     ) -> None:
         """
         Track query execution metrics (fire-and-forget).
@@ -129,6 +130,7 @@ class InstrumentationHooks:
                 user_id=user_id,
                 success=success,
                 metadata=metadata or {},
+                skip_record_query=skip_record_query,
             ))
         except Exception as e:
             # Never block - just log warning

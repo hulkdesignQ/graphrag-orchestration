@@ -871,12 +871,15 @@ class Neo4jStoreV3:
         """Store pre-computed embeddings on RELATED_TO edges.
 
         Each triple dict must have source_id and target_id to match the edge.
+        Entities may belong to group_id or __global__, so we match both.
         """
+        group_ids = [group_id, "__global__"]
         cypher = """
         UNWIND $items AS item
-        MATCH (e1:Entity {id: item.source_id, group_id: $group_id})
+        MATCH (e1:Entity {id: item.source_id})
               -[r:RELATED_TO]->
-              (e2:Entity {id: item.target_id, group_id: $group_id})
+              (e2:Entity {id: item.target_id})
+        WHERE e1.group_id IN $group_ids AND e2.group_id IN $group_ids
         SET r.embedding_v2 = item.embedding
         RETURN count(r) AS count
         """
@@ -894,7 +897,7 @@ class Neo4jStoreV3:
         for i in range(0, len(items), batch_size):
             batch = items[i : i + batch_size]
             with self.get_retry_session() as session:
-                result = session.run(cypher, items=batch, group_id=group_id)
+                result = session.run(cypher, items=batch, group_ids=group_ids)
                 record = result.single()
                 total += cast(int, record["count"]) if record else 0
         return total
