@@ -704,8 +704,8 @@ class UnifiedSearchHandler(BaseRouteHandler):
 
         OPTIONAL MATCH (sent)-[:IN_DOCUMENT]->(doc:Document)
         WITH sent, score, doc
-        WHERE $folder_id IS NULL OR doc IS NULL
-           OR EXISTS { (doc)-[:IN_FOLDER]->(f:Folder {id: $folder_id}) WHERE f.group_id IN $group_ids }
+        WHERE $folder_id IS NULL
+           OR (doc IS NOT NULL AND EXISTS { (doc)-[:IN_FOLDER]->(f:Folder {id: $folder_id}) WHERE f.group_id IN $group_ids })
         OPTIONAL MATCH (sent)-[:NEXT_IN_SECTION]->(next_sent:Sentence)
         OPTIONAL MATCH (prev_sent:Sentence)-[:NEXT_IN_SECTION]->(sent)
 

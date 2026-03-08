@@ -1803,8 +1803,8 @@ class HippoRAG2Handler(BaseRouteHandler):
         OPTIONAL MATCH (sent)-[:IN_DOCUMENT]->(doc:Document)
         WHERE doc.group_id IN $group_ids
         WITH sent, score, doc
-        WHERE $folder_id IS NULL OR doc IS NULL
-           OR EXISTS { MATCH (doc)-[:IN_FOLDER]->(f:Folder) WHERE f.id = $folder_id AND f.group_id IN $group_ids }
+        WHERE $folder_id IS NULL
+           OR (doc IS NOT NULL AND EXISTS { MATCH (doc)-[:IN_FOLDER]->(f:Folder) WHERE f.id = $folder_id AND f.group_id IN $group_ids })
 
         RETURN sent.id AS sentence_id,
                sent.text AS text,

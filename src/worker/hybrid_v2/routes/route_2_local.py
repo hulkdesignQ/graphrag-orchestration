@@ -447,8 +447,8 @@ class LocalSearchHandler(BaseRouteHandler):
         OPTIONAL MATCH (sent)-[:IN_SECTION]->(sec:Section)
         OPTIONAL MATCH (sent)-[:IN_DOCUMENT]->(doc:Document)
         WITH sent, score, sec, doc
-        WHERE $folder_id IS NULL OR doc IS NULL
-           OR EXISTS { MATCH (doc)-[:IN_FOLDER]->(f:Folder) WHERE f.id = $folder_id AND f.group_id IN $group_ids }
+        WHERE $folder_id IS NULL
+           OR (doc IS NOT NULL AND EXISTS { MATCH (doc)-[:IN_FOLDER]->(f:Folder) WHERE f.id = $folder_id AND f.group_id IN $group_ids })
         RETURN sent.id AS sentence_id,
                sent.text AS text,
                sent.source AS source,
@@ -644,8 +644,8 @@ class LocalSearchHandler(BaseRouteHandler):
         OPTIONAL MATCH (sent)-[:IN_SECTION]->(sec:Section)
         OPTIONAL MATCH (sent)-[:IN_DOCUMENT]->(doc:Document)
         WITH sent, final_score, sources, sec, doc
-        WHERE $folder_id IS NULL OR doc IS NULL
-           OR EXISTS { MATCH (doc)-[:IN_FOLDER]->(f:Folder) WHERE f.id = $folder_id AND f.group_id IN $group_ids }
+        WHERE $folder_id IS NULL
+           OR (doc IS NOT NULL AND EXISTS { MATCH (doc)-[:IN_FOLDER]->(f:Folder) WHERE f.id = $folder_id AND f.group_id IN $group_ids })
 
         RETURN sent.id AS sentence_id,
                sent.text AS text,

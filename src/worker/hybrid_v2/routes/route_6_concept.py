@@ -583,8 +583,8 @@ class ConceptSearchHandler(BaseRouteHandler):
         """Streaming variant of execute(). Yields synthesis chunks.
 
         Runs the same retrieval pipeline (community match, sentence search,
-        section heading search, entity-doc map, denoise, rerank), then
-        streams the LLM synthesis token-by-token.
+        section heading search, entity-doc map, denoise, diversity, entity
+        expansion, rerank), then streams the LLM synthesis token-by-token.
 
         Gated by ROUTE6_STREAM_SYNTHESIS env var — caller should check before invoking.
         """
@@ -654,20 +654,75 @@ class ConceptSearchHandler(BaseRouteHandler):
         except Exception:
             entity_doc_map = {}
 
-        # Step 2: Denoise + Rerank (same as execute)
+        # Step 1b: Entity expansion (same as execute)
+        expansion_enabled = os.getenv(
+            "ROUTE6_ENTITY_EXPANSION", "0"
+        ).strip().lower() in {"1", "true", "yes"}
+        expanded: List[Dict[str, Any]] = []
+
+        if expansion_enabled and sentence_evidence:
+            exp_seeds = int(os.getenv("ROUTE6_ENTITY_EXPANSION_SEEDS", "10"))
+            exp_top_k = int(os.getenv("ROUTE6_ENTITY_EXPANSION_TOP_K", "20"))
+            exp_min_overlap = int(
+                os.getenv("ROUTE6_ENTITY_EXPANSION_MIN_OVERLAP", "1")
+            )
+            try:
+                expanded = await self._expand_sentences_via_entities(
+                    seed_evidence=sentence_evidence,
+                    seed_count=exp_seeds,
+                    top_k=exp_top_k,
+                    min_overlap=exp_min_overlap,
+                )
+            except Exception:
+                pass
+
+        # Step 2: Denoise + Diversity + Rerank (same as execute)
         if sentence_evidence:
             sentence_evidence = self._denoise_sentences(sentence_evidence)
+
             rerank_enabled = os.getenv(
                 "ROUTE6_SENTENCE_RERANK", "1"
             ).strip().lower() in {"1", "true", "yes"}
             rerank_top_k = int(os.getenv("ROUTE6_RERANK_TOP_K", "15"))
-            if rerank_enabled:
+            diversity_enabled = os.getenv(
+                "ROUTE6_SENTENCE_DIVERSITY", "1"
+            ).strip().lower() in {"1", "true", "yes"}
+            min_per_doc = int(os.getenv("ROUTE6_SENTENCE_MIN_PER_DOC", "2"))
+            score_gate = float(os.getenv("ROUTE6_SENTENCE_SCORE_GATE", "0.85"))
+
+            # Diversity before reranking (same as execute)
+            if diversity_enabled and sentence_evidence:
+                diversity_pool_k = rerank_top_k * 2
+                if len(sentence_evidence) > diversity_pool_k:
+                    sentence_evidence = self._diversify_by_document(
+                        sentence_evidence,
+                        top_k=diversity_pool_k,
+                        min_per_doc=min_per_doc,
+                        score_gate=score_gate,
+                    )
+
+            # Inject entity-expanded sentences after diversity, before rerank
+            if expanded:
+                expanded_denoised = self._denoise_sentences(expanded)
+                if expanded_denoised:
+                    seen_ids = {ev.get("sentence_id") for ev in sentence_evidence}
+                    for ev in expanded_denoised:
+                        if ev.get("sentence_id") not in seen_ids:
+                            sentence_evidence.append(ev)
+                            seen_ids.add(ev.get("sentence_id"))
+
+            if rerank_enabled and sentence_evidence:
                 try:
                     sentence_evidence = await self._rerank_sentences(
                         query, sentence_evidence, top_k=rerank_top_k,
                     )
                 except Exception:
                     sentence_evidence = sentence_evidence[:rerank_top_k]
+
+        # Negative detection (same as execute)
+        if not community_data and not sentence_evidence and not section_headings:
+            yield "The requested information was not found in the available documents."
+            return
 
         # Step 3: Stream synthesis
         async for chunk in self._stream_synthesize(
@@ -804,8 +859,8 @@ class ConceptSearchHandler(BaseRouteHandler):
 
         folder_filter_clause = (
             "WITH s, doc, c_id\n"
-            "        WHERE $folder_id IS NULL OR doc IS NULL"
-            " OR (doc)-[:IN_FOLDER]->(:Folder {id: $folder_id})\n"
+            "        WHERE $folder_id IS NULL"
+            " OR (doc IS NOT NULL AND (doc)-[:IN_FOLDER]->(:Folder {id: $folder_id}))\n"
         )
 
         cypher = f"""
@@ -1242,8 +1297,8 @@ class ConceptSearchHandler(BaseRouteHandler):
         folder_filter_clause = (
             "// R6-1: folder scope filter (no-op when $folder_id IS NULL)\n"
             "        WITH sent, score, doc, sec, prev_sent, next_sent\n"
-            "        WHERE $folder_id IS NULL OR doc IS NULL"
-            " OR (doc)-[:IN_FOLDER]->(:Folder {id: $folder_id})\n"
+            "        WHERE $folder_id IS NULL"
+            " OR (doc IS NOT NULL AND (doc)-[:IN_FOLDER]->(:Folder {id: $folder_id}))\n"
         )
 
         # 2. Vector search on Sentence nodes + collect parent context
@@ -1425,8 +1480,8 @@ class ConceptSearchHandler(BaseRouteHandler):
             "// R6-1: folder scope filter (no-op when $folder_id IS NULL)\n"
             "        WITH expanded, shared_entity_count, doc, sec,"
             " prev_sent, next_sent\n"
-            "        WHERE $folder_id IS NULL OR doc IS NULL"
-            " OR (doc)-[:IN_FOLDER]->(:Folder {id: $folder_id})\n"
+            "        WHERE $folder_id IS NULL"
+            " OR (doc IS NOT NULL AND (doc)-[:IN_FOLDER]->(:Folder {id: $folder_id}))\n"
         )
 
         cypher = f"""
@@ -1592,8 +1647,8 @@ class ConceptSearchHandler(BaseRouteHandler):
 
         // R6-2: Folder scope filter (no-op when $folder_id IS NULL)
         WITH s, score, doc
-        WHERE $folder_id IS NULL OR doc IS NULL
-           OR (doc)-[:IN_FOLDER]->(:Folder {id: $folder_id})
+        WHERE $folder_id IS NULL
+           OR (doc IS NOT NULL AND (doc)-[:IN_FOLDER]->(:Folder {id: $folder_id}))
 
         RETURN s.title AS title,
                s.summary AS summary,
