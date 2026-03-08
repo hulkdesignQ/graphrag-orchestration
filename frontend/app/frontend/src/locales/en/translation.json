@@ -239,7 +239,15 @@
         "renameFolderFailed": "Rename folder failed: {{message}}",
         "deleteFolderConfirm": "Delete this folder and all its contents?",
         "folderDeleted": "Folder deleted",
-        "deleteFolderFailed": "Delete folder failed: {{message}}"
+        "deleteFolderFailed": "Delete folder failed: {{message}}",
+        "moveToFolder": "Move to folder",
+        "moveFile": "Move File",
+        "selectDestination": "Select destination folder:",
+        "rootLevel": "Root (no folder)",
+        "move": "Move",
+        "fileMoved": "\"{{filename}}\" moved to {{folder}}",
+        "moveFailed": "Move failed: {{message}}",
+        "uploadingProgress": "Uploading file {{current}} of {{total}}…"
     },
 
     "nav": {

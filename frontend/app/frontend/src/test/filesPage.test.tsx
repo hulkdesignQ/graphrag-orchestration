@@ -31,6 +31,7 @@ const mockUploadFiles = vi.fn().mockResolvedValue({ message: "Uploaded" });
 const mockDeleteFile = vi.fn().mockResolvedValue({});
 const mockBulkDelete = vi.fn().mockResolvedValue({});
 const mockRenameFile = vi.fn().mockResolvedValue({});
+const mockMoveFile = vi.fn().mockResolvedValue({ message: "Moved" });
 
 vi.mock("../api/files", () => ({
     listFilesApi: (...args: any[]) => mockListFiles(...args),
@@ -38,6 +39,8 @@ vi.mock("../api/files", () => ({
     deleteFileApi: (...args: any[]) => mockDeleteFile(...args),
     bulkDeleteFilesApi: (...args: any[]) => mockBulkDelete(...args),
     renameFileApi: (...args: any[]) => mockRenameFile(...args),
+    moveFileApi: (...args: any[]) => mockMoveFile(...args),
+    listGlobalFilesApi: vi.fn().mockResolvedValue([]),
     getFileIcon: (name: string) => "📄",
     ACCEPTED_FILE_TYPES: ".pdf,.docx,.xlsx",
 }));

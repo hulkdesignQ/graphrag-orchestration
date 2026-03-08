@@ -23,6 +23,7 @@ import {
     deleteFileApi,
     bulkDeleteFilesApi,
     renameFileApi,
+    moveFileApi,
     getFileIcon,
     ACCEPTED_FILE_TYPES,
 } from "../../api/files";
@@ -38,6 +39,7 @@ import { FileList } from "../../components/FileManager/FileList";
 import { FileToolbar } from "../../components/FileManager/FileToolbar";
 import { RenameDialog } from "../../components/FileManager/RenameDialog";
 import { FolderSidebar } from "../../components/FileManager/FolderSidebar";
+import { MoveToFolderDialog } from "../../components/FileManager/MoveToFolderDialog";
 import { Toast } from "../../components/FileManager/Toast";
 import styles from "./Files.module.css";
 
@@ -65,7 +67,10 @@ const Files = () => {
     const [searchQuery, setSearchQuery] = useState("");
     const [uploading, setUploading] = useState(false);
     const [uploadProgress, setUploadProgress] = useState(0);
+    const [uploadedCount, setUploadedCount] = useState(0);
+    const [uploadTotal, setUploadTotal] = useState(0);
     const [renameFile, setRenameFile] = useState<string | null>(null);
+    const [moveFile, setMoveFile] = useState<string | null>(null);
     const [toasts, setToasts] = useState<ToastMessage[]>([]);
     const toastIdRef = useRef(0);
 
@@ -139,19 +144,41 @@ const Files = () => {
         }
     }, [activeTab, loadGlobalFiles]);
 
-    // Upload handler
+    // Upload handler — uploads files one-by-one with per-file progress
     const handleUpload = useCallback(
         async (fileList: File[]) => {
             if (fileList.length === 0) return;
             try {
                 setUploading(true);
                 setUploadProgress(0);
+                setUploadedCount(0);
+                setUploadTotal(fileList.length);
                 const token = client ? await getToken(client) : undefined;
                 if (useLogin && !token) throw new Error("Not authenticated");
-                const result = await uploadFilesApi(fileList, token as string, (loaded, total) => {
-                    setUploadProgress(Math.round((loaded / total) * 100));
-                }, activeFolderId ?? undefined);
-                addToast("success", result.message || t("files.filesUploaded", { count: fileList.length }));
+
+                let successCount = 0;
+                let lastError: string | null = null;
+
+                for (let i = 0; i < fileList.length; i++) {
+                    setUploadedCount(i);
+                    setUploadProgress(Math.round((i / fileList.length) * 100));
+                    try {
+                        await uploadFilesApi([fileList[i]], token as string, (loaded, total) => {
+                            const fileProgress = loaded / total;
+                            const overall = (i + fileProgress) / fileList.length;
+                            setUploadProgress(Math.round(overall * 100));
+                        }, activeFolderId ?? undefined);
+                        successCount++;
+                    } catch (err: any) {
+                        lastError = err.message;
+                        addToast("error", t("files.uploadFailed", { message: `${fileList[i].name}: ${err.message}` }));
+                    }
+                }
+
+                setUploadProgress(100);
+                if (successCount > 0) {
+                    addToast("success", t("files.filesUploaded", { count: successCount }));
+                }
                 await loadFiles();
                 setSelected(new Set());
             } catch (err: any) {
@@ -159,6 +186,8 @@ const Files = () => {
             } finally {
                 setUploading(false);
                 setUploadProgress(0);
+                setUploadedCount(0);
+                setUploadTotal(0);
             }
         },
         [client, addToast, loadFiles, activeFolderId]
@@ -257,6 +286,26 @@ const Files = () => {
         [client, addToast, loadFolders, activeFolderId]
     );
 
+    // Move file to folder
+    const handleMoveFile = useCallback(
+        async (filename: string, destFolderId: string | null) => {
+            try {
+                const token = client ? await getToken(client) : undefined;
+                if (useLogin && !token) throw new Error("Not authenticated");
+                const destFolder = destFolderId ? folders.find(f => f.id === destFolderId) : null;
+                const destFolderName = destFolder?.name ?? undefined;
+                const sourceFolder = activeFolderId ? folders.find(f => f.id === activeFolderId)?.name : undefined;
+                await moveFileApi(filename, destFolderName ?? "", token as string, sourceFolder);
+                addToast("success", t("files.fileMoved", { filename, folder: destFolderName || t("files.rootLevel") }));
+                setMoveFile(null);
+                await loadFiles();
+            } catch (err: any) {
+                addToast("error", t("files.moveFailed", { message: err.message }));
+            }
+        },
+        [client, addToast, loadFiles, folders, activeFolderId]
+    );
+
     // Selection helpers
     const toggleSelect = useCallback((filename: string) => {
         setSelected(prev => {
@@ -335,6 +384,8 @@ const Files = () => {
                     uploading={uploading}
                     progress={uploadProgress}
                     acceptedTypes={ACCEPTED_FILE_TYPES}
+                    uploadedCount={uploadedCount}
+                    uploadTotal={uploadTotal}
                 />
             )}
 
@@ -400,6 +451,7 @@ const Files = () => {
                         onToggleSelect={isShared ? () => {} : toggleSelect}
                         onDelete={isShared ? () => {} : (f) => handleDelete([f])}
                         onRename={isShared ? () => {} : (f) => setRenameFile(f)}
+                        onMove={isShared ? undefined : (f) => setMoveFile(f)}
                     />
                 </div>
             </div>
@@ -410,6 +462,17 @@ const Files = () => {
                     currentName={renameFile}
                     onRename={(newName) => handleRename(renameFile, newName)}
                     onDismiss={() => setRenameFile(null)}
+                />
+            )}
+
+            {/* Move to folder dialog — only for My Files */}
+            {!isShared && moveFile && (
+                <MoveToFolderDialog
+                    filename={moveFile}
+                    folders={folders}
+                    currentFolderId={activeFolderId}
+                    onMove={handleMoveFile}
+                    onDismiss={() => setMoveFile(null)}
                 />
             )}
 

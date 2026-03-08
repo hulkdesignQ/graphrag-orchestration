@@ -7,9 +7,11 @@ interface UploadZoneProps {
     uploading: boolean;
     progress: number;
     acceptedTypes: string;
+    uploadedCount?: number;
+    uploadTotal?: number;
 }
 
-export const UploadZone = ({ onUpload, uploading, progress, acceptedTypes }: UploadZoneProps) => {
+export const UploadZone = ({ onUpload, uploading, progress, acceptedTypes, uploadedCount, uploadTotal }: UploadZoneProps) => {
     const { t } = useTranslation();
     const [dragOver, setDragOver] = useState(false);
     const inputRef = useRef<HTMLInputElement>(null);
@@ -68,7 +70,11 @@ export const UploadZone = ({ onUpload, uploading, progress, acceptedTypes }: Upl
             <span className={styles.uploadIcon}>{uploading ? "⏳" : "📤"}</span>
             {uploading ? (
                 <>
-                    <p className={styles.uploadText}>{t("files.uploading")}</p>
+                    <p className={styles.uploadText}>
+                        {uploadTotal && uploadTotal > 1
+                            ? t("files.uploadingProgress", { current: (uploadedCount ?? 0) + 1, total: uploadTotal })
+                            : t("files.uploading")}
+                    </p>
                     <div className={styles.progressBarOuter}>
                         <div className={styles.progressBarInner} style={{ width: `${progress}%` }} />
                     </div>
