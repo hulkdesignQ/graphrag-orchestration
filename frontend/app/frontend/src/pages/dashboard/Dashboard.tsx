@@ -14,6 +14,12 @@ const PLAN_BADGE_CLASS: Record<string, string> = {
     enterprise: styles.planEnterprise
 };
 
+function formatStorage(gb: number): string {
+    if (gb <= 0) return "0 MB";
+    if (gb < 0.1) return `${(gb * 1024).toFixed(1)} MB`;
+    return `${gb.toFixed(1)} GB`;
+}
+
 function usePct(used: number, limit: number): { pct: number; color: string } {
     if (limit <= 0) return { pct: 0, color: styles.barGreen };
     const pct = Math.min(100, Math.round((used / limit) * 100));
@@ -208,7 +214,7 @@ const Dashboard = () => {
 
                 <div className={styles.statCard}>
                     <span className={styles.statLabel}>{t("dashboard.storageUsed")}</span>
-                    <span className={styles.statValue}>{usage.storage_used_gb.toFixed(1)} GB</span>
+                    <span className={styles.statValue}>{formatStorage(usage.storage_used_gb)}</span>
                     <span className={styles.statSubtext}>{t("dashboard.gbLimit", { limit: usage.storage_limit_gb })}</span>
                     <div className={styles.statBar}>
                         <div className={`${styles.statBarFill} ${storage.color}`} style={{ width: `${storage.pct}%` }} />
