@@ -9,6 +9,8 @@ interface Props {
     filename: string;
     /** All filenames in the current list — enables prev/next navigation */
     allFiles: string[];
+    /** Active folder name — needed to resolve blob path */
+    folder?: string;
     onDismiss: () => void;
     /** Navigate to a different file */
     onNavigate: (filename: string) => void;
@@ -28,9 +30,9 @@ function getCategory(filename: string): FileCategory {
     return "unknown";
 }
 
-export const FilePreviewPanel = ({ filename, allFiles, onDismiss, onNavigate }: Props) => {
+export const FilePreviewPanel = ({ filename, allFiles, folder, onDismiss, onNavigate }: Props) => {
     const { t } = useTranslation();
-    const { blobUrl, rawBytes, contentType, loading, error } = useFileBlob(filename);
+    const { blobUrl, rawBytes, contentType, loading, error } = useFileBlob(filename, folder);
     const category = useMemo(() => getCategory(filename), [filename]);
 
     // Zoom state

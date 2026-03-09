@@ -591,6 +591,7 @@ const Files = () => {
                     <FilePreviewPanel
                         filename={previewFile}
                         allFiles={filteredFiles}
+                        folder={activeFolder?.name}
                         onDismiss={() => setPreviewFile(null)}
                         onNavigate={(f) => setPreviewFile(f)}
                     />

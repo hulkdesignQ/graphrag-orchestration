@@ -12,7 +12,7 @@ interface FileBlobState {
     error: string | null;
 }
 
-export function useFileBlob(filename: string | null) {
+export function useFileBlob(filename: string | null, folder?: string) {
     const client = useLogin ? useMsal().instance : undefined;
     const [state, setState] = useState<FileBlobState>({
         blobUrl: null,
@@ -29,7 +29,7 @@ export function useFileBlob(filename: string | null) {
         try {
             const token = client ? await getToken(client) : undefined;
             const headers = await getHeaders(token);
-            const url = getFileContentUrl(name);
+            const url = getFileContentUrl(name, folder);
             const resp = await fetch(url, { headers });
 
             if (!resp.ok) {
@@ -50,7 +50,7 @@ export function useFileBlob(filename: string | null) {
         } catch (err: any) {
             setState({ blobUrl: null, contentType: null, rawBytes: null, loading: false, error: err.message || "Unknown error" });
         }
-    }, [client]);
+    }, [client, folder]);
 
     useEffect(() => {
         if (filename) {

@@ -616,6 +616,7 @@ async def content_file(
     request: Request,
     path: str,
     source: Optional[str] = None,
+    folder: Optional[str] = None,
     group_id: str = Depends(get_group_id),
     user_id: str = Depends(get_user_id),
 ):
@@ -656,7 +657,7 @@ async def content_file(
     # Try user storage first (files stored as {group_id}/{filename})
     if user_blob_manager is not None:
         try:
-            blob_data = await user_blob_manager.download_blob(path, group_id)
+            blob_data = await user_blob_manager.download_blob(path, group_id, folder=folder)
             if blob_data:
                 content_bytes, props = blob_data
                 content_type = props.get("content_settings", {}).get("content_type") or mimetypes.guess_type(path)[0] or "application/octet-stream"

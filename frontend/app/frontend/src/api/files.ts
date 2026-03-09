@@ -284,8 +284,9 @@ export async function unlockFileApi(filename: string, idToken: string): Promise<
 
 // ======================== Content / Preview ========================
 
-export function getFileContentUrl(path: string): string {
-    return `/content/${encodeURIComponent(path)}`;
+export function getFileContentUrl(path: string, folder?: string): string {
+    const base = `/content/${encodeURIComponent(path)}`;
+    return folder ? `${base}?folder=${encodeURIComponent(folder)}` : base;
 }
 
 // ======================== Helpers ========================
