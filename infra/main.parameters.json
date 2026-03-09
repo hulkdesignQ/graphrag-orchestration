@@ -8,20 +8,53 @@
     "location": {
       "value": "${AZURE_LOCATION}"
     },
-    "azureOpenAiApiKey": {
-      "value": "${AZURE_OPENAI_API_KEY}"
-    },
     "neo4jPassword": {
       "value": "${NEO4J_PASSWORD}"
     },
+    "voyageApiKey": {
+      "value": "${VOYAGE_API_KEY}"
+    },
+    "mistralApiKey": {
+      "value": "${MISTRAL_API_KEY}"
+    },
+    "llmwhispererApiKey": {
+      "value": "${LLMWHISPERER_API_KEY}"
+    },
+    "auraDsClientSecret": {
+      "value": "${AURA_DS_CLIENT_SECRET}"
+    },
+    "auraDsClientId": {
+      "value": "${AURA_DS_CLIENT_ID}"
+    },
+    "adminApiKey": {
+      "value": "${ADMIN_API_KEY}"
+    },
+    "azureDocumentIntelligenceEndpoint": {
+      "value": "${AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT}"
+    },
+    "azureContentUnderstandingEndpoint": {
+      "value": "${AZURE_CONTENT_UNDERSTANDING_ENDPOINT}"
+    },
+    "azureTranslatorEndpoint": {
+      "value": "${AZURE_TRANSLATOR_ENDPOINT}"
+    },
+    "azureTranslatorRegion": {
+      "value": "${AZURE_TRANSLATOR_REGION=swedencentral}"
+    },
+    "enableSpeechTranslation": {
+      "value": "${ENABLE_SPEECH_TRANSLATION=false}"
+    },
     "skipRoleAssignments": {
-      "value": false
+      "value": "${SKIP_ROLE_ASSIGNMENTS=false}"
     },
     "enableAuth": {
       "value": "${ENABLE_AUTH=false}"
     },
     "authClientId": {
-      "value": "b68b6881-80ba-4cec-b9dd-bd2232ec8817"
+      "value": "${AUTH_CLIENT_ID}"
+    },
+    "authClientSecret": {
+      "value": "${AUTH_CLIENT_SECRET}"
     },
     "enableB2C": {
       "value": "${ENABLE_B2C=false}"
@@ -44,11 +77,38 @@
     "b2cCustomDomain": {
       "value": "${B2C_CUSTOM_DOMAIN}"
     },
-    "serviceGraphragImageName": {
-      "value": "${SERVICE_GRAPHRAG_IMAGE_NAME}"
+    "resourceGroupName": {
+      "value": "${RESOURCE_GROUP_NAME=rg-graphrag-feature}"
     },
-    "authClientSecret": {
-      "value": "${authClientSecret}"
+    "containerRegistryName": {
+      "value": "${CONTAINER_REGISTRY_NAME=graphragacr12153}"
+    },
+    "containerAppsEnvironmentName": {
+      "value": "${CONTAINER_APPS_ENVIRONMENT_NAME=graphrag-env}"
+    },
+    "storageAccountName": {
+      "value": "${STORAGE_ACCOUNT_NAME=neo4jstorage21224}"
+    },
+    "azureOpenAiEndpoint": {
+      "value": "${AZURE_OPENAI_ENDPOINT=https://graphrag-openai-8476.openai.azure.com/}"
+    },
+    "azureOpenAiResourceName": {
+      "value": "${AZURE_OPENAI_RESOURCE_NAME=graphrag-openai-8476}"
+    },
+    "documentIntelligenceName": {
+      "value": "${DOCUMENT_INTELLIGENCE_NAME=doc-intel-graphrag}"
+    },
+    "neo4jUri": {
+      "value": "${NEO4J_URI=neo4j+s://a86dcf63.databases.neo4j.io}"
+    },
+    "neo4jUsername": {
+      "value": "${NEO4J_USERNAME=neo4j}"
+    },
+    "neo4jDatabase": {
+      "value": "${NEO4J_DATABASE=neo4j}"
+    },
+    "groupIdOverride": {
+      "value": "${GROUP_ID_OVERRIDE}"
     }
   }
 }
