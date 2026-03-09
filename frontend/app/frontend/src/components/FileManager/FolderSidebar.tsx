@@ -149,10 +149,15 @@ export const FolderSidebar = ({
         const isRenaming = renamingId === folder.id;
         const children = childrenOf(folder.id);
 
+        const statusClass = folder.analysis_status === "analyzing" ? styles.folderRowAnalyzing
+            : folder.analysis_status === "analyzed" ? styles.folderRowAnalyzed
+            : folder.analysis_status === "stale" ? styles.folderRowStale
+            : "";
+
         return (
             <div key={folder.id}>
                 <div
-                    className={`${styles.folderRow} ${isActive ? styles.folderRowActive : ""}`}
+                    className={`${styles.folderRow} ${isActive ? styles.folderRowActive : ""} ${statusClass}`}
                     style={{ paddingLeft: 12 + depth * 20 }}
                     onClick={() => onSelectFolder(folder.id)}
                     onContextMenu={e => handleContextMenu(e, folder.id)}
