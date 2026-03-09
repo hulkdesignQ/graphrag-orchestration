@@ -295,6 +295,14 @@
 .fileName {
     word-break: break-word;
 }
+.fileNameLink {
+    cursor: pointer;
+    color: #0078d4;
+    text-decoration: none;
+}
+.fileNameLink:hover {
+    text-decoration: underline;
+}
 .fileExt {
     color: #999;
     font-size: 12px;

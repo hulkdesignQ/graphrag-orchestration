@@ -73,7 +73,15 @@ export const FileList = ({ files, selected, loading, onToggleSelect, onDelete, o
                                 <td style={{ width: 36, textAlign: "center" }}>
                                     <span className={styles.fileIcon}>{getFileIcon(f)}</span>
                                 </td>
-                                <td className={styles.fileName}>{f}</td>
+                                <td className={styles.fileName}>
+                                    <span
+                                        className={styles.fileNameLink}
+                                        onClick={(e) => { e.stopPropagation(); onPreview?.(f); }}
+                                        title={t("files.preview")}
+                                    >
+                                        {f}
+                                    </span>
+                                </td>
                                 <td className={styles.fileExt}>{getExt(f)}</td>
                                 <td>
                                     <div className={styles.fileActions} onClick={(e) => e.stopPropagation()}>
