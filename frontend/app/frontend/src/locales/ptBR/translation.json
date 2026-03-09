@@ -217,6 +217,7 @@
         "uploading": "Enviando...",
         "dragDropFiles": "Arraste e solte arquivos aqui",
         "orClickBrowse": "ou clique para procurar",
+        "supportedFormats": "Formatos: PDF, Word, Excel, PowerPoint, HTML, imagens, TXT, CSV",
         "chooseFiles": "Escolher arquivos",
         "folders": "Pastas",
         "newFolder": "Nova pasta",

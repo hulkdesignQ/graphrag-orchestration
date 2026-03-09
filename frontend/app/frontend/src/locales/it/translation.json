@@ -217,6 +217,7 @@
         "uploading": "Caricamento...",
         "dragDropFiles": "Trascina e rilascia i file qui",
         "orClickBrowse": "o clicca per sfogliare",
+        "supportedFormats": "Formati: PDF, Word, Excel, PowerPoint, HTML, immagini, TXT, CSV",
         "chooseFiles": "Scegli file",
         "folders": "Cartelle",
         "newFolder": "Nuova cartella",

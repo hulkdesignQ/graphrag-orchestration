@@ -217,6 +217,7 @@
         "uploading": "アップロード中...",
         "dragDropFiles": "ここにファイルをドラッグ＆ドロップ",
         "orClickBrowse": "またはクリックして参照",
+        "supportedFormats": "対応形式：PDF、Word、Excel、PowerPoint、HTML、画像、TXT、CSV",
         "chooseFiles": "ファイルを選択",
         "folders": "フォルダ",
         "newFolder": "新しいフォルダ",

@@ -209,6 +209,7 @@
         "uploading": "正在上传...",
         "dragDropFiles": "将文件拖放到此处",
         "orClickBrowse": "或点击浏览",
+        "supportedFormats": "支持：PDF、Word、Excel、PowerPoint、HTML、图片、TXT、CSV",
         "chooseFiles": "选择文件",
         "folders": "文件夹",
         "newFolder": "新建文件夹",

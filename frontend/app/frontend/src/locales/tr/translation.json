@@ -217,6 +217,7 @@
         "uploading": "Yükleniyor...",
         "dragDropFiles": "Dosyaları buraya sürükleyip bırakın",
         "orClickBrowse": "veya göz atmak için tıklayın",
+        "supportedFormats": "Desteklenen: PDF, Word, Excel, PowerPoint, HTML, görseller, TXT, CSV",
         "chooseFiles": "Dosya seçin",
         "folders": "Klasörler",
         "newFolder": "Yeni klasör",

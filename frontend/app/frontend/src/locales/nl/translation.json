@@ -217,6 +217,7 @@
         "uploading": "Uploaden...",
         "dragDropFiles": "Sleep bestanden hierheen",
         "orClickBrowse": "of klik om te bladeren",
+        "supportedFormats": "Formaten: PDF, Word, Excel, PowerPoint, HTML, afbeeldingen, TXT, CSV",
         "chooseFiles": "Bestanden kiezen",
         "folders": "Mappen",
         "newFolder": "Nieuwe map",

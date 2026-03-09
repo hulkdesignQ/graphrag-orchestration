@@ -220,6 +220,7 @@
         "uploading": "Przesyłanie...",
         "dragDropFiles": "Przeciągnij i upuść pliki tutaj",
         "orClickBrowse": "lub kliknij, aby przeglądać",
+        "supportedFormats": "Formaty: PDF, Word, Excel, PowerPoint, HTML, obrazy, TXT, CSV",
         "chooseFiles": "Wybierz pliki",
         "folders": "Foldery",
         "newFolder": "Nowy folder",

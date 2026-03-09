@@ -209,6 +209,7 @@
         "uploading": "업로드 중...",
         "dragDropFiles": "여기에 파일을 끌어다 놓으세요",
         "orClickBrowse": "또는 클릭하여 찾아보기",
+        "supportedFormats": "지원 형식: PDF, Word, Excel, PowerPoint, HTML, 이미지, TXT, CSV",
         "chooseFiles": "파일 선택",
         "folders": "폴더",
         "newFolder": "새 폴더",

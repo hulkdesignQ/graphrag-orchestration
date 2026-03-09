@@ -217,6 +217,7 @@
         "uploading": "Subiendo...",
         "dragDropFiles": "Arrastra y suelta archivos aquí",
         "orClickBrowse": "o haz clic para explorar",
+        "supportedFormats": "Formatos: PDF, Word, Excel, PowerPoint, HTML, imágenes, TXT, CSV",
         "chooseFiles": "Elegir archivos",
         "folders": "Carpetas",
         "newFolder": "Nueva carpeta",

@@ -116,6 +116,12 @@
     color: #999;
     margin: 4px 0 0;
 }
+.uploadFormatsHint {
+    font-size: 11px;
+    color: #bbb;
+    margin: 8px 0 0;
+    letter-spacing: 0.2px;
+}
 .uploadBrowseBtn {
     display: inline-block;
     margin-top: 12px;

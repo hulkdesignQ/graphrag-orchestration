@@ -217,6 +217,7 @@
         "uploading": "Uploader...",
         "dragDropFiles": "Træk og slip filer her",
         "orClickBrowse": "eller klik for at gennemse",
+        "supportedFormats": "Formater: PDF, Word, Excel, PowerPoint, HTML, billeder, TXT, CSV",
         "chooseFiles": "Vælg filer",
         "folders": "Mapper",
         "newFolder": "Ny mappe",

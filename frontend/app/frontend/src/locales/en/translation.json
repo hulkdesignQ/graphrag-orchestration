@@ -219,6 +219,7 @@
         "chooseFiles": "Choose files",
         "dragDropFiles": "Drag & drop files here",
         "orClickBrowse": "or click to browse",
+        "supportedFormats": "Supported: PDF, Word, Excel, PowerPoint, HTML, images, TXT, CSV",
         "uploading": "Uploading...",
         "filesUploaded": "{{count}} file(s) uploaded",
         "uploadFailed": "Upload failed: {{message}}",

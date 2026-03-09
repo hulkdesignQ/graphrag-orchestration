@@ -84,6 +84,7 @@ export const UploadZone = ({ onUpload, uploading, progress, acceptedTypes, uploa
                 <>
                     <p className={styles.uploadText}>{t("files.dragDropFiles")}</p>
                     <p className={styles.uploadTextSub}>{t("files.orClickBrowse")}</p>
+                    <p className={styles.uploadFormatsHint}>{t("files.supportedFormats")}</p>
                     <button className={styles.uploadBrowseBtn} onClick={(e) => { e.stopPropagation(); handleBrowse(); }}>
                         {t("files.chooseFiles")}
                     </button>
