@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 import neo4j
 from neo4j import GraphDatabase
 
+from src.core.config import settings, build_group_ids
 from src.worker.hybrid_v2.services.neo4j_retry import retry_session
 
 logger = logging.getLogger(__name__)
@@ -505,7 +506,7 @@ class Neo4jStoreV3:
     def get_entity(self, group_id: str, entity_id: str, group_ids: List[str] = None) -> Optional[Entity]:
         """Get an entity by ID."""
         if group_ids is None:
-            group_ids = [group_id, "__global__"]
+            group_ids = build_group_ids(group_id)
         query = """
         MATCH (e:Entity {id: $id})
         WHERE e.group_id IN $group_ids
@@ -548,13 +549,13 @@ class Neo4jStoreV3:
             query_text: Original query string for keyword matching
             embedding: Query embedding for vector search
             top_k: Number of final results to return
-            group_ids: List of group IDs to search across (defaults to [group_id, "__global__"])
+            group_ids: List of group IDs to search across (defaults to [group_id, settings.GLOBAL_GROUP_ID])
             
         Returns:
             List of (Entity, combined_score) tuples sorted by fused rank
         """
         if group_ids is None:
-            group_ids = [group_id, "__global__"]
+            group_ids = build_group_ids(group_id)
         k_constant = 60  # RRF constant
         candidate_k = max(top_k * 3, 20)  # Retrieve more for fusion
         
@@ -638,8 +639,8 @@ class Neo4jStoreV3:
         Searches across group_id and __global__ via UNION ALL.
         """
         if group_ids is None:
-            group_ids = [group_id, "__global__"]
-        global_group_id = "__global__"
+            group_ids = build_group_ids(group_id)
+        global_group_id = settings.GLOBAL_GROUP_ID
         query = """CYPHER 25
         CALL () {
             MATCH (node:Entity)
@@ -692,7 +693,7 @@ class Neo4jStoreV3:
         Useful for locating invoice amounts, contract values, etc.
         """
         if group_ids is None:
-            group_ids = [group_id, "__global__"]
+            group_ids = build_group_ids(group_id)
         query = """
         MATCH (e:Entity)
         WHERE e.group_id IN $group_ids
@@ -853,7 +854,7 @@ class Neo4jStoreV3:
         entity's first document if no shared document exists.
         """
         if group_ids is None:
-            group_ids = [group_id, "__global__"]
+            group_ids = build_group_ids(group_id)
         cypher = """
         MATCH (e1:Entity)-[r:RELATED_TO]->(e2:Entity)
         WHERE e1.group_id IN $group_ids AND e2.group_id IN $group_ids
@@ -890,7 +891,7 @@ class Neo4jStoreV3:
         Each triple dict must have source_id and target_id to match the edge.
         Entities may belong to group_id or __global__, so we match both.
         """
-        group_ids = [group_id, "__global__"]
+        group_ids = build_group_ids(group_id)
         cypher = """
         UNWIND $items AS item
         MATCH (e1:Entity {id: item.source_id})
@@ -987,7 +988,7 @@ class Neo4jStoreV3:
     def get_communities_by_level(self, group_id: str, level: int, group_ids: List[str] = None) -> List[Community]:
         """Get all communities at a specific level."""
         if group_ids is None:
-            group_ids = [group_id, "__global__"]
+            group_ids = build_group_ids(group_id)
         query = """
         MATCH (c:Community)
         WHERE c.group_id IN $group_ids AND c.level = $level
@@ -1017,7 +1018,7 @@ class Neo4jStoreV3:
     def get_community_levels(self, group_id: str, group_ids: List[str] = None) -> List[int]:
         """Return sorted distinct community levels for a group."""
         if group_ids is None:
-            group_ids = [group_id, "__global__"]
+            group_ids = build_group_ids(group_id)
         query = """
         MATCH (c:Community)
         WHERE c.group_id IN $group_ids
@@ -1089,7 +1090,7 @@ class Neo4jStoreV3:
     def get_child_communities(self, group_id: str, parent_id: str, child_level: int, group_ids: List[str] = None) -> List[Community]:
         """Fetch child communities linked to a parent community."""
         if group_ids is None:
-            group_ids = [group_id, "__global__"]
+            group_ids = build_group_ids(group_id)
         query = """
         MATCH (child:Community)-[:PARENT_COMMUNITY]->(parent:Community {id: $parent_id})
         WHERE child.group_id IN $group_ids AND child.level = $child_level
@@ -1139,7 +1140,7 @@ class Neo4jStoreV3:
         Used by Phase B sentence-based entity extraction.
         """
         if group_ids is None:
-            group_ids = [group_id, "__global__"]
+            group_ids = build_group_ids(group_id)
         query = """
         MATCH (s:Sentence)
         WHERE s.group_id IN $group_ids
@@ -1396,8 +1397,8 @@ class Neo4jStoreV3:
         Searches across group_id and __global__ via UNION ALL.
         """
         if group_ids is None:
-            group_ids = [group_id, "__global__"]
-        global_group_id = "__global__"
+            group_ids = build_group_ids(group_id)
+        global_group_id = settings.GLOBAL_GROUP_ID
         query = """CYPHER 25
         CALL () {
             MATCH (sent:Sentence)

@@ -19,6 +19,8 @@ import json
 from pathlib import Path
 import asyncio
 
+from src.core.config import settings, build_group_ids
+
 logger = structlog.get_logger(__name__)
 
 
@@ -51,11 +53,11 @@ class CommunityMatcher:
             neo4j_service: Neo4j service for validating dynamic communities.
             folder_id: Optional folder ID for scoped search (None = all folders).
             group_ids: Multi-tenant group IDs for two-tier retrieval.
-                       Defaults to [group_id, "__global__"].
+                       Defaults to build_group_ids(group_id).
         """
         self.embedding_client = embedding_client
         self.group_id = group_id
-        self.group_ids = group_ids or ([group_id, "__global__"] if group_id != "__global__" else ["__global__"])
+        self.group_ids = group_ids or build_group_ids(group_id)
         self.folder_id = folder_id
         self.communities_path = Path(communities_path) if communities_path else None
         self.neo4j_service = neo4j_service

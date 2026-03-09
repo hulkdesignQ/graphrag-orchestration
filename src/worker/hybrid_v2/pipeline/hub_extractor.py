@@ -22,6 +22,7 @@ from typing import List, Dict, Any, Optional, Tuple
 import asyncio
 import structlog
 
+from src.core.config import settings, build_group_ids
 from .enhanced_graph_retriever import EnhancedGraphRetriever
 from ..services.neo4j_retry import retry_session
 
@@ -57,12 +58,12 @@ class HubExtractor:
             graph_store: LlamaIndex graph store.
             neo4j_driver: Neo4j driver for direct queries.
             folder_id: Optional folder ID for scoped search (None = all folders).
-            group_ids: Two-tier group list [group_id, "__global__"]. Auto-constructed if None.
+            group_ids: Two-tier group list. Defaults to build_group_ids(group_id). Auto-constructed if None.
         """
         self.graph_store = graph_store
         self.neo4j_driver = neo4j_driver
         self.group_id = group_id
-        self.group_ids = group_ids or ([group_id, "__global__"] if group_id != "__global__" else ["__global__"])
+        self.group_ids = group_ids or build_group_ids(group_id)
         self.folder_id = folder_id
         
         logger.info("hub_extractor_created",

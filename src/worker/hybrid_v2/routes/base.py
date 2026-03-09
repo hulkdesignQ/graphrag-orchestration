@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 import structlog
 
+from src.core.config import settings
 from ..services.neo4j_retry import retry_session
 
 if TYPE_CHECKING:
@@ -568,7 +569,7 @@ class BaseRouteHandler:
                         bm25_query=bm25_query,
                         embedding=embedding,
                         group_id=group_id,
-                        global_group_id="__global__",
+                        global_group_id=settings.GLOBAL_GROUP_ID,
                         group_ids=group_ids,
                         vector_k=vector_k,
                         bm25_k=bm25_k,

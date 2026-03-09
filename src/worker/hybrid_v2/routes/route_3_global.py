@@ -30,6 +30,7 @@ import structlog
 
 from .base import BaseRouteHandler, Citation, RouteResult
 from .route_3_prompts import MAP_PROMPT, REDUCE_WITH_EVIDENCE_PROMPT, REDUCE_WITH_EVIDENCE_PROMPT_CONCISE
+from src.core.config import settings
 from ..services.neo4j_retry import retry_session
 
 logger = structlog.get_logger(__name__)
@@ -444,7 +445,7 @@ class GlobalSearchHandler(BaseRouteHandler):
                         cypher,
                         embedding=query_embedding,
                         group_id=self.group_id,
-                        global_group_id="__global__",
+                        global_group_id=settings.GLOBAL_GROUP_ID,
                         group_ids=self.group_ids,
                         top_k=fetch_k,
                         threshold=threshold,

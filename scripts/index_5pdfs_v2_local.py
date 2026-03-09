@@ -30,6 +30,9 @@ Usage:
     # Fresh indexing (creates new group ID)
     PYTHONPATH=. python3 scripts/index_5pdfs_v2_local.py
 
+    # Index as GLOBAL (visible to all authenticated users)
+    PYTHONPATH=. python3 scripts/index_5pdfs_v2_local.py --global
+
     # Re-index existing group (deletes old data first)
     GROUP_ID=test-5pdfs-v2-fix2 PYTHONPATH=. python3 scripts/index_5pdfs_v2_local.py
 
@@ -512,6 +515,8 @@ def main():
     parser = argparse.ArgumentParser(description="V2 Local Indexing with Voyage Embeddings")
     parser.add_argument("--dry-run", action="store_true", help="Verify setup without indexing")
     parser.add_argument("--group-id", type=str, help="Specific group ID (default: new ID)")
+    parser.add_argument("--global", dest="use_global", action="store_true",
+                        help=f"Index under the global group ({settings.GLOBAL_GROUP_ID}) so all users can see the data")
     parser.add_argument("--verify-only", type=str, help="Only verify existing group (no indexing)")
     args = parser.parse_args()
     
@@ -526,9 +531,14 @@ def main():
         return
     
     # Determine group ID
-    group_id_from_env = os.getenv("GROUP_ID")
-    group_id = args.group_id or group_id_from_env or f"test-5pdfs-v2-{int(time.time())}"
-    reindex = bool(group_id_from_env or args.group_id)
+    if args.use_global:
+        group_id = settings.GLOBAL_GROUP_ID
+        reindex = True
+        log(f"\n🌐 Using GLOBAL group: {group_id} (visible to all users)")
+    else:
+        group_id_from_env = os.getenv("GROUP_ID")
+        group_id = args.group_id or group_id_from_env or f"test-5pdfs-v2-{int(time.time())}"
+        reindex = bool(group_id_from_env or args.group_id)
     
     # Run indexing
     stats = asyncio.run(run_v2_indexing(group_id, reindex, args.dry_run))

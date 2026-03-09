@@ -263,3 +263,13 @@ class Settings(BaseSettings):
         extra = "ignore"
 
 settings = Settings()
+
+
+def build_group_ids(group_id: str) -> List[str]:
+    """Build two-tier group ID list: [user_group, global_group].
+
+    Deduplicates when group_id IS the global group to avoid duplicate
+    entries in Cypher IN-list queries.
+    """
+    g = settings.GLOBAL_GROUP_ID
+    return [group_id, g] if group_id != g else [g]

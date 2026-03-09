@@ -65,7 +65,7 @@ except ImportError:
     AsyncNeo4jService = None
 
 # V2 Voyage embedding support (Jan 26, 2026)
-from src.core.config import settings
+from src.core.config import settings, build_group_ids
 
 def _is_v2_enabled() -> bool:
     """Check if Voyage embeddings are available (API key present).
@@ -208,7 +208,7 @@ class HybridPipeline:
         self.relevance_budget = relevance_budget
         self.graph_communities = graph_communities
         self.group_id = group_id
-        self.group_ids = [group_id, "__global__"] if group_id != "__global__" else ["__global__"]
+        self.group_ids = build_group_ids(group_id)
         self.folder_id = folder_id  # None means search all folders
         self.neo4j_driver = neo4j_driver
 

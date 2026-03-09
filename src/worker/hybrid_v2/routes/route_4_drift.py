@@ -33,6 +33,7 @@ from typing import Dict, Any, List, Tuple, Optional
 
 import structlog
 
+from src.core.config import settings
 from ..services.neo4j_retry import retry_session
 from .base import BaseRouteHandler, RouteResult, Citation
 
@@ -1257,7 +1258,7 @@ Sub-questions:"""
                         cypher,
                         embedding=query_embedding,
                         group_id=self.group_id,
-                        global_group_id="__global__",
+                        global_group_id=settings.GLOBAL_GROUP_ID,
                         group_ids=self.group_ids,
                         top_k=top_k,
                         threshold=threshold,

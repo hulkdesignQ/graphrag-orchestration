@@ -34,6 +34,7 @@ import structlog
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
+from src.core.config import settings, build_group_ids
 from src.worker.hybrid_v2.services.neo4j_retry import retry_session
 
 logger = structlog.get_logger(__name__)
@@ -145,11 +146,11 @@ class EnhancedGraphRetriever:
             neo4j_driver: Neo4j driver instance
             group_id: Document group ID for filtering
             folder_id: Optional folder ID for scoped search (None = all folders)
-            group_ids: Optional list of group IDs (two-tier: [user_group, "__global__"])
+            group_ids: Optional list of group IDs (two-tier). Defaults to build_group_ids(group_id).
         """
         self.driver = neo4j_driver
         self.group_id = group_id
-        self.group_ids = group_ids or ([group_id, "__global__"] if group_id != "__global__" else ["__global__"])
+        self.group_ids = group_ids or build_group_ids(group_id)
         self.folder_id = folder_id
     
     def _get_folder_filter_clause(self, doc_alias: str = "d") -> str:

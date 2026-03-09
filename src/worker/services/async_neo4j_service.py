@@ -34,7 +34,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from neo4j import AsyncGraphDatabase, AsyncDriver, AsyncSession
 from neo4j.exceptions import Neo4jError
 
-from src.core.config import settings
+from src.core.config import settings, build_group_ids
 from src.worker.hybrid_v2.services.neo4j_retry import AsyncRetrySession
 
 logger = logging.getLogger(__name__)
@@ -164,7 +164,7 @@ class AsyncNeo4jService:
         group_ids: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """Get top entities by importance score (native async)."""
-        effective_ids = group_ids or [group_id, "__global__"]
+        effective_ids = group_ids or build_group_ids(group_id)
         query = cypher25_query("""
         MATCH (e)
         WHERE e.group_id IN $effective_ids
@@ -219,7 +219,7 @@ class AsyncNeo4jService:
             entity_names: List of seed names to resolve
             use_extended_matching: If True, use strategies 3-5 for unmatched seeds
             return_unmatched: If True, return tuple of (records, unmatched_seeds)
-            group_ids: Optional list of group IDs to query (defaults to [group_id, "__global__"])
+            group_ids: Optional list of group IDs to query (defaults to [group_id, settings.GLOBAL_GROUP_ID])
             
         Returns:
             If return_unmatched=False: List of entity records with id, name, etc.
@@ -228,7 +228,7 @@ class AsyncNeo4jService:
         if not entity_names:
             return []
         
-        effective_ids = group_ids or [group_id, "__global__"]
+        effective_ids = group_ids or build_group_ids(group_id)
         
         # Strategy 1 & 2: Exact name match + Alias match
         query_exact = cypher25_query("""
@@ -429,7 +429,7 @@ class AsyncNeo4jService:
             seed_embedding: Vector embedding of the seed phrase
             top_k: Number of similar entities to return
             index_name: Vector index to query (default: 'entity_embedding')
-            group_ids: Optional list of group IDs to query (defaults to [group_id, "__global__"])
+            group_ids: Optional list of group IDs to query (defaults to [group_id, settings.GLOBAL_GROUP_ID])
             
         Returns:
             List of entity records with id, name, degree, importance_score, similarity
@@ -437,7 +437,7 @@ class AsyncNeo4jService:
         if not seed_embedding:
             return []
         
-        effective_ids = group_ids or [group_id, "__global__"]
+        effective_ids = group_ids or build_group_ids(group_id)
         
         # SEARCH clause with in-index group_id filtering (Neo4j 5.18+, Cypher 25)
         # Vector index WHERE clause only supports single equality, so use UNION ALL
@@ -474,7 +474,7 @@ class AsyncNeo4jService:
                 result = await session.run(
                     query,
                     group_id=group_id,
-                    global_group_id="__global__",
+                    global_group_id=settings.GLOBAL_GROUP_ID,
                     embedding=seed_embedding,
                     top_k=top_k,
                     seed_text=seed_text,
@@ -517,7 +517,7 @@ class AsyncNeo4jService:
         
         Uses native Cypher path patterns - no GDS required.
         """
-        effective_ids = group_ids or [group_id, "__global__"]
+        effective_ids = group_ids or build_group_ids(group_id)
         query = cypher25_query(f"""
         UNWIND $entity_ids AS eid
         MATCH (seed)
@@ -566,7 +566,7 @@ class AsyncNeo4jService:
         """
         Get all relationships for a specific entity.
         """
-        effective_ids = group_ids or [group_id, "__global__"]
+        effective_ids = group_ids or build_group_ids(group_id)
         query = cypher25_query("""
         MATCH (e)-[r]-(other)
         WHERE (e:Entity)
@@ -654,7 +654,7 @@ class AsyncNeo4jService:
         else:
             query = self._build_ppr_query_entity_only()
         
-        effective_ids = group_ids or [group_id, "__global__"]
+        effective_ids = group_ids or build_group_ids(group_id)
 
         import time
 
@@ -778,7 +778,7 @@ class AsyncNeo4jService:
 
         query = self._build_ppr_query_weighted_section_graph()
 
-        effective_ids = group_ids or [group_id, "__global__"]
+        effective_ids = group_ids or build_group_ids(group_id)
 
         import time
         t0 = time.perf_counter()
@@ -1373,7 +1373,7 @@ class AsyncNeo4jService:
                cid AS community_id,
                coalesce(peer.degree, 0) AS degree
         """)
-        effective_ids = group_ids or [group_id, "__global__"]
+        effective_ids = group_ids or build_group_ids(group_id)
         import time
         t0 = time.perf_counter()
         async with self._get_session() as session:
@@ -1427,7 +1427,7 @@ class AsyncNeo4jService:
         if not sentence_ids:
             return []
 
-        effective_ids = group_ids or [group_id, "__global__"]
+        effective_ids = group_ids or build_group_ids(group_id)
 
         query = cypher25_query("""
         UNWIND $sentence_ids AS sid
@@ -1480,7 +1480,7 @@ class AsyncNeo4jService:
         """
         Get text chunks that mention the given entities.
         """
-        effective_ids = group_ids or [group_id, "__global__"]
+        effective_ids = group_ids or build_group_ids(group_id)
         # Fetch text chunks mentioning given entities
         query = cypher25_query("""
         UNWIND $entity_ids AS eid
@@ -1525,7 +1525,7 @@ class AsyncNeo4jService:
         Returns:
             (exists: bool, matched_section: Optional[str])
         """
-        effective_ids = group_ids or [group_id, "__global__"]
+        effective_ids = group_ids or build_group_ids(group_id)
         query = cypher25_query("""
         MATCH (c)
         WHERE c.group_id IN $effective_ids 
@@ -1583,12 +1583,12 @@ class AsyncNeo4jService:
             group_id: The group ID for the chunks
             doc_url: Document URL or ID to check
             pattern: Regex pattern to match (e.g., r'(?i)(VAT|Tax ID).{0,50}\\d{5,}')
-            group_ids: Optional list of group IDs to query (defaults to [group_id, "__global__"])
+            group_ids: Optional list of group IDs to query (defaults to [group_id, settings.GLOBAL_GROUP_ID])
             
         Returns:
             True if pattern found in any chunk, False otherwise
         """
-        effective_ids = group_ids or [group_id, "__global__"]
+        effective_ids = group_ids or build_group_ids(group_id)
         query = cypher25_query("""
         MATCH (c)
         WHERE c.group_id IN $effective_ids 
@@ -1642,7 +1642,7 @@ class AsyncNeo4jService:
         """
         # Prefer checking the parent Document node for title/source metadata
         # to avoid UnknownPropertyKey warnings when those properties are not set on chunks.
-        effective_ids = group_ids or [group_id, "__global__"]
+        effective_ids = group_ids or build_group_ids(group_id)
         query = cypher25_query("""
         MATCH (c)
         OPTIONAL MATCH (c)-[:PART_OF|IN_DOCUMENT]->(d:Document)
@@ -1842,7 +1842,7 @@ class AsyncNeo4jService:
         ORDER BY score DESC
         """)
 
-        effective_ids = group_ids or [group_id, "__global__"]
+        effective_ids = group_ids or build_group_ids(group_id)
 
         import time
 
@@ -1862,7 +1862,7 @@ class AsyncNeo4jService:
                     vector_expansion_query,
                     query_embedding=query_embedding,
                     group_id=group_id,
-                    global_group_id="__global__",
+                    global_group_id=settings.GLOBAL_GROUP_ID,
                     beam_width=beam_width,
                 )
                 vector_records = await result.data()
@@ -2044,7 +2044,7 @@ class AsyncNeo4jService:
             [{doc_id, doc_title, matching_seeds: [str], seed_coverage: int,
               entity_doc_counts: {entity_name: num_docs_it_spans}}]
         """
-        effective_ids = group_ids or [group_id, "__global__"]
+        effective_ids = group_ids or build_group_ids(group_id)
         query = """
         UNWIND $entity_names AS ename
         MATCH (e)-[:APPEARS_IN_DOCUMENT]->(d:Document)

@@ -10,6 +10,8 @@ Now with async-native Neo4j support for better performance.
 from typing import List, Tuple, Optional, Dict, Any, TYPE_CHECKING
 import structlog
 
+from src.core.config import settings, build_group_ids
+
 if TYPE_CHECKING:
     from typing import Any as HippoRAGType
     from src.worker.services.async_neo4j_service import AsyncNeo4jService
@@ -54,7 +56,7 @@ class DeterministicTracer:
             folder_id: Optional folder ID for scoped search (None = all folders).
             embed_model: Embedding model for Strategy 6 vector fallback.
                         Should have get_query_embedding(text) or embed_query(text) method.
-            group_ids: Two-tier group list [group_id, "__global__"]. Auto-constructed if None.
+            group_ids: Two-tier group list. Defaults to build_group_ids(group_id). Auto-constructed if None.
         """
         if not group_id:
             raise ValueError("group_id is required for DeterministicTracer to ensure tenant isolation")
@@ -63,7 +65,7 @@ class DeterministicTracer:
         self.graph_store = graph_store
         self.async_neo4j = async_neo4j
         self.group_id = group_id
-        self.group_ids = group_ids or ([group_id, "__global__"] if group_id != "__global__" else ["__global__"])
+        self.group_ids = group_ids or build_group_ids(group_id)
         self.folder_id = folder_id
         self.embed_model = embed_model
         self._use_hipporag = hipporag_instance is not None

@@ -33,6 +33,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import structlog
 
+from src.core.config import settings, build_group_ids
 from ..services.neo4j_retry import retry_session
 
 logger = structlog.get_logger(__name__)
@@ -91,7 +92,7 @@ class TripleEmbeddingStore:
             group_ids: List of group IDs for multi-group retrieval.
                        Defaults to [group_id] if not provided.
         """
-        effective_group_ids = group_ids or [group_id, "__global__"]
+        effective_group_ids = group_ids or build_group_ids(group_id)
         t0 = time.perf_counter()
 
         # Fetch all RELATED_TO triples from Neo4j

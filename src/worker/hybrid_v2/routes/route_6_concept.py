@@ -34,6 +34,7 @@ from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
 import structlog
 import tiktoken
 
+from src.core.config import settings
 from .base import BaseRouteHandler, Citation, RouteResult
 from .route_6_prompts import CONCEPT_SYNTHESIS_PROMPT, COMMUNITY_EXTRACT_PROMPT
 from ..services.neo4j_retry import retry_session
@@ -1353,7 +1354,7 @@ class ConceptSearchHandler(BaseRouteHandler):
                         cypher,
                         embedding=query_embedding,
                         group_id=self.group_id,
-                        global_group_id="__global__",
+                        global_group_id=settings.GLOBAL_GROUP_ID,
                         group_ids=group_ids,
                         top_k=fetch_k,
                         threshold=threshold,

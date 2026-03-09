@@ -35,6 +35,8 @@ from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 import structlog
 
+from src.core.config import settings, build_group_ids
+
 if TYPE_CHECKING:
     from src.worker.services.async_neo4j_service import AsyncNeo4jService
     from ..pipeline.community_matcher import CommunityMatcher
@@ -146,7 +148,7 @@ async def match_sections_by_embedding(
     Returns:
         List of section title strings that match the query.
     """
-    effective_group_ids = group_ids or ([group_id, "__global__"] if group_id != "__global__" else ["__global__"])
+    effective_group_ids = group_ids or build_group_ids(group_id)
     # Embed query with Voyage
     try:
         from src.worker.hybrid_v2.routes.route_5_unified import _get_voyage_service
@@ -220,7 +222,7 @@ async def match_sections_by_llm(
     Returns:
         List of section title strings selected by the LLM.
     """
-    effective_group_ids = group_ids or ([group_id, "__global__"] if group_id != "__global__" else ["__global__"])
+    effective_group_ids = group_ids or build_group_ids(group_id)
 
     if not llm_client:
         logger.warning("tier2_llm_no_client")
@@ -320,7 +322,7 @@ async def resolve_section_entities(
     if not section_paths:
         return []
 
-    effective_group_ids = group_ids or ([group_id, "__global__"] if group_id != "__global__" else ["__global__"])
+    effective_group_ids = group_ids or build_group_ids(group_id)
 
     folder_filter = ""
     folder_params: Dict[str, Any] = {}
@@ -405,7 +407,7 @@ async def resolve_signatureblock_entities(
     Returns:
         List of unique entity IDs extracted from signature blocks.
     """
-    effective_group_ids = group_ids or ([group_id, "__global__"] if group_id != "__global__" else ["__global__"])
+    effective_group_ids = group_ids or build_group_ids(group_id)
 
     folder_filter = ""
     folder_params: Dict[str, Any] = {}
@@ -475,7 +477,7 @@ async def resolve_thematic_seeds(
         entity_records: List[{id, name, community}]
         matched_community_data: raw community dicts for optional synthesis context
     """
-    effective_group_ids = group_ids or ([group_id, "__global__"] if group_id != "__global__" else ["__global__"])
+    effective_group_ids = group_ids or build_group_ids(group_id)
     # Step 1: Community match
     try:
         matched = await community_matcher.match_communities(
@@ -740,7 +742,7 @@ async def resolve_all_tiers(
         community_data: List[Dict] — matched communities (for optional synthesis context)
         structural_sections: List[str] — section paths used as anchors
     """
-    effective_group_ids = group_ids or ([group_id, "__global__"] if group_id != "__global__" else ["__global__"])
+    effective_group_ids = group_ids or build_group_ids(group_id)
     min_sentences = int(os.getenv("ROUTE5_STRUCTURAL_MIN_SENTENCES", "2"))
 
     # ------------------------------------------------------------------
@@ -988,7 +990,7 @@ async def resolve_flat_seed_pool(
         structural_sections: List[str] — matched section titles
     """
 
-    effective_group_ids = group_ids or ([group_id, "__global__"] if group_id != "__global__" else ["__global__"])
+    effective_group_ids = group_ids or build_group_ids(group_id)
 
     # ------------------------------------------------------------------
     # NER: primary seed source (identical to _resolve_tier1 logic)

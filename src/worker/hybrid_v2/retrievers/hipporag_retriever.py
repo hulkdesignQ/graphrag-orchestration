@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any, Tuple, Callable
 import structlog
 
+from src.core.config import settings, build_group_ids
 from llama_index.core.retrievers import BaseRetriever
 from llama_index.core.schema import NodeWithScore, TextNode, QueryBundle
 from llama_index.core.callbacks import CallbackManager
@@ -124,7 +125,7 @@ class HippoRAGRetriever(BaseRetriever):
         self.embed_model = embed_model
         self.config = config or HippoRAGRetrieverConfig()
         self.group_id = group_id
-        self.group_ids = group_ids or ([group_id, "__global__"] if group_id != "__global__" else ["__global__"])
+        self.group_ids = group_ids or build_group_ids(group_id)
         
         # Graph cache (lazy loaded)
         self._adjacency: Dict[str, List[str]] = {}
@@ -349,7 +350,7 @@ class HippoRAGRetriever(BaseRetriever):
                 "embedding": seed_embedding,
                 "top_k": top_k,
                 "group_id": self.group_id,
-                "global_group_id": "__global__",
+                "global_group_id": settings.GLOBAL_GROUP_ID,
             }
             
             results: List[str] = []

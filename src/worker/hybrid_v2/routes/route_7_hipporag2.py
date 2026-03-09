@@ -33,6 +33,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import structlog
 
+from src.core.config import settings
 from .base import BaseRouteHandler, Citation, RouteResult
 from ..services.neo4j_retry import retry_session
 
@@ -1457,7 +1458,7 @@ class HippoRAG2Handler(BaseRouteHandler):
                         sentence_cypher,
                         embedding=query_embedding,
                         group_id=self.group_id,
-                        global_group_id="__global__",
+                        global_group_id=settings.GLOBAL_GROUP_ID,
                         group_ids=group_ids,
                         sentence_top_k=sentence_top_k,
                         top_k=top_k,
@@ -1829,7 +1830,7 @@ class HippoRAG2Handler(BaseRouteHandler):
                         cypher,
                         embedding=query_embedding,
                         group_id=self.group_id,
-                        global_group_id="__global__",
+                        global_group_id=settings.GLOBAL_GROUP_ID,
                         group_ids=group_ids,
                         top_k=top_k,
                         threshold=threshold,
@@ -2035,7 +2036,7 @@ class HippoRAG2Handler(BaseRouteHandler):
                         cypher,
                         embedding=query_embedding,
                         group_id=self.group_id,
-                        global_group_id="__global__",
+                        global_group_id=settings.GLOBAL_GROUP_ID,
                         top_k=top_k,
                         threshold=threshold,
                     )
