@@ -9,6 +9,9 @@ Keys:
     quota:{user_id}:monthly:{YYYYMM}    → monthly query count (TTL: 35d)
     quota:{user_id}:plan                 → cached PlanTier     (TTL: 1h)
 
+Note: Keys use Redis hash tags {user_id} so all keys for the same user
+map to the same hash slot — required for MULTI/pipeline on Redis Cluster.
+
 Fail-open: If Redis is unavailable, requests are allowed through
 with a warning log — availability beats strict enforcement.
 """
@@ -58,21 +61,21 @@ class QuotaEnforcer:
     @staticmethod
     def _daily_key(user_id: str, dt: Optional[datetime] = None) -> str:
         d = dt or datetime.utcnow()
-        return f"{_PREFIX}:{user_id}:daily:{d.strftime('%Y%m%d')}"
+        return f"{_PREFIX}:{{{user_id}}}:daily:{d.strftime('%Y%m%d')}"
 
     @staticmethod
     def _monthly_key(user_id: str, dt: Optional[datetime] = None) -> str:
         d = dt or datetime.utcnow()
-        return f"{_PREFIX}:{user_id}:monthly:{d.strftime('%Y%m')}"
+        return f"{_PREFIX}:{{{user_id}}}:monthly:{d.strftime('%Y%m')}"
 
     @staticmethod
     def _plan_key(user_id: str) -> str:
-        return f"{_PREFIX}:{user_id}:plan"
+        return f"{_PREFIX}:{{{user_id}}}:plan"
 
     @staticmethod
     def _credit_key(user_id: str, dt: Optional[datetime] = None) -> str:
         d = dt or datetime.utcnow()
-        return f"{_PREFIX}:{user_id}:credits:{d.strftime('%Y%m')}"
+        return f"{_PREFIX}:{{{user_id}}}:credits:{d.strftime('%Y%m')}"
 
     # ── Plan resolution ──────────────────────────────────────────────────
 
