@@ -359,6 +359,7 @@ class UnifiedSearchHandler(BaseRouteHandler):
                 try:
                     ppr_evidence = await self._async_neo4j.personalized_pagerank_native(
                         group_id=self.group_id,
+                        group_ids=self.group_ids,
                         seed_entity_ids=flat_seed_ids,
                         damping=0.85,
                         top_k=ppr_top_k,
@@ -373,6 +374,7 @@ class UnifiedSearchHandler(BaseRouteHandler):
                 try:
                     ppr_evidence = await self._async_neo4j.personalized_pagerank_weighted(
                         group_id=self.group_id,
+                        group_ids=self.group_ids,
                         weighted_seeds=weighted_seeds,
                         damping=damping,
                         top_k=ppr_top_k,

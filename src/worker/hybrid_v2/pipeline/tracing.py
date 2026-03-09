@@ -43,6 +43,7 @@ class DeterministicTracer:
         group_id: Optional[str] = None,
         folder_id: Optional[str] = None,
         embed_model: Optional[Any] = None,
+        group_ids: Optional[List[str]] = None,
     ):
         """
         Args:
@@ -53,6 +54,7 @@ class DeterministicTracer:
             folder_id: Optional folder ID for scoped search (None = all folders).
             embed_model: Embedding model for Strategy 6 vector fallback.
                         Should have get_query_embedding(text) or embed_query(text) method.
+            group_ids: Two-tier group list [group_id, "__global__"]. Auto-constructed if None.
         """
         if not group_id:
             raise ValueError("group_id is required for DeterministicTracer to ensure tenant isolation")
@@ -61,6 +63,7 @@ class DeterministicTracer:
         self.graph_store = graph_store
         self.async_neo4j = async_neo4j
         self.group_id = group_id
+        self.group_ids = group_ids or ([group_id, "__global__"] if group_id != "__global__" else ["__global__"])
         self.folder_id = folder_id
         self.embed_model = embed_model
         self._use_hipporag = hipporag_instance is not None
@@ -188,6 +191,7 @@ class DeterministicTracer:
             # First, resolve seed entity names to IDs using Strategies 1-5
             result = await self.async_neo4j.get_entities_by_names(
                 group_id=self.group_id,
+                group_ids=self.group_ids,
                 entity_names=seed_entities,
                 return_unmatched=True,  # Get unmatched for Strategy 6
             )
@@ -231,6 +235,7 @@ class DeterministicTracer:
                         # Search for similar entities
                         vector_records = await self.async_neo4j.get_entities_by_vector_similarity(
                             group_id=self.group_id,
+                            group_ids=self.group_ids,
                             seed_text=seed,
                             seed_embedding=embedding,
                             top_k=3,  # Limit per unmatched seed
@@ -275,6 +280,7 @@ class DeterministicTracer:
                 try:
                     peers = await self.async_neo4j.get_community_peers(
                         group_id=self.group_id,
+                        group_ids=self.group_ids,
                         seed_entity_ids=seed_ids,
                         max_peers=community_seed_augment,
                     )
@@ -292,6 +298,7 @@ class DeterministicTracer:
             # Use native PPR approximation (distance-based decay)
             ranked_nodes = await self.async_neo4j.personalized_pagerank_native(
                 group_id=self.group_id,
+                group_ids=self.group_ids,
                 seed_entity_ids=seed_ids,
                 damping=0.85,
                 max_iterations=20,
@@ -361,6 +368,7 @@ class DeterministicTracer:
             # Resolve seed names to IDs
             seed_records = await self.async_neo4j.get_entities_by_names(
                 group_id=self.group_id,
+                group_ids=self.group_ids,
                 entity_names=seed_entities,
             )
             seed_ids = [r["id"] for r in seed_records]
@@ -373,6 +381,7 @@ class DeterministicTracer:
 
             ranked = await self.async_neo4j.semantic_multihop_beam(
                 group_id=self.group_id,
+                group_ids=self.group_ids,
                 query_embedding=query_embedding,
                 seed_entity_ids=seed_ids,
                 max_hops=max_hops,
@@ -423,12 +432,12 @@ class DeterministicTracer:
             WHERE (seed:Entity)
               AND (toLower(seed.name) = toLower(seedName)
                    OR ANY(alias IN coalesce(seed.aliases, []) WHERE toLower(alias) = toLower(seedName)))
-              AND seed.group_id = $group_id
+              AND seed.group_id IN $group_ids
             
             // Expand to neighbors with decay
             OPTIONAL MATCH path = (seed)-[*1..3]-(neighbor)
             WHERE (neighbor:Entity)
-              AND neighbor.group_id = $group_id
+              AND neighbor.group_id IN $group_ids
               AND ALL(r IN relationships(path) WHERE type(r) <> 'MENTIONS')
             
             WITH coalesce(neighbor, seed) AS entity,
@@ -447,7 +456,7 @@ class DeterministicTracer:
             result = await asyncio.to_thread(
                 self.graph_store.structured_query,
                 cypher_query,
-                {"seedNames": seed_entities, "topK": top_k, "group_id": self.graph_store.group_id}
+                {"seedNames": seed_entities, "topK": top_k, "group_ids": self.group_ids}
             )
             
             if result:
@@ -481,7 +490,7 @@ class DeterministicTracer:
         cypher_query = """
         MATCH (a)
         WHERE (a:Entity)
-          AND a.group_id = $group_id
+          AND a.group_id IN $group_ids
           AND toLower(a.name) IN $nodeNames
         WITH collect(a) AS nodes
         UNWIND nodes AS a
@@ -496,7 +505,7 @@ class DeterministicTracer:
             node_names = [n.lower() for n in evidence_nodes]
             result = self.graph_store.structured_query(
                 cypher_query,
-                {"nodeNames": node_names, "group_id": self.graph_store.group_id},
+                {"nodeNames": node_names, "group_ids": self.group_ids},
             )
             edges = [
                 {

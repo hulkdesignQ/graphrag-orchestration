@@ -336,10 +336,10 @@ class EnhancedGraphRetriever:
             MATCH (e:Entity)
             WHERE (toLower(e.name) = toLower(entity_name) OR e.id = entity_name
                    OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = toLower(entity_name)))
-              AND e.group_id = $group_id
+              AND e.group_id IN $group_ids
             // Then traverse to sections via APPEARS_IN_SECTION
             MATCH (e)-[r:APPEARS_IN_SECTION]->(s:Section)
-            WHERE r.group_id = $group_id
+            WHERE r.group_id IN $group_ids
             RETURN 
                 entity_name,
                 s.id AS section_id,
@@ -355,7 +355,7 @@ class EnhancedGraphRetriever:
             MATCH (e:Entity)<-[:MENTIONS]-(c:Sentence)-[:IN_SECTION]->(s:Section)
             WHERE (toLower(e.name) = toLower(entity_name) OR e.id = entity_name
                    OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = toLower(entity_name)))
-              AND c.group_id = $group_id
+              AND c.group_id IN $group_ids
             WITH entity_name, s, count(c) AS mention_count
             RETURN 
                 entity_name,
@@ -374,7 +374,7 @@ class EnhancedGraphRetriever:
                     result = session.run(
                         query,
                         entity_names=entity_names,
-                        group_id=self.group_id,
+                        group_ids=self.group_ids,
                     )
                     return [dict(record) for record in result]
             
@@ -422,10 +422,10 @@ class EnhancedGraphRetriever:
             MATCH (e:Entity)
             WHERE (toLower(e.name) = toLower(entity_name) OR e.id = entity_name
                    OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = toLower(entity_name)))
-              AND e.group_id = $group_id
+              AND e.group_id IN $group_ids
             // Then traverse to documents via APPEARS_IN_DOCUMENT
             MATCH (e)-[r:APPEARS_IN_DOCUMENT]->(d:Document)
-            WHERE r.group_id = $group_id
+            WHERE r.group_id IN $group_ids
             {folder_filter}
             RETURN 
                 entity_name,
@@ -443,7 +443,7 @@ class EnhancedGraphRetriever:
             MATCH (e:Entity)<-[:MENTIONS]-(c:Sentence)-[:IN_DOCUMENT]->(d:Document)
             WHERE (toLower(e.name) = toLower(entity_name) OR e.id = entity_name
                    OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = toLower(entity_name)))
-              AND c.group_id = $group_id
+              AND c.group_id IN $group_ids
             {folder_filter}
             OPTIONAL MATCH (c)-[:IN_SECTION]->(s:Section)
             WITH entity_name, d, count(DISTINCT c) AS mention_count, count(DISTINCT s) AS section_count
@@ -459,7 +459,7 @@ class EnhancedGraphRetriever:
         
         try:
             loop = asyncio.get_event_loop()
-            params = {"entity_names": entity_names, "group_id": self.group_id}
+            params = {"entity_names": entity_names, "group_ids": self.group_ids}
             params.update(self._get_folder_params())
             
             def _run_query():
@@ -505,7 +505,7 @@ class EnhancedGraphRetriever:
         UNWIND $section_ids AS section_id
         MATCH (s:Section)-[r:HAS_HUB_ENTITY]->(e:Entity)
         WHERE s.id = section_id
-          AND r.group_id = $group_id
+          AND r.group_id IN $group_ids
         RETURN 
             section_id,
             s.title AS section_title,
@@ -524,7 +524,7 @@ class EnhancedGraphRetriever:
                     result = session.run(
                         query,
                         section_ids=section_ids,
-                        group_id=self.group_id,
+                        group_ids=self.group_ids,
                     )
                     return [dict(record) for record in result]
             
@@ -568,7 +568,7 @@ class EnhancedGraphRetriever:
         MATCH (e:Entity)-[r:APPEARS_IN_DOCUMENT]->(d:Document)
         WHERE (toLower(e.name) = toLower(entity_name) OR e.id = entity_name
                OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = toLower(entity_name)))
-          AND r.group_id = $group_id
+          AND r.group_id IN $group_ids
         {folder_filter}
         WITH entity_name, 
              count(d) AS doc_count,
@@ -580,7 +580,7 @@ class EnhancedGraphRetriever:
         
         try:
             loop = asyncio.get_event_loop()
-            params = {"entity_names": entity_names, "group_id": self.group_id}
+            params = {"entity_names": entity_names, "group_ids": self.group_ids}
             params.update(self._get_folder_params())
             
             def _run_query():
@@ -640,15 +640,16 @@ class EnhancedGraphRetriever:
         cross_doc_filter = "AND s1.doc_id <> s2.doc_id" if cross_doc_only else ""
         
         # Build folder filter for related document - only allow sections from same folder
-        folder_filter_clause = ""
+        folder_filter_clause_with_group = "WHERE d IS NULL OR d.group_id IN $group_ids"
         if self.folder_id:
-            folder_filter_clause = "WHERE d IS NULL OR (d)-[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})"
+            folder_filter_clause_with_group = "WHERE d IS NULL OR (d.group_id IN $group_ids AND (d)-[:IN_FOLDER]->(:Folder {id: $folder_id}))"
         
         query = f"""
         UNWIND $section_ids AS source_section_id
-        MATCH (s1:Section {{id: source_section_id, group_id: $group_id}})
+        MATCH (s1:Section {{id: source_section_id}})
+        WHERE s1.group_id IN $group_ids
         MATCH (s1)-[r:SHARES_ENTITY]->(s2:Section)
-        WHERE r.group_id = $group_id
+        WHERE r.group_id IN $group_ids
           AND r.shared_count >= $min_shared_count
           {cross_doc_filter}
         WITH source_section_id, s1, s2, r
@@ -662,8 +663,8 @@ class EnhancedGraphRetriever:
                  shared_entities: r.shared_entities
              }})[0..$max_per_section] AS related_sections
         UNWIND related_sections AS rel
-        OPTIONAL MATCH (d:Document {{id: rel.related_doc_id, group_id: $group_id}})
-        {folder_filter_clause}
+        OPTIONAL MATCH (d:Document {{id: rel.related_doc_id}})
+        {folder_filter_clause_with_group}
         RETURN 
             source_section_id,
             rel.related_section_id AS related_section_id,
@@ -678,7 +679,7 @@ class EnhancedGraphRetriever:
             loop = asyncio.get_event_loop()
             params = {
                 "section_ids": section_ids,
-                "group_id": self.group_id,
+                "group_ids": self.group_ids,
                 "min_shared_count": min_shared_count,
                 "max_per_section": max_per_section,
             }
@@ -852,7 +853,7 @@ class EnhancedGraphRetriever:
         # Build folder filter for document optional match
         folder_filter_clause = ""
         if self.folder_id:
-            folder_filter_clause = "WHERE d IS NULL OR (d.group_id = $group_id AND (d)-[:IN_FOLDER]->(:Folder {id: $folder_id}))"
+            folder_filter_clause = "WHERE d IS NULL OR (d.group_id IN $group_ids AND (d)-[:IN_FOLDER]->(:Folder {id: $folder_id}))"
         
         # Query: Use new 1-hop edges to get sections, then fetch chunks from those sections
         query = f"""
@@ -860,13 +861,13 @@ class EnhancedGraphRetriever:
                 MATCH (e:Entity)
                 WHERE (toLower(e.name) = toLower(entity_name)
                        OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = toLower(entity_name)))
-                  AND e.group_id = $group_id
+                  AND e.group_id IN $group_ids
                 // Use 1-hop APPEARS_IN_SECTION edge
                 MATCH (e)-[:APPEARS_IN_SECTION]->(s:Section)
-                WHERE s.group_id = $group_id
+                WHERE s.group_id IN $group_ids
                 // Get chunks from this section
                 MATCH (c:Sentence)-[:IN_SECTION]->(s)
-                WHERE c.group_id = $group_id
+                WHERE c.group_id IN $group_ids
                 // Get document info
                 OPTIONAL MATCH (c)-[:IN_DOCUMENT]->(d:Document)
                 {folder_filter_clause}
@@ -904,7 +905,7 @@ class EnhancedGraphRetriever:
             loop = asyncio.get_event_loop()
             params = {
                 "entity_names": entity_names,
-                "group_id": self.group_id,
+                "group_ids": self.group_ids,
                 "max_per_entity": max_per_entity,
             }
             params.update(self._get_folder_params())
@@ -989,7 +990,7 @@ class EnhancedGraphRetriever:
         # Build folder filter for document optional match
         folder_filter_clause = ""
         if self.folder_id:
-            folder_filter_clause = "WHERE d IS NULL OR (d.group_id = $group_id AND (d)-[:IN_FOLDER]->(:Folder {id: $folder_id}))"
+            folder_filter_clause = "WHERE d IS NULL OR (d.group_id IN $group_ids AND (d)-[:IN_FOLDER]->(:Folder {id: $folder_id}))"
         
         # Simplified query for current hybrid pipeline schema
         # Includes alias support for flexible entity matching
@@ -999,8 +1000,8 @@ class EnhancedGraphRetriever:
                 WHERE (e:Entity)
                   AND (toLower(e.name) = toLower(entity_name)
                        OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = toLower(entity_name)))
-                    AND t.group_id = $group_id
-                    AND e.group_id = $group_id
+                    AND t.group_id IN $group_ids
+                    AND e.group_id IN $group_ids
                 OPTIONAL MATCH (t)-[:IN_SECTION]->(s:Section)
                 OPTIONAL MATCH (t)-[:IN_DOCUMENT]->(d:Document)
                 {folder_filter_clause}
@@ -1031,7 +1032,7 @@ class EnhancedGraphRetriever:
                 """
 
         # Build folder filter for fallback query
-        fallback_folder_filter = "WHERE d IS NULL OR (d.group_id = $group_id"
+        fallback_folder_filter = "WHERE d IS NULL OR (d.group_id IN $group_ids"
         if self.folder_id:
             fallback_folder_filter += " AND (d)-[:IN_FOLDER]->(:Folder {id: $folder_id}))"
         else:
@@ -1039,10 +1040,10 @@ class EnhancedGraphRetriever:
         
         fallback_query = f"""
                 UNWIND $entity_names AS entity_name
-                WITH entity_name, $group_id AS group_id, $max_per_entity AS max_per_entity, $probe_limit AS probe_limit
+                WITH entity_name, $group_ids AS group_ids, $max_per_entity AS max_per_entity, $probe_limit AS probe_limit
                 CALL db.index.fulltext.queryNodes('sentence_fulltext', entity_name, {{limit: probe_limit}})
                     YIELD node AS t, score
-                WHERE t.group_id = group_id
+                WHERE t.group_id IN group_ids
                 OPTIONAL MATCH (t)-[:IN_SECTION]->(s:Section)
                 OPTIONAL MATCH (t)-[:IN_DOCUMENT]->(d:Document)
                 {fallback_folder_filter}
@@ -1083,7 +1084,7 @@ class EnhancedGraphRetriever:
             loop = asyncio.get_event_loop()
             params = {
                 "entity_names": entity_names,
-                "group_id": self.group_id,
+                "group_ids": self.group_ids,
                 "max_per_entity": max_per_entity,
             }
             params.update(self._get_folder_params())
@@ -1139,7 +1140,7 @@ class EnhancedGraphRetriever:
                     def _run_fallback():
                         fallback_params = {
                             "entity_names": sanitized,
-                            "group_id": self.group_id,
+                            "group_ids": self.group_ids,
                             "max_per_entity": max_per_entity,
                             "probe_limit": probe_limit,
                         }
@@ -1367,7 +1368,7 @@ class EnhancedGraphRetriever:
 
         query = """
         MATCH (t:Sentence)
-        WHERE t.group_id = $group_id
+        WHERE t.group_id IN $group_ids
         WITH t,
              replace(
                  replace(
@@ -1401,7 +1402,7 @@ class EnhancedGraphRetriever:
         WHERE match_count >= $min_matches
         OPTIONAL MATCH (t)-[:IN_SECTION]->(s:Section)
         OPTIONAL MATCH (t)-[:IN_DOCUMENT]->(d:Document)
-        WHERE d IS NULL OR (d.group_id = $group_id AND ($folder_id IS NULL OR (d)-[:IN_FOLDER]->(:Folder {id: $folder_id})))
+        WHERE d IS NULL OR (d.group_id IN $group_ids AND ($folder_id IS NULL OR (d)-[:IN_FOLDER]->(:Folder {id: $folder_id})))
         RETURN
             t.id AS sentence_id,
             t.text AS text,
@@ -1427,7 +1428,7 @@ class EnhancedGraphRetriever:
             def _run_query():
                 with retry_session(self.driver) as session:
                     params = {
-                        "group_id": self.group_id,
+                        "group_ids": self.group_ids,
                         "keyword_needles": keyword_needles,
                         "min_matches": min_matches,
                         "candidate_limit": candidate_limit,
@@ -1524,8 +1525,8 @@ class EnhancedGraphRetriever:
 
         query = f"""
         MATCH (d:Document)<-[:IN_DOCUMENT]-(t:Sentence)
-        WHERE d.group_id = $group_id
-          AND t.group_id = $group_id
+        WHERE d.group_id IN $group_ids
+          AND t.group_id IN $group_ids
           AND t.chunk_index IN $chunk_indexes
         {folder_filter}
         OPTIONAL MATCH (t)-[:IN_SECTION]->(s:Section)
@@ -1545,7 +1546,7 @@ class EnhancedGraphRetriever:
         try:
             loop = asyncio.get_event_loop()
             params = {
-                "group_id": self.group_id,
+                "group_ids": self.group_ids,
                 "chunk_indexes": candidate_chunk_indexes,
             }
             params.update(self._get_folder_params())
@@ -1654,15 +1655,15 @@ class EnhancedGraphRetriever:
 
         query = """
         MATCH (s:Section)<-[:IN_SECTION]-(t:Sentence)
-        WHERE t.group_id = $group_id
-          AND s.group_id = $group_id
+        WHERE t.group_id IN $group_ids
+          AND s.group_id IN $group_ids
         WITH t, s,
              reduce(cnt = 0, k IN $section_keywords |
                 cnt + CASE WHEN toLower(coalesce(s.path_key, "")) CONTAINS k THEN 1 ELSE 0 END
              ) AS match_count
         WHERE match_count >= $min_matches
         OPTIONAL MATCH (t)-[:IN_DOCUMENT]->(d:Document)
-        WHERE d IS NULL OR (d.group_id = $group_id AND ($folder_id IS NULL OR (d)-[:IN_FOLDER]->(:Folder {id: $folder_id})))
+        WHERE d IS NULL OR (d.group_id IN $group_ids AND ($folder_id IS NULL OR (d)-[:IN_FOLDER]->(:Folder {id: $folder_id})))
         RETURN
             t.id AS sentence_id,
             t.text AS text,
@@ -1685,7 +1686,7 @@ class EnhancedGraphRetriever:
                 with retry_session(self.driver) as session:
                     result = session.run(
                         query,
-                        group_id=self.group_id,
+                        group_ids=self.group_ids,
                         section_keywords=lowered,
                         min_matches=min_matches,
                         candidate_limit=candidate_limit,
@@ -1784,11 +1785,11 @@ class EnhancedGraphRetriever:
 
         query = """
         MATCH (s:Section)<-[:IN_SECTION]-(t:Sentence)
-        WHERE t.group_id = $group_id
-          AND s.group_id = $group_id
+        WHERE t.group_id IN $group_ids
+          AND s.group_id IN $group_ids
           AND s.id IN $section_ids
         OPTIONAL MATCH (t)-[:IN_DOCUMENT]->(d:Document)
-        WHERE d IS NULL OR (d.group_id = $group_id AND ($folder_id IS NULL OR (d)-[:IN_FOLDER]->(:Folder {id: $folder_id})))
+        WHERE d IS NULL OR (d.group_id IN $group_ids AND ($folder_id IS NULL OR (d)-[:IN_FOLDER]->(:Folder {id: $folder_id})))
         RETURN
             t.id AS sentence_id,
             t.text AS text,
@@ -1810,7 +1811,7 @@ class EnhancedGraphRetriever:
                 with retry_session(self.driver) as session:
                     result = session.run(
                         query,
-                        group_id=self.group_id,
+                        group_ids=self.group_ids,
                         section_ids=normalized,
                         candidate_limit=candidate_limit,
                         folder_id=self.folder_id,
@@ -1993,18 +1994,19 @@ class EnhancedGraphRetriever:
         UNWIND $entity_inputs AS seed
         MATCH (e1)
         WHERE (e1:Entity)
-          AND e1.group_id = $group_id
+          AND e1.group_id IN $group_ids
             AND (toLower(e1.name) = toLower(seed) OR coalesce(e1.id, '') = seed OR elementId(e1) = seed
                  OR ANY(alias IN coalesce(e1.aliases, []) WHERE toLower(alias) = toLower(seed)))
         
         MATCH (c:Sentence)-[:MENTIONS]->(e1)
-        WHERE c.group_id = $group_id
-        OPTIONAL MATCH (c)-[:IN_DOCUMENT]->(d:Document {{group_id: $group_id}})
+        WHERE c.group_id IN $group_ids
+        OPTIONAL MATCH (c)-[:IN_DOCUMENT]->(d:Document)
+        WHERE d IS NULL OR d.group_id IN $group_ids
         WITH e1, c, d
         WHERE $folder_id IS NULL OR d IS NULL {folder_filter}
         MATCH (c)-[:MENTIONS]->(e2)
         WHERE (e2:Entity)
-          AND e2.group_id = $group_id AND e2 <> e1
+          AND e2.group_id IN $group_ids AND e2 <> e1
         
         WITH e1, e2, count(DISTINCT c) AS shared_chunks, collect(DISTINCT c.id)[0..2] AS sentence_ids
         WHERE shared_chunks > 0
@@ -2024,12 +2026,12 @@ class EnhancedGraphRetriever:
         UNWIND $entity_inputs AS seed
         MATCH (e1)
         WHERE (e1:Entity)
-          AND e1.group_id = $group_id
+          AND e1.group_id IN $group_ids
           AND (toLower(e1.name) = toLower(seed) OR coalesce(e1.id, '') = seed OR elementId(e1) = seed
                OR ANY(alias IN coalesce(e1.aliases, []) WHERE toLower(alias) = toLower(seed)))
         MATCH (e1)-[r:RELATED_TO]-(e2)
         WHERE (e2:Entity)
-          AND e2.group_id = $group_id AND e2 <> e1
+          AND e2.group_id IN $group_ids AND e2 <> e1
         WITH e1, e2, r
         WHERE elementId(e1) < elementId(e2)
         RETURN
@@ -2047,7 +2049,7 @@ class EnhancedGraphRetriever:
                 with retry_session(self.driver) as session:
                     params = {
                         "entity_inputs": entity_names,
-                        "group_id": self.group_id,
+                        "group_ids": self.group_ids,
                         "max_rels": max_relationships,
                         "folder_id": self.folder_id,
                     }
@@ -2063,7 +2065,7 @@ class EnhancedGraphRetriever:
                         result = session.run(
                             fallback_query,
                             entity_inputs=entity_names,
-                            group_id=self.group_id,
+                            group_ids=self.group_ids,
                             max_rels=max_relationships,
                         )
                         return list(result)
@@ -2100,7 +2102,7 @@ class EnhancedGraphRetriever:
         UNWIND $entity_names AS name
         MATCH (e)
         WHERE (e:Entity)
-          AND e.group_id = $group_id
+          AND e.group_id IN $group_ids
                     AND (toLower(e.name) = toLower(name) OR e.id = name OR elementId(e) = name)
         RETURN e.name as name, e.description as description
         """
@@ -2110,7 +2112,7 @@ class EnhancedGraphRetriever:
             
             def _run_query():
                 with retry_session(self.driver) as session:
-                    result = session.run(query, entity_names=entity_names, group_id=self.group_id)
+                    result = session.run(query, entity_names=entity_names, group_ids=self.group_ids)
                     return list(result)
             
             records = await loop.run_in_executor(None, _run_query)
@@ -2135,7 +2137,7 @@ class EnhancedGraphRetriever:
         
         query = """
         MATCH (e:Entity)-[r]-()
-        WHERE e.group_id = $group_id
+        WHERE e.group_id IN $group_ids
         WITH e, count(r) as degree
         ORDER BY degree DESC
         LIMIT $top_k
@@ -2147,7 +2149,7 @@ class EnhancedGraphRetriever:
             
             def _run_query():
                 with retry_session(self.driver) as session:
-                    result = session.run(query, group_id=self.group_id, top_k=top_k)
+                    result = session.run(query, group_ids=self.group_ids, top_k=top_k)
                     return list(result)
             
             records = await loop.run_in_executor(None, _run_query)
@@ -2173,7 +2175,7 @@ class EnhancedGraphRetriever:
         
         query = """
         MATCH (e:Entity)
-        WHERE e.group_id = $group_id
+        WHERE e.group_id IN $group_ids
           AND e.entity_embedding IS NOT NULL
         WITH e, vector.similarity.cosine(
             e.entity_embedding, $query_embedding
@@ -2190,7 +2192,7 @@ class EnhancedGraphRetriever:
                 with retry_session(self.driver) as session:
                     result = session.run(
                         query,
-                        group_id=self.group_id,
+                        group_ids=self.group_ids,
                         query_embedding=query_embedding,
                         top_k=top_k,
                     )
@@ -2256,7 +2258,7 @@ class EnhancedGraphRetriever:
             logger.info(
                 "all_documents_retrieved",
                 num_docs=len(docs),
-                group_id=self.group_id,
+                group_ids=self.group_ids,
             )
             return docs
             
@@ -2327,7 +2329,7 @@ class EnhancedGraphRetriever:
                 "documents_by_date_retrieved",
                 num_docs=len(docs),
                 order=order,
-                group_id=self.group_id,
+                group_ids=self.group_ids,
             )
             return docs
             
@@ -2488,7 +2490,7 @@ class EnhancedGraphRetriever:
                 max_per_document=max_per_document,
                 max_total=max_total,
                 prefer_early_chunks=prefer_early_chunks,
-                group_id=self.group_id,
+                group_ids=self.group_ids,
                 truncated=truncated,
             )
             
@@ -2640,7 +2642,7 @@ class EnhancedGraphRetriever:
                 num_unique_docs=len(doc_keys_sorted),
                 max_per_document=max_per_document,
                 max_total=max_total,
-                group_id=self.group_id,
+                group_ids=self.group_ids,
             )
             
             return chunks
@@ -2758,7 +2760,7 @@ class EnhancedGraphRetriever:
             records = await loop.run_in_executor(None, _run_query)
             
             logger.info("section_chunks_query_executed",
-                       group_id=self.group_id,
+                       group_ids=self.group_ids,
                        records_returned=len(records),
                        max_per_section=max_per_section)
             
@@ -2787,7 +2789,7 @@ class EnhancedGraphRetriever:
                 ))
             
             logger.info("all_sections_chunks_retrieved",
-                       group_id=self.group_id,
+                       group_ids=self.group_ids,
                        num_sections=len(chunks))
             
             return chunks
@@ -2796,7 +2798,7 @@ class EnhancedGraphRetriever:
             logger.error("all_sections_chunks_retrieval_failed", 
                         error=str(e),
                         error_type=type(e).__name__,
-                        group_id=self.group_id)
+                        group_ids=self.group_ids)
             return []
 
     async def search_sections_by_vector(
@@ -2889,7 +2891,7 @@ class EnhancedGraphRetriever:
                 })
             
             logger.info("section_vector_search_complete",
-                       group_id=self.group_id,
+                       group_ids=self.group_ids,
                        top_k=top_k,
                        threshold=score_threshold,
                        sections_found=len(sections))
@@ -2900,7 +2902,7 @@ class EnhancedGraphRetriever:
             logger.error("section_vector_search_failed",
                         error=str(e),
                         error_type=type(e).__name__,
-                        group_id=self.group_id)
+                        group_ids=self.group_ids)
             return []
 
     async def get_summary_chunks_by_section(
@@ -2925,8 +2927,8 @@ class EnhancedGraphRetriever:
 
         query = f"""
         MATCH (d:Document)<-[:IN_DOCUMENT]-(t:Sentence)
-        WHERE d.group_id = $group_id
-          AND t.group_id = $group_id
+        WHERE d.group_id IN $group_ids
+          AND t.group_id IN $group_ids
           AND t.metadata IS NOT NULL
         {folder_filter}
         WITH d, t, apoc.convert.fromJsonMap(t.metadata) AS meta
@@ -2963,7 +2965,7 @@ class EnhancedGraphRetriever:
         try:
             loop = asyncio.get_event_loop()
             params = {
-                "group_id": self.group_id,
+                "group_ids": self.group_ids,
                 "max_per_document": max_per_document,
             }
             params.update(self._get_folder_params())
@@ -3029,7 +3031,7 @@ class EnhancedGraphRetriever:
                 num_unique_docs=len(doc_keys_sorted),
                 max_per_document=max_per_document,
                 max_total=max_total,
-                group_id=self.group_id,
+                group_ids=self.group_ids,
             )
             return chunks
 
@@ -3061,9 +3063,10 @@ class EnhancedGraphRetriever:
         folder_filter = self._get_folder_filter_clause("d")
         query = f"""
         MATCH (t:Sentence)
-        WHERE t.group_id = $group_id
+        WHERE t.group_id IN $group_ids
           AND t.metadata IS NOT NULL
-        OPTIONAL MATCH (t)-[:IN_DOCUMENT]->(d:Document {{group_id: $group_id}})
+        OPTIONAL MATCH (t)-[:IN_DOCUMENT]->(d:Document)
+        WHERE d IS NULL OR d.group_id IN $group_ids
         WITH t, d,
              apoc.convert.fromJsonMap(t.metadata).section_path as sections
         WHERE sections IS NOT NULL
@@ -3083,7 +3086,7 @@ class EnhancedGraphRetriever:
             def _run_query():
                 with retry_session(self.driver) as session:
                     params = {
-                        "group_id": self.group_id,
+                        "group_ids": self.group_ids,
                         "top_k": top_k,
                         "folder_id": self.folder_id,
                         **kw_params,

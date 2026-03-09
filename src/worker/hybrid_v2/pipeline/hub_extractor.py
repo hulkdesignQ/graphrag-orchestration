@@ -50,16 +50,19 @@ class HubExtractor:
         neo4j_driver: Optional[Any] = None,
         group_id: str = "default",
         folder_id: Optional[str] = None,
+        group_ids: Optional[List[str]] = None,
     ):
         """
         Args:
             graph_store: LlamaIndex graph store.
             neo4j_driver: Neo4j driver for direct queries.
             folder_id: Optional folder ID for scoped search (None = all folders).
+            group_ids: Two-tier group list [group_id, "__global__"]. Auto-constructed if None.
         """
         self.graph_store = graph_store
         self.neo4j_driver = neo4j_driver
         self.group_id = group_id
+        self.group_ids = group_ids or ([group_id, "__global__"] if group_id != "__global__" else ["__global__"])
         self.folder_id = folder_id
         
         logger.info("hub_extractor_created",
@@ -183,8 +186,9 @@ class HubExtractor:
         try:
             # Query for most connected entities in the community
             query = """
-            MATCH (e:Entity {group_id: $group_id})-[r]-()
-            WHERE e.community = $community_id OR e.community_id = $community_id
+            MATCH (e:Entity)-[r]-()
+            WHERE e.group_id IN $group_ids
+              AND (e.community = $community_id OR e.community_id = $community_id)
             WITH e, count(r) as degree
             ORDER BY degree DESC
             LIMIT $top_k
@@ -199,7 +203,7 @@ class HubExtractor:
                         query,
                         community_id=community_id,
                         top_k=top_k,
-                        group_id=self.group_id,
+                        group_ids=self.group_ids,
                     )
                     return [r.get("name") or r.get("id") for r in result if r]
 
@@ -238,7 +242,7 @@ class HubExtractor:
             query = """
             MATCH (e)
             WHERE (e:Entity)
-              AND e.group_id = $group_id
+              AND e.group_id IN $group_ids
               AND any(kw IN $keywords WHERE toLower(e.name) CONTAINS kw)
             WITH e
             MATCH (e)-[r]-()
@@ -256,7 +260,7 @@ class HubExtractor:
                     result = session.run(
                         query,
                         top_k=top_k,
-                        group_id=self.group_id,
+                        group_ids=self.group_ids,
                         keywords=keyword_list,
                     )
                     return [r["name"] for r in result if r.get("name")]
@@ -304,15 +308,15 @@ class HubExtractor:
                         UNWIND $entity_names AS entity_name
                         MATCH (c:Sentence)-[:MENTIONS]->(e)
                         WHERE (e:Entity)
-                          AND c.group_id = $group_id AND e.group_id = $group_id
+                          AND c.group_id IN $group_ids AND e.group_id IN $group_ids
                             AND (toLower(e.name) = toLower(entity_name)
                                  OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = toLower(entity_name)))
                         OPTIONAL MATCH (c)-[:IN_DOCUMENT]->(d:Document)
-                        WHERE d IS NULL OR (d.group_id = $group_id {folder_filter})
+                        WHERE d IS NULL OR (d.group_id IN $group_ids {folder_filter})
                         WITH entity_name, c, apoc.convert.fromJsonMap(c.metadata) AS meta
                         RETURN entity_name, meta.url AS doc_url
                         LIMIT 100
-                                        """, entity_names=entity_names, group_id=self.group_id, folder_id=self.folder_id)
+                                        """, entity_names=entity_names, group_ids=self.group_ids, folder_id=self.folder_id)
                     return [(r["entity_name"], r["doc_url"]) for r in result if r.get("doc_url")]
             
             entity_docs = await loop.run_in_executor(None, _sync_query)
@@ -383,7 +387,7 @@ class HubExtractor:
             query = """
             MATCH (e)-[r]-()
             WHERE (e:Entity)
-              AND e.group_id = $group_id
+              AND e.group_id IN $group_ids
             RETURN e.name as name, e.id as id, count(r) as degree
             ORDER BY degree DESC
             LIMIT $top_k
@@ -393,7 +397,7 @@ class HubExtractor:
 
             def _sync_query():
                 with retry_session(self.neo4j_driver, read_only=True) as session:
-                    result = session.run(query, top_k=top_k, group_id=self.group_id)
+                    result = session.run(query, top_k=top_k, group_ids=self.group_ids)
                     return [
                         (r.get("name") or r.get("id"), r.get("degree", 0))
                         for r in result if r

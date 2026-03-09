@@ -277,6 +277,7 @@ class HybridPipeline:
             graph_store=graph_store,
             async_neo4j=self._async_neo4j,
             group_id=group_id,
+            group_ids=self.group_ids,
             folder_id=folder_id,
             embed_model=embedding_client,  # For Strategy 6 vector fallback
         )

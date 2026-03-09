@@ -1086,18 +1086,23 @@ class Neo4jStoreV3:
                     child_level=child_level,
                 )
 
-    def get_child_communities(self, group_id: str, parent_id: str, child_level: int) -> List[Community]:
+    def get_child_communities(self, group_id: str, parent_id: str, child_level: int, group_ids: List[str] = None) -> List[Community]:
         """Fetch child communities linked to a parent community."""
+        if group_ids is None:
+            group_ids = [group_id, "__global__"]
         query = """
-        MATCH (child:Community {group_id: $group_id, level: $child_level})-[:PARENT_COMMUNITY]->(parent:Community {id: $parent_id, group_id: $group_id})
-        OPTIONAL MATCH (e:Entity {group_id: $group_id})-[:BELONGS_TO]->(child)
+        MATCH (child:Community)-[:PARENT_COMMUNITY]->(parent:Community {id: $parent_id})
+        WHERE child.group_id IN $group_ids AND child.level = $child_level
+          AND parent.group_id IN $group_ids
+        OPTIONAL MATCH (e:Entity)-[:BELONGS_TO]->(child)
+        WHERE e.group_id IN $group_ids
         RETURN child AS c, collect(DISTINCT e.id) AS entity_ids
         ORDER BY child.rank DESC
         """
         with self.get_retry_session() as session:
             result = session.run(
                 query,
-                group_id=group_id,
+                group_ids=group_ids,
                 parent_id=parent_id,
                 child_level=child_level,
             )

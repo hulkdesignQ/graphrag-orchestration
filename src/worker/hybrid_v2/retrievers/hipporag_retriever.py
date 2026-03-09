@@ -124,7 +124,7 @@ class HippoRAGRetriever(BaseRetriever):
         self.embed_model = embed_model
         self.config = config or HippoRAGRetrieverConfig()
         self.group_id = group_id
-        self.group_ids = group_ids or [group_id]
+        self.group_ids = group_ids or ([group_id, "__global__"] if group_id != "__global__" else ["__global__"])
         
         # Graph cache (lazy loaded)
         self._adjacency: Dict[str, List[str]] = {}
