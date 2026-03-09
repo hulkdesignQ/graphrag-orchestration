@@ -2,12 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useFileBlob } from "../../hooks/useFileBlob";
 import { PdfHighlightViewer } from "../DocumentViewer/PdfHighlightViewer";
-import { getFileContentUrl } from "../../api/files";
-import { useMsal } from "@azure/msal-react";
-import { useLogin, getToken } from "../../authConfig";
-import { getHeaders } from "../../api/api";
 import DOMPurify from "dompurify";
-import styles from "./FilePreviewModal.module.css";
+import styles from "./FilePreviewPanel.module.css";
 
 interface Props {
     filename: string;
@@ -32,23 +28,16 @@ function getCategory(filename: string): FileCategory {
     return "unknown";
 }
 
-export const FilePreviewModal = ({ filename, allFiles, onDismiss, onNavigate }: Props) => {
+export const FilePreviewPanel = ({ filename, allFiles, onDismiss, onNavigate }: Props) => {
     const { t } = useTranslation();
     const { blobUrl, rawBytes, contentType, loading, error } = useFileBlob(filename);
     const category = useMemo(() => getCategory(filename), [filename]);
 
-    // Zoom/pan state
+    // Zoom state
     const [zoom, setZoom] = useState(1);
-    const [pan, setPan] = useState({ x: 0, y: 0 });
-    const dragging = useRef(false);
-    const dragStart = useRef({ x: 0, y: 0 });
-    const panStart = useRef({ x: 0, y: 0 });
 
     // Reset zoom on file change
-    useEffect(() => {
-        setZoom(1);
-        setPan({ x: 0, y: 0 });
-    }, [filename]);
+    useEffect(() => { setZoom(1); }, [filename]);
 
     // File navigation
     const currentIndex = allFiles.indexOf(filename);
@@ -61,11 +50,6 @@ export const FilePreviewModal = ({ filename, allFiles, onDismiss, onNavigate }: 
     useEffect(() => {
         const handler = (e: KeyboardEvent) => {
             if (e.key === "Escape") onDismiss();
-            else if (e.key === "ArrowLeft") goPrev();
-            else if (e.key === "ArrowRight") goNext();
-            else if (e.key === "+" || e.key === "=") setZoom(z => Math.min(5, z + 0.25));
-            else if (e.key === "-") setZoom(z => Math.max(0.25, z - 0.25));
-            else if (e.key === "0") { setZoom(1); setPan({ x: 0, y: 0 }); }
         };
         window.addEventListener("keydown", handler);
         return () => window.removeEventListener("keydown", handler);
@@ -80,28 +64,6 @@ export const FilePreviewModal = ({ filename, allFiles, onDismiss, onNavigate }: 
         }
     }, []);
 
-    // Pan via drag
-    const handleMouseDown = useCallback((e: React.MouseEvent) => {
-        if (zoom > 1) {
-            dragging.current = true;
-            dragStart.current = { x: e.clientX, y: e.clientY };
-            panStart.current = { ...pan };
-        }
-    }, [zoom, pan]);
-
-    const handleMouseMove = useCallback((e: React.MouseEvent) => {
-        if (dragging.current) {
-            setPan({
-                x: panStart.current.x + (e.clientX - dragStart.current.x),
-                y: panStart.current.y + (e.clientY - dragStart.current.y),
-            });
-        }
-    }, []);
-
-    const handleMouseUp = useCallback(() => {
-        dragging.current = false;
-    }, []);
-
     // Download
     const handleDownload = useCallback(() => {
         if (blobUrl) {
@@ -112,71 +74,52 @@ export const FilePreviewModal = ({ filename, allFiles, onDismiss, onNavigate }: 
         }
     }, [blobUrl, filename]);
 
-    // Close on backdrop click
-    const handleBackdropClick = useCallback((e: React.MouseEvent) => {
-        if (e.target === e.currentTarget) onDismiss();
-    }, [onDismiss]);
-
     const zoomPercent = Math.round(zoom * 100);
 
     return (
-        <div className={styles.overlay} onClick={handleBackdropClick}>
-            {/* Top bar */}
-            <div className={styles.topBar}>
+        <div className={styles.panel}>
+            {/* Header */}
+            <div className={styles.header}>
                 <span className={styles.filename} title={filename}>{filename}</span>
-                {allFiles.length > 1 && (
-                    <span className={styles.navInfo}>
-                        {currentIndex + 1} / {allFiles.length}
-                    </span>
-                )}
-                <button className={styles.topBtn} onClick={goPrev} disabled={!hasPrev} title={t("preview.prev")}>◀</button>
-                <button className={styles.topBtn} onClick={goNext} disabled={!hasNext} title={t("preview.next")}>▶</button>
-                <button className={styles.topBtn} onClick={handleDownload} disabled={!blobUrl} title={t("preview.download")}>
-                    ⬇ {t("preview.download")}
-                </button>
-                <button className={styles.topBtn} onClick={onDismiss} title={t("preview.close")}>✕</button>
+                <button className={styles.headerBtn} onClick={onDismiss} title={t("preview.close")}>✕</button>
             </div>
 
-            {/* Zoom bar */}
-            {(category === "image" || category === "pdf") && (
-                <div className={styles.zoomBar}>
-                    <button className={styles.zoomBtn} onClick={() => setZoom(z => Math.max(0.25, z - 0.25))}>−</button>
-                    <span className={styles.zoomLevel}>{zoomPercent}%</span>
-                    <button className={styles.zoomBtn} onClick={() => setZoom(z => Math.min(5, z + 0.25))}>+</button>
-                    <button className={styles.zoomBtn} onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }); }}>
-                        {t("preview.fitWidth")}
-                    </button>
-                </div>
-            )}
+            {/* Toolbar */}
+            <div className={styles.toolbar}>
+                <button className={styles.toolBtn} onClick={goPrev} disabled={!hasPrev} title={t("preview.prev")}>◀</button>
+                <span className={styles.navInfo}>{currentIndex + 1} / {allFiles.length}</span>
+                <button className={styles.toolBtn} onClick={goNext} disabled={!hasNext} title={t("preview.next")}>▶</button>
+                <span className={styles.sep} />
+                {(category === "image" || category === "pdf") && (
+                    <>
+                        <button className={styles.toolBtn} onClick={() => setZoom(z => Math.max(0.25, z - 0.25))}>−</button>
+                        <span className={styles.zoomLevel}>{zoomPercent}%</span>
+                        <button className={styles.toolBtn} onClick={() => setZoom(z => Math.min(5, z + 0.25))}>+</button>
+                        <button className={styles.toolBtn} onClick={() => setZoom(1)} title={t("preview.fitWidth")}>⊡</button>
+                        <span className={styles.sep} />
+                    </>
+                )}
+                <button className={styles.toolBtn} onClick={handleDownload} disabled={!blobUrl} title={t("preview.download")}>⬇</button>
+            </div>
 
             {/* Content */}
-            <div
-                className={styles.viewerArea}
-                onWheel={handleWheel}
-                onMouseDown={handleMouseDown}
-                onMouseMove={handleMouseMove}
-                onMouseUp={handleMouseUp}
-                onMouseLeave={handleMouseUp}
-            >
+            <div className={styles.content} onWheel={handleWheel}>
                 {loading && (
                     <div className={styles.stateCard}>
                         <div className={styles.spinner} />
-                        <h3>{t("preview.loading")}</h3>
+                        <p>{t("preview.loading")}</p>
                     </div>
                 )}
 
                 {error && (
                     <div className={styles.stateCard}>
-                        <h3 className={styles.errorText}>{t("preview.error")}</h3>
+                        <p className={styles.errorText}>{t("preview.error")}</p>
                         <p>{error}</p>
                     </div>
                 )}
 
                 {!loading && !error && blobUrl && (
-                    <div
-                        className={styles.viewerContent}
-                        style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}
-                    >
+                    <div className={styles.viewerWrap} style={{ transform: `scale(${zoom})`, transformOrigin: "top center" }}>
                         <ContentRenderer
                             category={category}
                             blobUrl={blobUrl}
@@ -204,7 +147,7 @@ interface RendererProps {
 const ContentRenderer = ({ category, blobUrl, rawBytes, contentType, filename }: RendererProps) => {
     switch (category) {
         case "pdf":
-            return <PdfHighlightViewer src={blobUrl} highlights={[]} height="calc(100vh - 100px)" />;
+            return <PdfHighlightViewer src={blobUrl} highlights={[]} height="100%" />;
         case "image":
             return <ImageRenderer blobUrl={blobUrl} filename={filename} />;
         case "html":
@@ -246,8 +189,8 @@ const TextRenderer = ({ rawBytes }: { rawBytes: ArrayBuffer | null }) => {
     }, [rawBytes]);
 
     return (
-        <div style={{ background: "#fff", padding: 24, borderRadius: 8, maxWidth: "90vw", overflow: "auto", maxHeight: "80vh" }}>
-            <pre style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: 13, lineHeight: 1.6 }}>{text}</pre>
+        <div className={styles.textWrap}>
+            <pre>{text}</pre>
         </div>
     );
 };
@@ -277,8 +220,8 @@ const DocxRenderer = ({ rawBytes }: { rawBytes: ArrayBuffer | null }) => {
         return () => { cancelled = true; };
     }, [rawBytes]);
 
-    if (err) return <div className={styles.stateCard}><h3 className={styles.errorText}>{t("preview.error")}</h3><p>{err}</p></div>;
-    if (!html) return <div className={styles.stateCard}><div className={styles.spinner} /><h3>{t("preview.rendering")}</h3></div>;
+    if (err) return <div className={styles.stateCard}><p className={styles.errorText}>{t("preview.error")}</p><p>{err}</p></div>;
+    if (!html) return <div className={styles.stateCard}><div className={styles.spinner} /><p>{t("preview.rendering")}</p></div>;
     return <iframe srcDoc={html} className={styles.htmlFrame} sandbox="allow-same-origin" title="DOCX Preview" />;
 };
 
@@ -307,8 +250,8 @@ const XlsxRenderer = ({ rawBytes }: { rawBytes: ArrayBuffer | null }) => {
         return () => { cancelled = true; };
     }, [rawBytes]);
 
-    if (err) return <div className={styles.stateCard}><h3 className={styles.errorText}>{t("preview.error")}</h3><p>{err}</p></div>;
-    if (!tableHtml) return <div className={styles.stateCard}><div className={styles.spinner} /><h3>{t("preview.rendering")}</h3></div>;
+    if (err) return <div className={styles.stateCard}><p className={styles.errorText}>{t("preview.error")}</p><p>{err}</p></div>;
+    if (!tableHtml) return <div className={styles.stateCard}><div className={styles.spinner} /><p>{t("preview.rendering")}</p></div>;
     return <div className={styles.xlsxWrapper} dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(tableHtml) }} />;
 };
 
@@ -324,7 +267,7 @@ const FallbackRenderer = ({ filename, blobUrl }: { filename: string; blobUrl: st
 
     return (
         <div className={styles.stateCard}>
-            <h3>{t("preview.noPreview")}</h3>
+            <p><strong>{t("preview.noPreview")}</strong></p>
             <p>{t("preview.noPreviewHint")}</p>
             <button className={styles.downloadBtn} onClick={handleDownload}>
                 ⬇ {t("preview.downloadFile")}

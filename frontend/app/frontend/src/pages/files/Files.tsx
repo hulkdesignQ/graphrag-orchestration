@@ -42,7 +42,7 @@ import { FileToolbar } from "../../components/FileManager/FileToolbar";
 import { RenameDialog } from "../../components/FileManager/RenameDialog";
 import { FolderSidebar } from "../../components/FileManager/FolderSidebar";
 import { MoveToFolderDialog } from "../../components/FileManager/MoveToFolderDialog";
-import { FilePreviewModal } from "../../components/FileManager/FilePreviewModal";
+import { FilePreviewPanel } from "../../components/FileManager/FilePreviewPanel";
 import { Toast } from "../../components/FileManager/Toast";
 import styles from "./Files.module.css";
 
@@ -585,6 +585,16 @@ const Files = () => {
                         onPreview={(f) => setPreviewFile(f)}
                     />
                 </div>
+
+                {/* File preview side panel */}
+                {previewFile && (
+                    <FilePreviewPanel
+                        filename={previewFile}
+                        allFiles={filteredFiles}
+                        onDismiss={() => setPreviewFile(null)}
+                        onNavigate={(f) => setPreviewFile(f)}
+                    />
+                )}
             </div>
 
             {/* Rename dialog */}
@@ -604,16 +614,6 @@ const Files = () => {
                     currentFolderId={activeFolderId}
                     onMove={handleMoveFile}
                     onDismiss={() => setMoveFile(null)}
-                />
-            )}
-
-            {/* File preview modal */}
-            {previewFile && (
-                <FilePreviewModal
-                    filename={previewFile}
-                    allFiles={filteredFiles}
-                    onDismiss={() => setPreviewFile(null)}
-                    onNavigate={(f) => setPreviewFile(f)}
                 />
             )}
 
