@@ -504,3 +504,83 @@
         font-size: 13px;
     }
 }
+
+/* Analysis Summary Panel */
+.analysisSummary {
+    background: linear-gradient(135deg, #f0f9ff, #e8f5e9);
+    border: 1px solid #c8e6c9;
+    border-radius: 10px;
+    padding: 14px 18px;
+    margin-bottom: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.analysisSummaryHeader {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.analysisSummaryIcon {
+    font-size: 20px;
+}
+
+.analysisSummaryTitle {
+    font-size: 14px;
+    font-weight: 600;
+    color: #2e7d32;
+}
+
+.analysisSummaryStats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+}
+
+.analysisStat {
+    font-size: 13px;
+    color: #555;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.chatWithAnalysisBtn {
+    align-self: flex-start;
+    padding: 8px 16px;
+    border-radius: 8px;
+    border: 1px solid #4cc9f0;
+    background: #fff;
+    color: #0d8ab5;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s, box-shadow 0.15s;
+    margin-top: 4px;
+}
+.chatWithAnalysisBtn:hover {
+    background: #eaf9ff;
+    box-shadow: 0 2px 8px rgba(76, 201, 240, 0.2);
+}
+
+.analysisProgressBar {
+    height: 4px;
+    background: #e0e0e0;
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.analysisProgressFill {
+    height: 100%;
+    background: linear-gradient(90deg, #4cc9f0, #2ecc71);
+    border-radius: 2px;
+    animation: progressSlide 2s ease-in-out infinite;
+    width: 40%;
+}
+
+@keyframes progressSlide {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(350%); }
+}

@@ -12747,3 +12747,223 @@ Unit tests in `tests/unit/test_folder_resolver.py` cover:
 - `get_valid_partition_ids`: Returns auth_group_id + root folder IDs; no driver → returns auth_group_id only; no folders → returns auth_group_id only
 
 ### Commit: e3a3fb3d
+
+---
+
+## §57 — Dual Storage Architecture: User Files ↔ Analysis System (2026-03-09)
+
+### Problem
+
+The system had two conflicting requirements:
+
+1. **User File Management (System A):** Users need an unrestricted file manager with unlimited folder nesting, drag-and-drop, rename, move — like a desktop file explorer.
+2. **Analysis System (System B):** The Neo4j knowledge graph requires folder-level `group_id` isolation for indexing, retrieval, and chat. Analysis is expensive and should be triggered explicitly, not on every upload.
+
+Previously, these two systems were **tightly coupled** — every file upload auto-triggered indexing via `doc_sync.on_file_uploaded()` in `files.py:198-203`, and folder depth was hardcoded to max 2 levels. This created problems:
+- Users couldn't organize files freely without triggering costly re-indexing
+- No visibility into which folders had been analyzed
+- No way to review analysis results or chat with a specific analysis scope
+- The 2-level depth restriction felt arbitrary and blocked deep hierarchies
+
+### Architecture Decision
+
+Decouple the two storage systems with an explicit **Analyze** action as the bridge:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                      System A (User-Facing)                      │
+│              Azure Blob + Neo4j :Folder nodes                    │
+│                                                                  │
+│  📁 Contracts/                                                   │
+│  ├── 📁 2025/ ← unlimited depth                                 │
+│  │   ├── 📁 Q1/                                                  │
+│  │   │   ├── contract_a.pdf                                      │
+│  │   │   └── contract_b.pdf                                      │
+│  │   └── 📁 Q2/                                                  │
+│  │       └── contract_c.pdf                                      │
+│  └── 📁 Templates/                                               │
+│      └── nda_template.docx                                       │
+│                                                                  │
+│  📁 Analysis Results/ (auto-created, folder_type=analysis_result)│
+│  ├── 📁 Contracts — 2026-03-09 10:30                            │
+│  └── 📁 HR Policies — 2026-03-09 11:15                          │
+└──────────────┬───────────────────────────────────────────────────┘
+               │ User clicks "🔍 Analyze"
+               │ on a folder
+               ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                 System B (Internal — Not User-Visible)            │
+│           Neo4j Knowledge Graph with group_id isolation           │
+│                                                                  │
+│  group_id = folder-contracts-uuid                                │
+│  ├── :Document nodes (one per file)                              │
+│  ├── :Entity nodes + :SYNONYM edges                              │
+│  ├── :Sentence nodes + embeddings                                │
+│  ├── :Triple nodes + PPR weights                                 │
+│  └── :Community summaries                                        │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Folder Model Extensions
+
+The `Folder` Pydantic model (`src/core/models/folder.py`) gained these fields:
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `folder_type` | `"user"` \| `"analysis_result"` | Distinguishes user folders from auto-created result folders |
+| `analysis_status` | `"not_analyzed"` \| `"analyzing"` \| `"analyzed"` \| `"stale"` \| `null` | Analysis lifecycle state |
+| `analysis_group_id` | `str?` | Neo4j partition key this folder maps to |
+| `source_folder_id` | `str?` | For result folders: which user folder was analyzed |
+| `analyzed_at` | `datetime?` | When analysis last completed |
+| `file_count` | `int?` | Number of files in the analysis |
+| `entity_count` | `int?` | Number of entities extracted |
+| `community_count` | `int?` | Number of communities detected |
+
+Analysis status lifecycle:
+
+```
+not_analyzed ──[Analyze]──► analyzing ──[Complete]──► analyzed
+                                │                        │
+                                │ [Failure]               │ [File added/deleted]
+                                ▼                        ▼
+                              stale ◄────────────────── stale
+                                │
+                                │ [Re-analyze]
+                                ▼
+                            analyzing
+```
+
+### Depth Limit Removal
+
+**Before:** `folders.py:69-70` enforced `depth >= 1` → max 2 levels.
+
+**After:** Parent existence validation only — unlimited nesting. The `SUBFOLDER_OF` edge chain in Neo4j naturally supports arbitrary depth. Frontend `FolderSidebar.renderFolder()` was already recursive, so it handles deep trees automatically.
+
+### Smart Sync (Decoupled Upload → Index)
+
+**Before:** Every file upload unconditionally triggered `doc_sync.on_file_uploaded()`.
+
+**After (`files.py`):** Upload checks `_folder_is_analyzed()` first:
+
+1. Walks `SUBFOLDER_OF*0..` ancestors looking for `analysis_status IN ['analyzed', 'stale']`
+2. If found → index the file AND mark folder as `'stale'` (new content since last analysis)
+3. If not found → store blob only, no indexing
+
+This means files uploaded to un-analyzed folders are just stored in blob, ready for future analysis. Files uploaded to already-analyzed folders get auto-indexed but the folder is marked stale to signal the analysis may be incomplete.
+
+### Analyze Endpoint
+
+**`POST /folders/{folder_id}/analyze`** (new endpoint in `folders.py`):
+
+1. Validates folder exists and isn't already analyzing
+2. Marks folder + all descendants as `analysis_status='analyzing'`
+3. Resolves `neo4j_gid` via `folder_resolver`
+4. Calls `blob_manager.list_blobs_recursive()` to enumerate all files in the folder tree
+5. Kicks off background task `_run_folder_analysis()`:
+   - Iterates over all blobs, calling `doc_sync.on_file_uploaded()` for each
+   - On completion: stores entity/community counts, marks folder `'analyzed'`
+   - On failure: marks folder `'stale'` so user can retry
+   - Auto-creates a result folder under "Analysis Results"
+
+### Recursive Blob Listing
+
+**`UserBlobManager.list_blobs_recursive()`** (new in `user_blob_manager.py`):
+
+The existing `list_blobs()` method skipped nested files (`if "/" in name: continue`). The new method lists all blobs under a prefix recursively, returning `[{name, url, full_path}]` — needed for deep folder analysis.
+
+### Analysis Result Folders
+
+On analysis completion, `_create_analysis_result_folder()` automatically:
+
+1. Creates an "Analysis Results" root folder (`folder_type='analysis_result'`) if it doesn't exist
+2. Creates a subfolder named `"{source_folder_name} — {datetime}"` with:
+   - `analysis_group_id` linking to the Neo4j partition
+   - `source_folder_id` linking back to the source user folder
+   - Stat counts (`file_count`, `entity_count`, `community_count`)
+
+Result folders are one level deep (flat under "Analysis Results") regardless of source folder depth. This keeps the result listing simple while preserving the link to arbitrarily nested source folders.
+
+### Frontend Changes
+
+#### FolderSidebar (`FolderSidebar.tsx`)
+
+- **Unlimited depth:** Removed `isRoot` gate on "New Subfolder" context menu option. Any folder can have children.
+- **Analyze action:** 🔍 "Analyze" in context menu → calls `POST /folders/{id}/analyze`. Disabled when `analysis_status === "analyzing"`.
+- **Chat replay:** 💬 "Chat with analysis" in context menu → navigates to `/?folder={analysis_group_id}`, which `Chat.tsx` reads from `?folder` search param and passes as `folder_id` in `ChatAppRequestOverrides`.
+- **Analysis badges:** Emoji badges (⏳/✅/⚠️) with CSS pulse animation for "analyzing" state.
+
+#### Analysis Summary Panel (`Files.tsx`)
+
+When user selects an analyzed/stale/analyzing folder, a summary panel appears above the file list:
+
+```
+┌──────────────────────────────────────────────────┐
+│ 📊 Analysis Complete                              │
+│ 📄 12 files  🔗 847 entities  🏘️ 23 communities  │
+│ 🕐 2026-03-09 10:30:45                           │
+│                                                  │
+│ [💬 Chat with this analysis]                      │
+└──────────────────────────────────────────────────┘
+```
+
+For folders in "analyzing" state, shows an indeterminate progress bar with sliding gradient animation.
+
+#### Analysis Progress Polling
+
+A `useEffect` in `Files.tsx` detects any folder with `analysis_status === "analyzing"` and polls `loadFolders()` every 5 seconds until the analysis completes. This provides near-real-time status updates without WebSocket complexity.
+
+#### Type Changes (`folders.ts`)
+
+```typescript
+export type FolderType = "user" | "analysis_result";
+export type AnalysisStatus = "not_analyzed" | "analyzing" | "analyzed" | "stale";
+
+export interface Folder {
+    // ... existing fields ...
+    folder_type: FolderType;
+    analysis_status: AnalysisStatus | null;
+    analysis_group_id: string | null;
+    source_folder_id: string | null;
+    analyzed_at: string | null;
+    file_count: number | null;
+    entity_count: number | null;
+    community_count: number | null;
+}
+```
+
+New API functions: `analyzeFolderApi()`, `getFolderAnalysisStatusApi()`.
+
+### Chat Replay (L3 Review)
+
+The "Chat with this analysis" button navigates to `/?folder={analysis_group_id}`. Since `Chat.tsx` already reads `searchParams.get("folder")` (line 50) and passes it as `folder_id` in `ChatAppRequestOverrides` (line 318), the entire chat experience is automatically scoped to the analysis group's knowledge graph. No changes to the chat page or backend query pipeline were needed.
+
+This means:
+- Users can re-open any past analysis and ask new questions about it
+- Result folders link back to their analysis group, so clicking "Chat with analysis" on a result folder opens chat scoped to that analysis
+- The underlying Neo4j data persists, so results are always "live" — not snapshots
+
+### Key Design Decisions
+
+1. **Physical Copy for cross-analysis files.** If a file needs to appear in multiple analyses, users copy it to the other folder. Each copy gets independently indexed with its own embedding context. This preserves Neo4j `group_id` isolation (cross-group sharing would break `MERGE` invariants). OCR caching can offset the re-processing cost (~60-70% savings).
+
+2. **Lightweight result folders, not heavy snapshots.** Since Neo4j data persists indefinitely, the "result" is just a manifest (folder with metadata + link to `analysis_group_id`). No need to snapshot entity counts or community summaries — they can be queried live.
+
+3. **5-second polling, not WebSockets.** Analysis typically takes minutes to hours. Polling `loadFolders()` every 5s during "analyzing" state is simple, reliable, and avoids WebSocket infrastructure. The polling auto-stops when no folder is "analyzing".
+
+4. **Stale marking over re-analysis.** When files change in an analyzed folder, we mark it "stale" rather than auto-re-analyzing. Users decide when to re-run analysis, preventing unexpected compute costs.
+
+5. **System B is invisible.** Analysis result folders appear in System A's folder tree, but the underlying Neo4j groups (System B) are never directly exposed. Users interact only through folder context menus and the chat replay button.
+
+### Files Changed
+
+| File | Changes |
+|------|---------|
+| `src/core/models/folder.py` | Extended `Folder` with 8 new analysis fields, `FolderType`/`AnalysisStatus` types |
+| `src/api_gateway/routers/folders.py` | Removed depth limit, updated all Cypher queries, added `POST /analyze` endpoint with background task |
+| `src/api_gateway/routers/files.py` | Smart sync: conditional indexing + stale marking helpers |
+| `src/api_gateway/services/user_blob_manager.py` | Added `list_blobs_recursive()` |
+| `frontend/.../api/folders.ts` | Extended `Folder` type, added `analyzeFolderApi`, `getFolderAnalysisStatusApi` |
+| `frontend/.../FolderSidebar.tsx` | Unlimited depth, Analyze + Chat menu items, analysis badges |
+| `frontend/.../FolderSidebar.module.css` | Badge styles with pulse animation |
+| `frontend/.../Files.tsx` | Analysis polling, result summary panel, chat replay navigation |
+| `frontend/.../Files.module.css` | Summary panel + progress bar styles |

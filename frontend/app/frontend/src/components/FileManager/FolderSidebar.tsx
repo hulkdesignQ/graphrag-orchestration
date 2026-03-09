@@ -23,6 +23,7 @@ interface FolderSidebarProps {
     onRenameFolder: (folderId: string, newName: string) => void;
     onDeleteFolder: (folderId: string) => void;
     onAnalyzeFolder?: (folderId: string) => void;
+    onChatWithAnalysis?: (folderId: string) => void;
 }
 
 export const FolderSidebar = ({
@@ -33,6 +34,7 @@ export const FolderSidebar = ({
     onRenameFolder,
     onDeleteFolder,
     onAnalyzeFolder,
+    onChatWithAnalysis,
 }: FolderSidebarProps) => {
     const { t } = useTranslation();
     const [creating, setCreating] = useState<{ parentId: string | null } | null>(null);
@@ -252,6 +254,12 @@ export const FolderSidebar = ({
                                         onAnalyzeFolder(contextMenu.folderId);
                                         setContextMenu(null);
                                     }}>🔍 {t("files.analyze", "Analyze")}</button>
+                                )}
+                                {(folder?.analysis_status === "analyzed" || folder?.analysis_status === "stale" || folder?.folder_type === "analysis_result") && onChatWithAnalysis && (
+                                    <button onClick={() => {
+                                        onChatWithAnalysis(contextMenu.folderId);
+                                        setContextMenu(null);
+                                    }}>💬 {t("files.chatWithAnalysis", "Chat with analysis")}</button>
                                 )}
                                 <button
                                     className={styles.contextMenuDanger}

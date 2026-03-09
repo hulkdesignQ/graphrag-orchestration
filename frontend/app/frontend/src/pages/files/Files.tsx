@@ -13,6 +13,7 @@
 
 import { useState, useEffect, useCallback, useRef, useContext } from "react";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 import { useMsal } from "@azure/msal-react";
 import { useLogin, requireLogin, getToken } from "../../authConfig";
 import { LoginContext } from "../../loginContext";
@@ -55,6 +56,7 @@ const Files = () => {
     const client = useLogin ? useMsal().instance : null;
     const { loggedIn } = useContext(LoginContext);
     const { t } = useTranslation();
+    const navigate = useNavigate();
     const [activeTab, setActiveTab] = useState<"my" | "shared">("my");
     const [files, setFiles] = useState<string[]>([]);
     const [globalFiles, setGlobalFiles] = useState<string[]>([]);
@@ -156,6 +158,16 @@ const Files = () => {
             loadGlobalFiles();
         }
     }, [activeTab, loadGlobalFiles]);
+
+    // Poll folders while any folder is "analyzing" (every 5s)
+    useEffect(() => {
+        const hasAnalyzing = folders.some(f => f.analysis_status === "analyzing");
+        if (!hasAnalyzing) return;
+        const interval = setInterval(() => {
+            loadFolders();
+        }, 5000);
+        return () => clearInterval(interval);
+    }, [folders, loadFolders]);
 
     // Upload handler — bounded-parallel uploads (max 3 concurrent)
     const handleUpload = useCallback(
@@ -337,6 +349,16 @@ const Files = () => {
         [client, addToast, loadFolders]
     );
 
+    // Navigate to chat scoped to a folder's analysis group
+    const handleChatWithAnalysis = useCallback(
+        (folderId: string) => {
+            const folder = folders.find(f => f.id === folderId);
+            const groupId = folder?.analysis_group_id || folderId;
+            navigate(`/?folder=${encodeURIComponent(groupId)}`);
+        },
+        [folders, navigate]
+    );
+
     // Move file to folder
     const handleMoveFile = useCallback(
         async (filename: string, destFolderId: string | null) => {
@@ -451,6 +473,7 @@ const Files = () => {
                         onRenameFolder={handleRenameFolder}
                         onDeleteFolder={handleDeleteFolder}
                         onAnalyzeFolder={handleAnalyzeFolder}
+                        onChatWithAnalysis={handleChatWithAnalysis}
                     />
                 )}
 
@@ -474,6 +497,51 @@ const Files = () => {
                                 </>
                             )}
                             <span className={styles.breadcrumbCurrent}>{activeFolder?.name}</span>
+                        </div>
+                    )}
+
+                    {/* Analysis result summary — shown for analyzed/result folders */}
+                    {!isShared && activeFolder && (activeFolder.analysis_status === "analyzed" || activeFolder.analysis_status === "stale" || activeFolder.analysis_status === "analyzing" || activeFolder.folder_type === "analysis_result") && (
+                        <div className={styles.analysisSummary}>
+                            <div className={styles.analysisSummaryHeader}>
+                                <span className={styles.analysisSummaryIcon}>
+                                    {activeFolder.analysis_status === "analyzing" ? "⏳" : activeFolder.analysis_status === "stale" ? "⚠️" : "📊"}
+                                </span>
+                                <span className={styles.analysisSummaryTitle}>
+                                    {activeFolder.analysis_status === "analyzing"
+                                        ? t("files.analysisInProgress", "Analysis in progress…")
+                                        : activeFolder.analysis_status === "stale"
+                                            ? t("files.analysisStale", "Analysis is stale — files changed since last run")
+                                            : t("files.analysisComplete", "Analysis Complete")}
+                                </span>
+                            </div>
+                            <div className={styles.analysisSummaryStats}>
+                                {activeFolder.file_count != null && (
+                                    <span className={styles.analysisStat}>📄 {activeFolder.file_count} files</span>
+                                )}
+                                {activeFolder.entity_count != null && (
+                                    <span className={styles.analysisStat}>🔗 {activeFolder.entity_count} entities</span>
+                                )}
+                                {activeFolder.community_count != null && (
+                                    <span className={styles.analysisStat}>🏘️ {activeFolder.community_count} communities</span>
+                                )}
+                                {activeFolder.analyzed_at && (
+                                    <span className={styles.analysisStat}>🕐 {new Date(activeFolder.analyzed_at).toLocaleString()}</span>
+                                )}
+                            </div>
+                            {(activeFolder.analysis_status === "analyzed" || activeFolder.analysis_status === "stale" || activeFolder.folder_type === "analysis_result") && (
+                                <button
+                                    className={styles.chatWithAnalysisBtn}
+                                    onClick={() => handleChatWithAnalysis(activeFolder.id)}
+                                >
+                                    💬 {t("files.chatWithAnalysis", "Chat with this analysis")}
+                                </button>
+                            )}
+                            {activeFolder.analysis_status === "analyzing" && (
+                                <div className={styles.analysisProgressBar}>
+                                    <div className={styles.analysisProgressFill} />
+                                </div>
+                            )}
                         </div>
                     )}
 
