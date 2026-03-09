@@ -213,7 +213,7 @@ async def run_v2_indexing(group_id: str, reindex: bool, dry_run: bool, knn_enabl
 
 
 async def verify_v2_index(group_id: str):
-    """Verify V2 index has embedding_v2 properties."""
+    """Verify V2 index has embedding properties."""
     from neo4j import GraphDatabase
     
     log("")
@@ -227,7 +227,7 @@ async def verify_v2_index(group_id: str):
     )
     
     with driver.session(database=settings.NEO4J_DATABASE or "neo4j") as session:
-        # Check embedding_v2 coverage
+        # V1 legacy: TextChunk still uses .embedding_v2
         result = session.run(
             """
             MATCH (c:TextChunk {group_id: $group_id})
@@ -246,7 +246,7 @@ async def verify_v2_index(group_id: str):
         
         log(f"  Total chunks: {total}")
         if total > 0:
-            log(f"  With embedding_v2: {v2_count} ({100*v2_count/total:.1f}%)")
+            log(f"  With embedding_v2 (V1 legacy): {v2_count} ({100*v2_count/total:.1f}%)")
             log(f"  With embedding (v1): {v1_count} ({100*v1_count/total:.1f}%)")
         else:
             log("  ⚠️ No chunks found!")
@@ -284,7 +284,7 @@ async def verify_v2_index(group_id: str):
         )
         log(f"  APPEARS_IN_DOCUMENT edges: {result.single()['edge_count']}")
         
-        # Check if V2 embeddings are correct dimension
+        # V1 legacy: TextChunk still uses .embedding_v2
         result = session.run(
             """
             MATCH (c:TextChunk {group_id: $group_id})

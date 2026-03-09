@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-Re-index V2 group with correct embedding_v2 property after hybrid router fix.
+Re-index V2 group with correct embedding properties after hybrid router fix.
 
 This script will re-index the 5 test PDFs using the deployed V2 pipeline,
-which now correctly stores Voyage 2048D embeddings in embedding_v2 property.
+which now correctly stores Voyage 2048D embeddings in type-specific properties
+(entity_embedding, sentence_embedding, triple_embedding).
 
 Usage:
     # After deployment completes:
@@ -37,10 +38,10 @@ def check_health():
         return False
 
 def reindex_v2_group():
-    """Re-index V2 group with correct V2 pipeline (embedding_v2)."""
+    """Re-index V2 group with correct V2 pipeline (type-specific embeddings)."""
     
     print("=" * 70)
-    print("RE-INDEX V2 GROUP WITH CORRECT EMBEDDING_V2")
+    print("RE-INDEX V2 GROUP WITH CORRECT EMBEDDINGS")
     print("=" * 70)
     print(f"API: {API_URL}")
     print(f"Group ID: {V2_GROUP_ID}")

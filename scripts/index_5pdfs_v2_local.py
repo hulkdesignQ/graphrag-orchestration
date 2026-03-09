@@ -378,7 +378,7 @@ async def verify_v2_index(group_id: str):
             """
             MATCH (s:Sentence {group_id: $group_id})
             RETURN count(s) AS total_sentences,
-                   count(s.embedding_v2) AS with_embedding
+                   count(s.sentence_embedding) AS with_embedding
             """,
             group_id=group_id,
         )
@@ -394,8 +394,8 @@ async def verify_v2_index(group_id: str):
         result = session.run(
             """
             MATCH (s:Sentence {group_id: $group_id})
-            WHERE s.embedding_v2 IS NOT NULL
-            RETURN size(s.embedding_v2) AS dim
+            WHERE s.sentence_embedding IS NOT NULL
+            RETURN size(s.sentence_embedding) AS dim
             LIMIT 1
             """,
             group_id=group_id,
@@ -410,7 +410,7 @@ async def verify_v2_index(group_id: str):
             """
             MATCH (e:Entity {group_id: $group_id})
             RETURN count(e) AS entity_count,
-                   count(e.embedding_v2) AS with_embedding
+                   count(e.entity_embedding) AS with_embedding
             """,
             group_id=group_id,
         )

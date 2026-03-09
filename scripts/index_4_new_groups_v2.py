@@ -283,7 +283,7 @@ async def verify_v2_index(group_id: str) -> None:
     )
     
     with driver.session(database=settings.NEO4J_DATABASE or "neo4j") as session:
-        # Check embedding_v2 coverage
+        # V1 legacy: TextChunk still uses .embedding_v2
         result = session.run(
             """
             MATCH (c:TextChunk {group_id: $group_id})
@@ -298,7 +298,7 @@ async def verify_v2_index(group_id: str) -> None:
         v2_count = record["with_v2_embedding"]
         log(f"  Total chunks: {total}")
         if total > 0:
-            log(f"  With embedding_v2: {v2_count} ({100*v2_count/total:.1f}%)")
+            log(f"  With embedding_v2 (V1 legacy): {v2_count} ({100*v2_count/total:.1f}%)")
         
         # Check Document titles (should be URL-decoded now)
         result = session.run(
@@ -376,7 +376,7 @@ async def verify_v2_index(group_id: str) -> None:
         else:
             log(f"  ⚠️ No language spans stored in Document nodes")
         
-        # Check embedding dimension
+        # V1 legacy: TextChunk still uses .embedding_v2
         result = session.run(
             """
             MATCH (c:TextChunk {group_id: $group_id})
