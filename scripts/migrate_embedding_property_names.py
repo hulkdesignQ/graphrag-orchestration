@@ -18,6 +18,9 @@ import sys
 import time
 from typing import Optional
 
+from dotenv import load_dotenv
+load_dotenv()
+
 from neo4j import GraphDatabase
 
 NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")

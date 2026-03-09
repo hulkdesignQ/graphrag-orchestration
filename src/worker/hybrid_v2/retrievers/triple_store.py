@@ -202,12 +202,12 @@ class TripleEmbeddingStore:
         WITH e1, r, e2, head(collect(d.title)) AS shared_title
         OPTIONAL MATCH (e1)-[:APPEARS_IN_DOCUMENT]->(d2:Document)
         WHERE shared_title IS NULL
-        WITH e1, r, e2, COALESCE(shared_title, head(collect(d2.title))) AS doc_title
+        WITH e1, r, e2, shared_title, head(collect(d2.title)) AS fallback_title
         RETURN e1.id AS subj_id, e1.name AS subj_name,
                r.description AS predicate,
                e2.id AS obj_id, e2.name AS obj_name,
                r.triple_embedding AS embedding,
-               doc_title AS document_title
+               COALESCE(shared_title, fallback_title) AS document_title
         """
         triples: List[Triple] = []
         with retry_session(neo4j_driver) as session:

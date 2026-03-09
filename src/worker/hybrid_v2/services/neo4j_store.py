@@ -165,6 +165,9 @@ class Neo4jStoreV3:
                 self._driver = GraphDatabase.driver(
                     self.uri,
                     auth=(self.username, self.password),
+                    max_connection_lifetime=300,
+                    max_transaction_retry_time=120,
+                    connection_acquisition_timeout=120,
                 )
                 # Verify connectivity
                 self._driver.verify_connectivity()
@@ -481,8 +484,10 @@ class Neo4jStoreV3:
                 logger.warning(f"   entity_embedding dim: {len(sample['entity_embedding'])}")
         
         def _sync_upsert():
-            # Batch UNWIND to avoid Neo4j internal errors on large batches
-            BATCH_SIZE = 100
+            # Warm up connection — dedup can idle for 8+ minutes, staling pooled connections
+            self.driver.verify_connectivity()
+            # Batch UNWIND — smaller batches for Aura stability with 2048-dim embeddings
+            BATCH_SIZE = 25
             total_count = 0
             for i in range(0, len(entity_data), BATCH_SIZE):
                 batch = entity_data[i : i + BATCH_SIZE]
@@ -857,11 +862,11 @@ class Neo4jStoreV3:
         WITH e1, r, e2, head(collect(d.title)) AS shared_title
         OPTIONAL MATCH (e1)-[:APPEARS_IN_DOCUMENT]->(d2:Document)
         WHERE shared_title IS NULL
-        WITH e1, r, e2, COALESCE(shared_title, head(collect(d2.title))) AS doc_title
+        WITH e1, r, e2, shared_title, head(collect(d2.title)) AS fallback_title
         RETURN e1.id AS source_id, e1.name AS source_name,
                r.description AS description,
                e2.id AS target_id, e2.name AS target_name,
-               doc_title AS document_title
+               COALESCE(shared_title, fallback_title) AS document_title
         """
         triples: List[Dict[str, Any]] = []
         with self.get_retry_session() as session:
