@@ -226,7 +226,12 @@
         "newSubfolder": "Nouveau sous-dossier",
         "renameFile": "Renommer le fichier",
         "cancel": "Annuler",
-        "confirm": "Confirm"
+        "confirm": "Confirm",
+        "deleteAnalysis": "Supprimer les données d'analyse",
+        "deleteAnalysisConfirm": "Cela supprimera définitivement toutes les données d'analyse (graphe, entités, embeddings) de ce dossier. Les fichiers originaux seront conservés. Continuer ?",
+        "analysisDeleted": "Données d'analyse supprimées avec succès",
+        "deleteAnalysisFailed": "Échec de la suppression de l'analyse : {{message}}",
+        "storageReminder": "💡 Les données d'analyse utilisent du stockage. Supprimez l'analyse quand elle n'est plus nécessaire pour réduire les coûts."
     },
     "viewer": {
         "loadingFile": "Chargement du fichier",

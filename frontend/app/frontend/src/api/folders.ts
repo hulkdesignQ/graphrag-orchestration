@@ -188,6 +188,31 @@ export async function analyzeFolderApi(
     return response.json();
 }
 
+export async function deleteFolderAnalysisApi(
+    folderId: string,
+    idToken: string
+): Promise<{ status: string; deleted: Record<string, number>; message: string }> {
+    const headers = await getHeaders(idToken);
+    const response = await fetchWithAuthRetry(
+        `/folders/${encodeURIComponent(folderId)}/analysis`,
+        {
+            method: "DELETE",
+            headers,
+        }
+    );
+    if (!response.ok) {
+        let detail = response.statusText;
+        try {
+            const body = await response.json();
+            detail = body.detail || detail;
+        } catch {
+            /* ignore */
+        }
+        throw new Error(detail);
+    }
+    return response.json();
+}
+
 export async function getFolderAnalysisStatusApi(
     folderId: string,
     idToken: string

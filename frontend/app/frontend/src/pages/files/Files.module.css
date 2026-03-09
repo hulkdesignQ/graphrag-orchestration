@@ -571,6 +571,37 @@
     box-shadow: 0 2px 8px rgba(76, 201, 240, 0.2);
 }
 
+.analysisActions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 4px;
+}
+
+.deleteAnalysisBtn {
+    align-self: flex-start;
+    padding: 8px 16px;
+    border-radius: 8px;
+    border: 1px solid #e74c3c;
+    background: #fff;
+    color: #c0392b;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s, box-shadow 0.15s;
+}
+.deleteAnalysisBtn:hover {
+    background: #fdecea;
+    box-shadow: 0 2px 8px rgba(231, 76, 60, 0.2);
+}
+
+.storageReminder {
+    margin: 6px 0 0;
+    font-size: 11px;
+    color: #888;
+    line-height: 1.4;
+}
+
 .analysisProgressBar {
     height: 4px;
     background: #e0e0e0;

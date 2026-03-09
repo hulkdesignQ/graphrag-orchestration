@@ -787,6 +787,95 @@ async def analyze_folder(
     }
 
 
+@router.delete("/{folder_id}/analysis")
+async def delete_folder_analysis(
+    folder_id: str,
+    request: Request,
+    partition_id: str = Depends(get_partition_id),
+):
+    """Delete all analysis data (graph) for a folder, keeping original files.
+
+    This removes all Neo4j graph data (Documents, Sentences, Entities,
+    Communities, Sections, etc.) created during folder analysis. The
+    original files in blob storage are untouched.
+
+    Resets the folder's analysis_status to 'not_analyzed'.
+    """
+    driver = get_graph_driver()
+
+    # 1) Verify folder exists and has analysis data
+    verify_query = """
+    MATCH (f:Folder {id: $folder_id, group_id: $partition_id})
+    RETURN f.id as id, f.name as name,
+           f.analysis_status as analysis_status,
+           f.analysis_group_id as analysis_group_id,
+           f.folder_type as folder_type
+    """
+    with driver.session() as session:
+        record = session.run(verify_query,
+                             folder_id=folder_id,
+                             partition_id=partition_id).single()
+        if not record:
+            raise HTTPException(status_code=404, detail="Folder not found")
+        if record.get("analysis_status") == "analyzing":
+            raise HTTPException(status_code=409, detail="Cannot delete while analysis is in progress")
+
+    analysis_group_id = record.get("analysis_group_id")
+    if not analysis_group_id:
+        raise HTTPException(status_code=400, detail="Folder has no analysis data to delete")
+
+    # 2) Delete all graph data for this analysis group
+    from src.worker.hybrid_v2.services.neo4j_store import Neo4jStoreV3
+    store = Neo4jStoreV3()
+    deleted = store.delete_group_data(analysis_group_id)
+
+    # 3) Reset folder analysis status
+    reset_query = """
+    MATCH (f:Folder {id: $folder_id, group_id: $partition_id})
+    OPTIONAL MATCH (f)<-[:SUBFOLDER_OF*0..]-(sub:Folder)
+    WITH collect(f) + collect(sub) AS folders
+    UNWIND folders AS fld
+    SET fld.analysis_status = 'not_analyzed',
+        fld.analysis_group_id = null,
+        fld.analyzed_at = null,
+        fld.file_count = null,
+        fld.entity_count = null,
+        fld.community_count = null,
+        fld.updated_at = datetime()
+    RETURN count(fld) as reset_count
+    """
+    with driver.session() as session:
+        result = session.run(reset_query,
+                             folder_id=folder_id,
+                             partition_id=partition_id)
+        reset_record = result.single()
+
+    # 4) Delete associated "Analysis Results" child folder if it exists
+    cleanup_result_folder_query = """
+    MATCH (f:Folder {id: $folder_id, group_id: $partition_id})
+    OPTIONAL MATCH (rf:Folder {folder_type: 'analysis_result', source_folder_id: $folder_id, group_id: $partition_id})
+    DETACH DELETE rf
+    RETURN count(rf) as result_folders_deleted
+    """
+    with driver.session() as session:
+        session.run(cleanup_result_folder_query,
+                    folder_id=folder_id,
+                    partition_id=partition_id)
+
+    logger.info("folder_analysis_deleted",
+                folder_id=folder_id,
+                analysis_group_id=analysis_group_id,
+                deleted=deleted)
+
+    return {
+        "status": "deleted",
+        "folder_id": folder_id,
+        "analysis_group_id": analysis_group_id,
+        "deleted": deleted,
+        "message": f"Analysis data removed. Original files are kept.",
+    }
+
+
 async def _run_folder_analysis(
     *,
     driver,

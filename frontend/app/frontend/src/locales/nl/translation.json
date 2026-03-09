@@ -226,7 +226,12 @@
         "newSubfolder": "Nieuwe submap",
         "renameFile": "Bestand hernoemen",
         "cancel": "Annuleren",
-        "confirm": "Confirm"
+        "confirm": "Confirm",
+        "deleteAnalysis": "Analysegegevens verwijderen",
+        "deleteAnalysisConfirm": "Dit verwijdert permanent alle analysegegevens (grafiek, entiteiten, embeddings) voor deze map. Originele bestanden blijven behouden. Doorgaan?",
+        "analysisDeleted": "Analysegegevens succesvol verwijderd",
+        "deleteAnalysisFailed": "Verwijderen van analyse mislukt: {{message}}",
+        "storageReminder": "💡 Analysegegevens gebruiken opslagruimte. Verwijder de analyse wanneer deze niet meer nodig is om kosten te besparen."
     },
     "viewer": {
         "loadingFile": "Bestand laden",

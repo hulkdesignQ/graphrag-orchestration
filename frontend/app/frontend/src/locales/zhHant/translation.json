@@ -218,7 +218,12 @@
         "newSubfolder": "新增子資料夾",
         "renameFile": "重新命名檔案",
         "cancel": "取消",
-        "confirm": "Confirm"
+        "confirm": "Confirm",
+        "deleteAnalysis": "刪除分析資料",
+        "deleteAnalysisConfirm": "此操作將永久移除該資料夾的所有分析資料（圖譜、實體、嵌入向量）。原始檔案將保留。是否繼續？",
+        "analysisDeleted": "分析資料已成功刪除",
+        "deleteAnalysisFailed": "刪除分析資料失敗：{{message}}",
+        "storageReminder": "💡 分析資料會佔用儲存空間。不再需要時請刪除分析資料以節省費用。"
     },
     "viewer": {
         "loadingFile": "正在載入檔案",

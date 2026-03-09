@@ -226,7 +226,12 @@
         "newSubfolder": "Ny undermappe",
         "renameFile": "Omdøb fil",
         "cancel": "Annullér",
-        "confirm": "Confirm"
+        "confirm": "Confirm",
+        "deleteAnalysis": "Slet analysedata",
+        "deleteAnalysisConfirm": "Dette vil permanent fjerne alle analysedata (graf, entiteter, embeddings) for denne mappe. Originale filer beholdes. Fortsæt?",
+        "analysisDeleted": "Analysedata slettet",
+        "deleteAnalysisFailed": "Sletning af analyse mislykkedes: {{message}}",
+        "storageReminder": "💡 Analysedata bruger lagerplads. Slet analysen når den ikke længere er nødvendig for at spare omkostninger."
     },
     "viewer": {
         "loadingFile": "Indlæser fil",

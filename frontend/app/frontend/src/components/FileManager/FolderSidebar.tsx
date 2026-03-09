@@ -24,6 +24,7 @@ interface FolderSidebarProps {
     onDeleteFolder: (folderId: string) => void;
     onAnalyzeFolder?: (folderId: string) => void;
     onChatWithAnalysis?: (folderId: string) => void;
+    onDeleteAnalysis?: (folderId: string) => void;
 }
 
 export const FolderSidebar = ({
@@ -35,6 +36,7 @@ export const FolderSidebar = ({
     onDeleteFolder,
     onAnalyzeFolder,
     onChatWithAnalysis,
+    onDeleteAnalysis,
 }: FolderSidebarProps) => {
     const { t } = useTranslation();
     const [creating, setCreating] = useState<{ parentId: string | null } | null>(null);
@@ -260,6 +262,15 @@ export const FolderSidebar = ({
                                         onChatWithAnalysis(contextMenu.folderId);
                                         setContextMenu(null);
                                     }}>💬 {t("files.chatWithAnalysis", "Chat with analysis")}</button>
+                                )}
+                                {(folder?.analysis_status === "analyzed" || folder?.analysis_status === "stale") && onDeleteAnalysis && (
+                                    <button
+                                        className={styles.contextMenuDanger}
+                                        onClick={() => {
+                                            onDeleteAnalysis(contextMenu.folderId);
+                                            setContextMenu(null);
+                                        }}
+                                    >🗑️ {t("files.deleteAnalysis", "Delete Analysis Data")}</button>
                                 )}
                                 <button
                                     className={styles.contextMenuDanger}

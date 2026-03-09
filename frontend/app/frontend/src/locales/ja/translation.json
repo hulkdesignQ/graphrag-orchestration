@@ -226,7 +226,12 @@
         "newSubfolder": "新しいサブフォルダ",
         "renameFile": "ファイル名を変更",
         "cancel": "キャンセル",
-        "confirm": "Confirm"
+        "confirm": "Confirm",
+        "deleteAnalysis": "分析データを削除",
+        "deleteAnalysisConfirm": "このフォルダのすべての分析データ（グラフ、エンティティ、埋め込み）が完全に削除されます。元のファイルは保持されます。続行しますか？",
+        "analysisDeleted": "分析データが正常に削除されました",
+        "deleteAnalysisFailed": "分析データの削除に失敗しました：{{message}}",
+        "storageReminder": "💡 分析データはストレージを使用します。不要になったら分析を削除してコストを節約してください。"
     },
     "viewer": {
         "loadingFile": "ファイルを読み込み中",

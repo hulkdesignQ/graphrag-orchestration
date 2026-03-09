@@ -226,7 +226,12 @@
         "newSubfolder": "Nuova sottocartella",
         "renameFile": "Rinomina file",
         "cancel": "Annulla",
-        "confirm": "Confirm"
+        "confirm": "Confirm",
+        "deleteAnalysis": "Elimina dati di analisi",
+        "deleteAnalysisConfirm": "Verranno eliminati permanentemente tutti i dati di analisi (grafo, entità, embedding) di questa cartella. I file originali verranno conservati. Continuare?",
+        "analysisDeleted": "Dati di analisi eliminati con successo",
+        "deleteAnalysisFailed": "Eliminazione analisi fallita: {{message}}",
+        "storageReminder": "💡 I dati di analisi utilizzano spazio. Elimina l'analisi quando non serve più per risparmiare sui costi."
     },
     "viewer": {
         "loadingFile": "Caricamento file",

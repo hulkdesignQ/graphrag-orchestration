@@ -34,6 +34,7 @@ import {
     renameFolderApi,
     deleteFolderApi,
     analyzeFolderApi,
+    deleteFolderAnalysisApi,
     Folder,
 } from "../../api/folders";
 import { UploadZone } from "../../components/FileManager/UploadZone";
@@ -359,6 +360,23 @@ const Files = () => {
         [folders, navigate]
     );
 
+    // Delete analysis data for a folder (keeps original files)
+    const handleDeleteAnalysis = useCallback(
+        async (folderId: string) => {
+            if (!window.confirm(t("files.deleteAnalysisConfirm"))) return;
+            try {
+                const token = client ? await getToken(client) : undefined;
+                if (useLogin && !token) throw new Error("Not authenticated");
+                await deleteFolderAnalysisApi(folderId, token as string);
+                addToast("success", t("files.analysisDeleted"));
+                await loadFolders();
+            } catch (err: any) {
+                addToast("error", t("files.deleteAnalysisFailed", { message: err.message }));
+            }
+        },
+        [client, addToast, loadFolders, t]
+    );
+
     // Move file to folder
     const handleMoveFile = useCallback(
         async (filename: string, destFolderId: string | null) => {
@@ -474,6 +492,7 @@ const Files = () => {
                         onDeleteFolder={handleDeleteFolder}
                         onAnalyzeFolder={handleAnalyzeFolder}
                         onChatWithAnalysis={handleChatWithAnalysis}
+                        onDeleteAnalysis={handleDeleteAnalysis}
                     />
                 )}
 
@@ -530,12 +549,25 @@ const Files = () => {
                                 )}
                             </div>
                             {(activeFolder.analysis_status === "analyzed" || activeFolder.analysis_status === "stale" || activeFolder.folder_type === "analysis_result") && (
-                                <button
-                                    className={styles.chatWithAnalysisBtn}
-                                    onClick={() => handleChatWithAnalysis(activeFolder.id)}
-                                >
-                                    💬 {t("files.chatWithAnalysis", "Chat with this analysis")}
-                                </button>
+                                <div className={styles.analysisActions}>
+                                    <button
+                                        className={styles.chatWithAnalysisBtn}
+                                        onClick={() => handleChatWithAnalysis(activeFolder.id)}
+                                    >
+                                        💬 {t("files.chatWithAnalysis", "Chat with this analysis")}
+                                    </button>
+                                    <button
+                                        className={styles.deleteAnalysisBtn}
+                                        onClick={() => handleDeleteAnalysis(activeFolder.id)}
+                                    >
+                                        🗑️ {t("files.deleteAnalysis", "Delete Analysis Data")}
+                                    </button>
+                                </div>
+                            )}
+                            {(activeFolder.analysis_status === "analyzed" || activeFolder.analysis_status === "stale") && (
+                                <p className={styles.storageReminder}>
+                                    {t("files.storageReminder")}
+                                </p>
                             )}
                             {activeFolder.analysis_status === "analyzing" && (
                                 <div className={styles.analysisProgressBar}>

@@ -229,7 +229,12 @@
         "newSubfolder": "Nowy podfolder",
         "renameFile": "Zmień nazwę pliku",
         "cancel": "Anuluj",
-        "confirm": "Confirm"
+        "confirm": "Confirm",
+        "deleteAnalysis": "Usuń dane analizy",
+        "deleteAnalysisConfirm": "Spowoduje to trwałe usunięcie wszystkich danych analizy (graf, encje, embeddingi) dla tego folderu. Oryginalne pliki zostaną zachowane. Kontynuować?",
+        "analysisDeleted": "Dane analizy zostały pomyślnie usunięte",
+        "deleteAnalysisFailed": "Nie udało się usunąć analizy: {{message}}",
+        "storageReminder": "💡 Dane analizy zajmują miejsce. Usuń analizę, gdy nie jest już potrzebna, aby zaoszczędzić na kosztach."
     },
     "viewer": {
         "loadingFile": "Ładowanie pliku",
