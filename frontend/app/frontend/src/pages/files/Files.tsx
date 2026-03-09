@@ -519,6 +519,28 @@ const Files = () => {
                         </div>
                     )}
 
+                    {/* Hero CTA — shown when folder is selected, has files, and is not yet analyzed */}
+                    {!isShared && activeFolder
+                        && (!activeFolder.analysis_status || activeFolder.analysis_status === "not_analyzed")
+                        && (!activeFolder.folder_type || activeFolder.folder_type === "user")
+                        && filteredFiles.length > 0 && (
+                        <div className={styles.analysisCta}>
+                            <div className={styles.analysisCtaContent}>
+                                <span className={styles.analysisCtaIcon}>📊</span>
+                                <div className={styles.analysisCtaText}>
+                                    <strong>{t("files.readyToAnalyze", { count: filteredFiles.length, defaultValue: `Ready to analyze ${filteredFiles.length} document(s)` })}</strong>
+                                    <span>{t("files.analysisExplainer", "Build a knowledge graph from your files to enable AI-powered question answering.")}</span>
+                                </div>
+                            </div>
+                            <button
+                                className={styles.analysisCtaBtn}
+                                onClick={() => handleAnalyzeFolder(activeFolder.id)}
+                            >
+                                🔍 {t("files.analyzeNow", "Analyze Now")}
+                            </button>
+                        </div>
+                    )}
+
                     {/* Analysis result summary — shown for analyzed/result folders */}
                     {!isShared && activeFolder && (activeFolder.analysis_status === "analyzed" || activeFolder.analysis_status === "stale" || activeFolder.analysis_status === "analyzing" || activeFolder.folder_type === "analysis_result") && (
                         <div className={styles.analysisSummary}>
@@ -577,7 +599,7 @@ const Files = () => {
                         </div>
                     )}
 
-                    {/* Toolbar: search, sort, bulk actions */}
+                    {/* Toolbar: search, sort, bulk actions, analyze */}
                     <FileToolbar
                         fileCount={filteredFiles.length}
                         selectedCount={isShared ? 0 : selected.size}
@@ -593,6 +615,10 @@ const Files = () => {
                         onSelectNone={isShared ? () => {} : selectNone}
                         onDeleteSelected={isShared ? () => {} : () => handleDelete(Array.from(selected))}
                         onRefresh={isShared ? loadGlobalFiles : () => { loadFiles(); loadFolders(); }}
+                        activeFolderId={isShared ? null : activeFolderId}
+                        analysisStatus={activeFolder?.analysis_status}
+                        isUserFolder={!activeFolder?.folder_type || activeFolder.folder_type === "user"}
+                        onAnalyzeFolder={activeFolderId ? () => handleAnalyzeFolder(activeFolderId) : undefined}
                     />
 
                     {/* File list */}

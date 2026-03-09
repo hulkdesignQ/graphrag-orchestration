@@ -190,22 +190,22 @@ export const FolderSidebar = ({
                         <>
                             <span className={styles.folderName} title={folder.name}>{folder.name}</span>
                             {renderAnalysisBadge(folder.analysis_status)}
-                            {/* Inline primary action button */}
+                            {/* Inline shortcut icons (hover-reveal) */}
                             {(() => {
                                 const isUserFolder = !folder.folder_type || folder.folder_type === "user";
                                 if (isUserFolder && (!folder.analysis_status || folder.analysis_status === "not_analyzed") && onAnalyzeFolder) {
                                     return (
                                         <button
-                                            className={styles.inlineActionBtn}
+                                            className={styles.inlineIconBtn}
                                             onClick={e => { e.stopPropagation(); onAnalyzeFolder(folder.id); }}
                                             title={t("files.analyze", "Analyze")}
-                                        >🔍 {t("files.analyze", "Analyze")}</button>
+                                        >🔍</button>
                                     );
                                 }
                                 if ((folder.analysis_status === "analyzed" || folder.analysis_status === "stale") && onChatWithAnalysis) {
                                     return (
                                         <button
-                                            className={`${styles.inlineActionBtn} ${styles.inlineActionChat}`}
+                                            className={styles.inlineIconBtn}
                                             onClick={e => { e.stopPropagation(); onChatWithAnalysis(folder.id); }}
                                             title={t("files.chatWithAnalysis", "Chat")}
                                         >💬</button>
@@ -214,9 +214,9 @@ export const FolderSidebar = ({
                                 if (isUserFolder && folder.analysis_status === "stale" && onAnalyzeFolder) {
                                     return (
                                         <button
-                                            className={styles.inlineActionBtn}
+                                            className={styles.inlineIconBtn}
                                             onClick={e => { e.stopPropagation(); onAnalyzeFolder(folder.id); }}
-                                            title={t("files.analyze", "Re-analyze")}
+                                            title={t("files.reanalyze", "Re-analyze")}
                                         >🔍</button>
                                     );
                                 }

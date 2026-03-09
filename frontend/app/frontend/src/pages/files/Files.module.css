@@ -226,6 +226,48 @@
     color: #0d8ab5;
 }
 
+/* ── Toolbar Analyze Button ──────────────────────── */
+.toolbarBtnAnalyze {
+    padding: 8px 20px;
+    border-radius: 8px;
+    border: 2px solid #4cc9f0;
+    background: linear-gradient(135deg, #4cc9f0, #38b6db);
+    color: #fff;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 0.15s, box-shadow 0.15s, transform 0.1s;
+    white-space: nowrap;
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+.toolbarBtnAnalyze:hover {
+    background: linear-gradient(135deg, #38b6db, #2da5c9);
+    box-shadow: 0 2px 12px rgba(76, 201, 240, 0.4);
+    transform: translateY(-1px);
+}
+.toolbarBtnAnalyze:active {
+    transform: translateY(0);
+    box-shadow: 0 1px 4px rgba(76, 201, 240, 0.3);
+}
+.toolbarBtnAnalyzing {
+    padding: 8px 20px;
+    border-radius: 8px;
+    border: 2px solid #e0e0e0;
+    background: #f5f5f5;
+    color: #999;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: not-allowed;
+    white-space: nowrap;
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
 /* ── File List ───────────────────────────────────── */
 .fileListWrapper {
     flex: 1 1 auto;
@@ -509,6 +551,66 @@
         min-width: 160px;
         font-size: 13px;
     }
+}
+
+/* ── Analysis CTA Card (unanalyzed folder prompt) ── */
+.analysisCta {
+    background: linear-gradient(135deg, #eaf9ff, #e3f2fd);
+    border: 1px solid #b3e5fc;
+    border-radius: 10px;
+    padding: 16px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    flex-shrink: 0;
+}
+.analysisCtaContent {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+.analysisCtaIcon {
+    font-size: 28px;
+    flex-shrink: 0;
+    line-height: 1;
+}
+.analysisCtaText {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 13px;
+    color: #555;
+    min-width: 0;
+}
+.analysisCtaText strong {
+    font-size: 15px;
+    color: #0d8ab5;
+}
+.analysisCtaBtn {
+    padding: 10px 24px;
+    border-radius: 8px;
+    border: 2px solid #4cc9f0;
+    background: linear-gradient(135deg, #4cc9f0, #38b6db);
+    color: #fff;
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+    white-space: nowrap;
+    flex-shrink: 0;
+    transition: background 0.15s, box-shadow 0.15s, transform 0.1s;
+}
+.analysisCtaBtn:hover {
+    background: linear-gradient(135deg, #38b6db, #2da5c9);
+    box-shadow: 0 2px 12px rgba(76, 201, 240, 0.4);
+    transform: translateY(-1px);
+}
+.analysisCtaBtn:active {
+    transform: translateY(0);
+    box-shadow: 0 1px 4px rgba(76, 201, 240, 0.3);
 }
 
 /* Analysis Summary Panel */

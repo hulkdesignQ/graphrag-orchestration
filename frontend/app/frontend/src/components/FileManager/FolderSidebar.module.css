@@ -225,7 +225,26 @@
     }
 }
 
-/* Inline primary action button (Analyze / Chat) on folder row */
+/* Inline icon shortcut (hover-reveal, icon-only) */
+.inlineIconBtn {
+    flex-shrink: 0;
+    padding: 2px 4px;
+    border: none;
+    background: none;
+    cursor: pointer;
+    font-size: 13px;
+    opacity: 0;
+    transition: opacity 0.15s;
+    line-height: 1;
+}
+.folderRow:hover .inlineIconBtn {
+    opacity: 0.6;
+}
+.inlineIconBtn:hover {
+    opacity: 1;
+}
+
+/* Legacy inline action btn (kept for analysis_result Chat icon) */
 .inlineActionBtn {
     flex-shrink: 0;
     padding: 2px 8px;

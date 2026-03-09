@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
 
+import type { AnalysisStatus } from "../../api/folders";
 import styles from "../../pages/files/Files.module.css";
 
 interface FileToolbarProps {
@@ -14,6 +15,10 @@ interface FileToolbarProps {
     onSelectNone: () => void;
     onDeleteSelected: () => void;
     onRefresh: () => void;
+    activeFolderId?: string | null;
+    analysisStatus?: AnalysisStatus | null;
+    isUserFolder?: boolean;
+    onAnalyzeFolder?: () => void;
 }
 
 export const FileToolbar = ({
@@ -28,6 +33,10 @@ export const FileToolbar = ({
     onSelectNone,
     onDeleteSelected,
     onRefresh,
+    activeFolderId,
+    analysisStatus,
+    isUserFolder,
+    onAnalyzeFolder,
 }: FileToolbarProps) => {
     const { t } = useTranslation();
     const arrow = sortAsc ? "↑" : "↓";
@@ -81,6 +90,21 @@ export const FileToolbar = ({
             <button className={styles.toolbarBtn} onClick={onRefresh} title={t("fileToolbar.refresh")}>
                 🔄
             </button>
+
+            {/* Primary Analyze action — visible when a user folder is selected */}
+            {activeFolderId && isUserFolder && onAnalyzeFolder && (
+                analysisStatus === "analyzing" ? (
+                    <button className={styles.toolbarBtnAnalyzing} disabled>
+                        ⏳ {t("files.analyzing", "Analyzing…")}
+                    </button>
+                ) : analysisStatus !== "analyzed" ? (
+                    <button className={styles.toolbarBtnAnalyze} onClick={onAnalyzeFolder}>
+                        🔍 {analysisStatus === "stale"
+                            ? t("files.reanalyze", "Re-analyze")
+                            : t("files.analyzeFiles", { count: fileCount, defaultValue: `Analyze (${fileCount} files)` })}
+                    </button>
+                ) : null
+            )}
         </div>
     );
 };
