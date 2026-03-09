@@ -10,9 +10,10 @@ interface FileListProps {
     onDelete: (filename: string) => void;
     onRename: (filename: string) => void;
     onMove?: (filename: string) => void;
+    onPreview?: (filename: string) => void;
 }
 
-export const FileList = ({ files, selected, loading, onToggleSelect, onDelete, onRename, onMove }: FileListProps) => {
+export const FileList = ({ files, selected, loading, onToggleSelect, onDelete, onRename, onMove, onPreview }: FileListProps) => {
     const { t } = useTranslation();
 
     if (loading) {
@@ -76,6 +77,15 @@ export const FileList = ({ files, selected, loading, onToggleSelect, onDelete, o
                                 <td className={styles.fileExt}>{getExt(f)}</td>
                                 <td>
                                     <div className={styles.fileActions} onClick={(e) => e.stopPropagation()}>
+                                        {onPreview && (
+                                            <button
+                                                className={styles.actionBtn}
+                                                onClick={() => onPreview(f)}
+                                                title={t("files.preview")}
+                                            >
+                                                👁️
+                                            </button>
+                                        )}
                                         {onMove && (
                                             <button
                                                 className={styles.actionBtn}

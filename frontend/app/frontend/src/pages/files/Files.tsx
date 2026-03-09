@@ -42,6 +42,7 @@ import { FileToolbar } from "../../components/FileManager/FileToolbar";
 import { RenameDialog } from "../../components/FileManager/RenameDialog";
 import { FolderSidebar } from "../../components/FileManager/FolderSidebar";
 import { MoveToFolderDialog } from "../../components/FileManager/MoveToFolderDialog";
+import { FilePreviewModal } from "../../components/FileManager/FilePreviewModal";
 import { Toast } from "../../components/FileManager/Toast";
 import styles from "./Files.module.css";
 
@@ -71,6 +72,7 @@ const Files = () => {
     const [uploadTotal, setUploadTotal] = useState(0);
     const [renameFile, setRenameFile] = useState<string | null>(null);
     const [moveFile, setMoveFile] = useState<string | null>(null);
+    const [previewFile, setPreviewFile] = useState<string | null>(null);
     const [toasts, setToasts] = useState<ToastMessage[]>([]);
     const toastIdRef = useRef(0);
 
@@ -580,6 +582,7 @@ const Files = () => {
                         onDelete={(f) => handleDelete([f])}
                         onRename={(f) => setRenameFile(f)}
                         onMove={(f) => setMoveFile(f)}
+                        onPreview={(f) => setPreviewFile(f)}
                     />
                 </div>
             </div>
@@ -601,6 +604,16 @@ const Files = () => {
                     currentFolderId={activeFolderId}
                     onMove={handleMoveFile}
                     onDismiss={() => setMoveFile(null)}
+                />
+            )}
+
+            {/* File preview modal */}
+            {previewFile && (
+                <FilePreviewModal
+                    filename={previewFile}
+                    allFiles={filteredFiles}
+                    onDismiss={() => setPreviewFile(null)}
+                    onNavigate={(f) => setPreviewFile(f)}
                 />
             )}
 

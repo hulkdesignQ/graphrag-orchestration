@@ -232,7 +232,8 @@
         "deleteAnalysisConfirm": "This will permanently remove all analysis data (graph, entities, embeddings) for this folder. Original files will be kept. Continue?",
         "analysisDeleted": "Analysis data deleted successfully",
         "deleteAnalysisFailed": "Failed to delete analysis: {{message}}",
-        "storageReminder": "💡 Analysis data uses storage. Delete analysis when no longer needed to save costs."
+        "storageReminder": "💡 Analysis data uses storage. Delete analysis when no longer needed to save costs.",
+        "preview": "Preview"
     },
     "nav": {
         "chat": "Chat",
@@ -248,6 +249,19 @@
         "pageInfo": "Page {{current}} / {{total}}",
         "highlightCount": "{{count}} highlight(s) on this page",
         "failedLoadPdf": "Failed to load PDF document"
+    },
+    "preview": {
+        "prev": "Previous file",
+        "next": "Next file",
+        "download": "Download",
+        "close": "Close",
+        "fitWidth": "Fit",
+        "loading": "Loading preview…",
+        "rendering": "Rendering…",
+        "error": "Preview failed",
+        "noPreview": "Preview not available",
+        "noPreviewHint": "This file format cannot be previewed in the browser.",
+        "downloadFile": "Download file"
     },
     "analysis": {
         "citedSentences": "Cited Sentences",
