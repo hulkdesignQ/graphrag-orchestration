@@ -379,7 +379,7 @@ async def _fetch_user_usage(
         storage_used_gb = cosmos_doc_storage
 
     personal_documents_count = documents_count
-    total_documents = personal_documents_count + global_documents_count
+    total_documents = personal_documents_count
 
     # Count translated queries from recent activity
     translated_queries_month = sum(1 for q in recent_queries if q.get("was_translated"))
@@ -648,7 +648,7 @@ async def _fetch_dashboard_all(
         storage_used_gb = cosmos_doc_storage
 
     personal_documents_count = documents_count
-    total_documents = personal_documents_count + global_documents_count
+    total_documents = personal_documents_count
 
     translated_queries_month = sum(1 for q in recent_queries if q.get("was_translated"))
     speech_queries_month = sum(1 for q in recent_queries if q.get("was_speech_input"))
