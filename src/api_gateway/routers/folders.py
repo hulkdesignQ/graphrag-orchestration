@@ -1014,26 +1014,9 @@ async def _run_folder_analysis(
     import traceback
     file_count = len(blobs)
     try:
-        # Clean up any existing graph data for this group before re-indexing
-        # Use the existing driver (already connected) instead of creating a new
-        # Neo4jStoreV3 instance, to avoid extra connection overhead on Aura.
-        try:
-            cleanup_query = """
-            MATCH (n {group_id: $gid})
-            WHERE NOT n:Folder
-            DETACH DELETE n
-            RETURN count(*) AS deleted
-            """
-            with driver.session() as session:
-                result = session.run(cleanup_query, gid=neo4j_gid)
-                record = result.single()
-                logger.info("pre_analysis_cleanup",
-                            group_id=neo4j_gid,
-                            deleted=record["deleted"] if record else 0)
-        except Exception as cleanup_err:
-            logger.warning("pre_analysis_cleanup_failed",
-                           group_id=neo4j_gid,
-                           error=str(cleanup_err))
+        # NOTE: Group-wide cleanup removed — it overwhelms Neo4j Aura and kills
+        # the driver connection pool. Per-document cleanup in on_file_uploaded()
+        # handles individual files. For full cleanup, use "Delete Analysis" first.
 
         # Set total file count so the UI can show determinate progress
         init_query = """
