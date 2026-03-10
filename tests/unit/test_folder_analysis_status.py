@@ -23,7 +23,11 @@ def _build_app() -> FastAPI:
 
 
 def _mock_driver_with_records(records: list[dict]):
-    """Create a mock Neo4j driver that returns a list of records."""
+    """Create a mock Neo4j driver that returns a list of records.
+
+    Supports both legacy ``session.run()`` and managed transaction
+    ``session.execute_read()`` / ``session.execute_write()`` paths.
+    """
     mock_results = []
     for rec in records:
         mock_record = MagicMock()
@@ -31,12 +35,21 @@ def _mock_driver_with_records(records: list[dict]):
         mock_record.get = lambda key, default=None, r=rec: r.get(key, default)
         mock_results.append(mock_record)
 
-    mock_result = MagicMock()
-    mock_result.__iter__ = MagicMock(return_value=iter(mock_results))
-    mock_result.single.return_value = mock_results[0] if mock_results else None
+    def _make_result():
+        mock_result = MagicMock()
+        mock_result.__iter__ = MagicMock(return_value=iter(list(mock_results)))
+        mock_result.single.return_value = mock_results[0] if mock_results else None
+        return mock_result
+
+    # tx.run() used inside execute_read/execute_write transaction functions
+    mock_tx = MagicMock()
+    mock_tx.run.return_value = _make_result()
 
     mock_session = MagicMock()
-    mock_session.run.return_value = mock_result
+    mock_session.run.return_value = _make_result()
+    # execute_read/write call the user function with a tx argument
+    mock_session.execute_read.side_effect = lambda fn, *a, **kw: fn(mock_tx, *a, **kw)
+    mock_session.execute_write.side_effect = lambda fn, *a, **kw: fn(mock_tx, *a, **kw)
     mock_session.__enter__ = MagicMock(return_value=mock_session)
     mock_session.__exit__ = MagicMock(return_value=False)
 

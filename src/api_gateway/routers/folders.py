@@ -5,6 +5,7 @@ Provides hierarchical folder organization for documents.
 Supports multi-tenant isolation via group_id or user_id.
 """
 
+from contextlib import contextmanager
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends, Request
 from typing import List, Optional
 from pydantic import BaseModel
@@ -72,11 +73,64 @@ def get_partition_id(request: Request) -> str:
 
 
 def get_graph_driver():
-    """Get Neo4j driver with null check."""
+    """Get Neo4j driver with reconnection attempt."""
     graph_service = GraphService()
     if not graph_service.driver:
-        raise HTTPException(status_code=503, detail="Graph database unavailable")
+        if not graph_service.reconnect():
+            raise HTTPException(status_code=503, detail="Graph database unavailable")
     return graph_service.driver
+
+
+@contextmanager
+def graph_session(database: str = None):
+    """Context manager yielding a Neo4j session with automatic retry.
+
+    Usage for reads::
+
+        with graph_session() as (read, _write):
+            records = read(query, param1=val1)
+
+    Usage for writes::
+
+        with graph_session() as (_read, write):
+            records = write(query, param1=val1)
+
+    ``read`` / ``write`` wrap ``session.execute_read`` /
+    ``session.execute_write`` which retry transient errors
+    (network hiccups, leader changes) with exponential back-off.
+    On non-transient failures the original Neo4j exception propagates
+    and the outer error-handling middleware converts it to 503.
+    """
+    driver = get_graph_driver()
+    db = database or None
+    try:
+        with driver.session(database=db) as session:
+
+            def _run_read(query: str, **kwargs):
+                def _tx(tx, q=query, kw=kwargs):
+                    result = tx.run(q, **kw)
+                    return list(result)
+                return session.execute_read(_tx)
+
+            def _run_write(query: str, **kwargs):
+                def _tx(tx, q=query, kw=kwargs):
+                    result = tx.run(q, **kw)
+                    return list(result)
+                return session.execute_write(_tx)
+
+            yield _run_read, _run_write
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        err = str(e)[:200]
+        logger.warning("neo4j_session_error", error=err)
+        # Trigger reconnect for next request
+        try:
+            GraphService().reconnect()
+        except Exception:
+            pass
+        raise HTTPException(status_code=503, detail=f"Database temporarily busy: {err}")
 
 
 @router.post("", response_model=Folder)
@@ -94,19 +148,17 @@ async def create_folder(
     Returns:
         Created folder
     """
-    driver = get_graph_driver()
-    
     # Validate parent exists (unlimited depth allowed)
     if folder.parent_folder_id:
         parent_query = """
         MATCH (f:Folder {id: $parent_id, group_id: $partition_id})
         RETURN f.id as id
         """
-        with driver.session() as session:
-            result = session.run(parent_query, 
-                               parent_id=folder.parent_folder_id,
-                               partition_id=partition_id)
-            if not result.single():
+        with graph_session() as (read, _write):
+            result = read(parent_query,
+                          parent_id=folder.parent_folder_id,
+                          partition_id=partition_id)
+            if not result:
                 raise HTTPException(status_code=404, detail="Parent folder not found")
     
     # Create folder
@@ -139,13 +191,13 @@ async def create_folder(
            f.created_at as created_at, f.updated_at as updated_at
     """
     
-    with driver.session() as session:
-        result = session.run(create_query,
-                           name=folder.name,
-                           partition_id=partition_id,
-                           parent_folder_id=folder.parent_folder_id,
-                           folder_type=folder.folder_type)
-        record = result.single()
+    with graph_session() as (_read, write):
+        records = write(create_query,
+                        name=folder.name,
+                        partition_id=partition_id,
+                        parent_folder_id=folder.parent_folder_id,
+                        folder_type=folder.folder_type)
+        record = records[0] if records else None
 
     if not record:
         raise HTTPException(status_code=500, detail="Folder creation failed: no record returned from database")
@@ -170,8 +222,6 @@ async def list_folders(
     Returns:
         List of folders
     """
-    driver = get_graph_driver()
-    
     if parent_folder_id:
         query = f"""
         MATCH (f:Folder {{group_id: $partition_id}})
@@ -186,14 +236,11 @@ async def list_folders(
         ORDER BY f.name
         """
     
-    try:
-        with driver.session() as session:
-            result = session.run(query, 
-                               partition_id=partition_id,
-                               parent_folder_id=parent_folder_id)
-            folders = [_folder_from_record(record) for record in result]
-    except Exception as e:
-        raise HTTPException(status_code=503, detail=f"Database temporarily busy: {str(e)[:200]}")
+    with graph_session() as (read, _write):
+        records = read(query,
+                       partition_id=partition_id,
+                       parent_folder_id=parent_folder_id)
+        folders = [_folder_from_record(record) for record in records]
     
     return folders
 
@@ -204,21 +251,16 @@ async def get_folder(
     partition_id: str = Depends(get_partition_id)
 ):
     """Get a specific folder."""
-    driver = get_graph_driver()
-    
     query = f"""
     MATCH (f:Folder {{id: $folder_id, group_id: $partition_id}})
     RETURN {_FOLDER_RETURN}
     """
     
-    with driver.session() as session:
-        result = session.run(query, folder_id=folder_id, partition_id=partition_id)
-        record = result.single()
-        
-        if not record:
+    with graph_session() as (read, _write):
+        records = read(query, folder_id=folder_id, partition_id=partition_id)
+        if not records:
             raise HTTPException(status_code=404, detail="Folder not found")
-        
-        return _folder_from_record(record)
+        return _folder_from_record(records[0])
 
 
 @router.put("/{folder_id}", response_model=Folder)
@@ -228,27 +270,22 @@ async def update_folder(
     partition_id: str = Depends(get_partition_id)
 ):
     """Update a folder."""
-    driver = get_graph_driver()
-    
     query = f"""
     MATCH (f:Folder {{id: $folder_id, group_id: $partition_id}})
     SET f.name = $name, f.updated_at = datetime()
     RETURN {_FOLDER_RETURN}
     """
     
-    with driver.session() as session:
-        result = session.run(query, 
-                           folder_id=folder_id,
-                           partition_id=partition_id,
-                           name=folder_update.name)
-        record = result.single()
-        
-        if not record:
+    with graph_session() as (_read, write):
+        records = write(query,
+                        folder_id=folder_id,
+                        partition_id=partition_id,
+                        name=folder_update.name)
+        if not records:
             raise HTTPException(status_code=404, detail="Folder not found")
         
         logger.info("folder_updated", folder_id=folder_id, partition_id=partition_id)
-        
-        return _folder_from_record(record)
+        return _folder_from_record(records[0])
 
 
 @router.delete("/{folder_id}")
@@ -266,8 +303,6 @@ async def delete_folder(
         cascade: If True, delete subfolders and move documents to parent.
                  If False, fail if folder has children.
     """
-    driver = get_graph_driver()
-    
     if not cascade:
         # Check if folder has children
         check_query = """
@@ -276,11 +311,11 @@ async def delete_folder(
         OPTIONAL MATCH (doc:Document)-[:IN_FOLDER]->(f)
         RETURN count(child) as child_count, count(doc) as doc_count
         """
-        with driver.session() as session:
-            result = session.run(check_query, folder_id=folder_id, partition_id=partition_id)
-            record = result.single()
+        with graph_session() as (read, _write):
+            records = read(check_query, folder_id=folder_id, partition_id=partition_id)
+            record = records[0] if records else None
             
-            if record["child_count"] > 0 or record["doc_count"] > 0:
+            if record and (record["child_count"] > 0 or record["doc_count"] > 0):
                 raise HTTPException(
                     status_code=400,
                     detail="Folder has children. Use cascade=true to delete recursively."
@@ -298,14 +333,14 @@ async def delete_folder(
     RETURN count(f) as deleted
     """
     
-    with driver.session() as session:
-        result = session.run(delete_query,
-                           folder_id=folder_id,
-                           partition_id=partition_id,
-                           cascade=cascade)
-        record = result.single()
+    with graph_session() as (_read, write):
+        records = write(delete_query,
+                        folder_id=folder_id,
+                        partition_id=partition_id,
+                        cascade=cascade)
+        record = records[0] if records else None
         
-        if record["deleted"] == 0:
+        if not record or record["deleted"] == 0:
             raise HTTPException(status_code=404, detail="Folder not found")
     
     logger.info("folder_deleted", folder_id=folder_id, partition_id=partition_id, cascade=cascade)
@@ -358,16 +393,13 @@ async def assign_document_to_folder(
     """
     from src.api_gateway.services.folder_resolver import resolve_neo4j_group_id
 
-    driver = get_graph_driver()
-    
     # Verify folder exists and belongs to this partition
     verify_query = """
     MATCH (f:Folder {id: $folder_id, group_id: $partition_id})
     RETURN f.id as id
     """
-    with driver.session() as session:
-        result = session.run(verify_query, folder_id=folder_id, partition_id=partition_id)
-        if not result.single():
+    with graph_session() as (read, _write):
+        if not read(verify_query, folder_id=folder_id, partition_id=partition_id):
             raise HTTPException(status_code=404, detail="Folder not found")
     
     # Determine old and new root folder IDs to detect cross-partition moves
@@ -382,10 +414,11 @@ async def assign_document_to_folder(
     OPTIONAL MATCH (d)-[:IN_FOLDER]->(old_f:Folder)
     RETURN d.title as doc_title, d.source as doc_source, d.group_id as doc_group_id, old_f.id as old_folder_id
     """
-    with driver.session() as session:
-        doc_record = session.run(old_folder_query,
-                                document_id=assignment.document_id,
-                                valid_ids=valid_ids).single()
+    with graph_session() as (read, _write):
+        records = read(old_folder_query,
+                       document_id=assignment.document_id,
+                       valid_ids=valid_ids)
+        doc_record = records[0] if records else None
         if not doc_record:
             raise HTTPException(status_code=404, detail="Document not found")
     
@@ -416,13 +449,13 @@ async def assign_document_to_folder(
     RETURN d.id as document_id, f.id as folder_id, f.name as folder_name
     """
     
-    with driver.session() as session:
-        result = session.run(assign_query,
-                           document_id=assignment.document_id,
-                           folder_id=folder_id,
-                           partition_id=partition_id,
-                           valid_ids=valid_ids)
-        record = result.single()
+    with graph_session() as (_read, write):
+        records = write(assign_query,
+                        document_id=assignment.document_id,
+                        folder_id=folder_id,
+                        partition_id=partition_id,
+                        valid_ids=valid_ids)
+        record = records[0] if records else None
         
         if not record:
             raise HTTPException(status_code=404, detail="Document not found")
@@ -480,8 +513,6 @@ async def unassign_document_from_folder(
     Returns:
         Unassignment result
     """
-    driver = get_graph_driver()
-    
     unassign_query = """
     MATCH (d:Document {id: $document_id})-[r:IN_FOLDER]->(f:Folder {id: $folder_id, group_id: $partition_id})
     DELETE r
@@ -489,14 +520,12 @@ async def unassign_document_from_folder(
     RETURN d.id as document_id
     """
     
-    with driver.session() as session:
-        result = session.run(unassign_query,
-                           document_id=document_id,
-                           folder_id=folder_id,
-                           partition_id=partition_id)
-        record = result.single()
-        
-        if not record:
+    with graph_session() as (_read, write):
+        records = write(unassign_query,
+                        document_id=document_id,
+                        folder_id=folder_id,
+                        partition_id=partition_id)
+        if not records:
             raise HTTPException(status_code=404, detail="Document not in this folder")
     
     logger.info("document_unassigned_from_folder",
@@ -524,16 +553,13 @@ async def bulk_assign_documents_to_folder(
     Returns:
         Bulk assignment result with success/failure counts
     """
-    driver = get_graph_driver()
-    
     # Verify folder exists
     verify_query = """
     MATCH (f:Folder {id: $folder_id, group_id: $partition_id})
     RETURN f.id as id
     """
-    with driver.session() as session:
-        result = session.run(verify_query, folder_id=folder_id, partition_id=partition_id)
-        if not result.single():
+    with graph_session() as (read, _write):
+        if not read(verify_query, folder_id=folder_id, partition_id=partition_id):
             raise HTTPException(status_code=404, detail="Folder not found")
     
     # Bulk assign documents
@@ -555,13 +581,12 @@ async def bulk_assign_documents_to_folder(
     RETURN doc_id
     """
     
-    assigned_ids = []
-    with driver.session() as session:
-        result = session.run(bulk_query,
-                           document_ids=assignment.document_ids,
-                           folder_id=folder_id,
-                           partition_id=partition_id)
-        assigned_ids = [r["doc_id"] for r in result]
+    with graph_session() as (_read, write):
+        records = write(bulk_query,
+                        document_ids=assignment.document_ids,
+                        folder_id=folder_id,
+                        partition_id=partition_id)
+        assigned_ids = [r["doc_id"] for r in records]
     
     failed_ids = [d for d in assignment.document_ids if d not in assigned_ids]
     
@@ -598,8 +623,6 @@ async def list_documents_in_folder(
     Returns:
         List of documents in the folder
     """
-    driver = get_graph_driver()
-    
     if include_subfolders:
         query = """
         MATCH (f:Folder {id: $folder_id, group_id: $partition_id})
@@ -619,8 +642,8 @@ async def list_documents_in_folder(
         ORDER BY d.title
         """
     
-    with driver.session() as session:
-        result = session.run(query, folder_id=folder_id, partition_id=partition_id)
+    with graph_session() as (read, _write):
+        records = read(query, folder_id=folder_id, partition_id=partition_id)
         documents = [
             {
                 "id": r["id"],
@@ -629,7 +652,7 @@ async def list_documents_in_folder(
                 "folder_id": r["folder_id"],
                 "created_at": str(r["created_at"]) if r["created_at"] else None
             }
-            for r in result
+            for r in records
         ]
     
     return {"folder_id": folder_id, "documents": documents, "count": len(documents)}
@@ -650,8 +673,6 @@ async def list_unfiled_documents(
     Returns:
         List of unfiled documents
     """
-    driver = get_graph_driver()
-    
     query = """
     MATCH (d:Document {group_id: $partition_id})
     WHERE NOT (d)-[:IN_FOLDER]->(:Folder)
@@ -660,8 +681,8 @@ async def list_unfiled_documents(
     ORDER BY d.title
     """
     
-    with driver.session() as session:
-        result = session.run(query, partition_id=partition_id)
+    with graph_session() as (read, _write):
+        records = read(query, partition_id=partition_id)
         documents = [
             {
                 "id": r["id"],
@@ -670,7 +691,7 @@ async def list_unfiled_documents(
                 "folder_id": None,
                 "created_at": str(r["created_at"]) if r["created_at"] else None
             }
-            for r in result
+            for r in records
         ]
     
     return {"folder_id": None, "documents": documents, "count": len(documents)}
@@ -720,15 +741,14 @@ async def get_folder_file_count(
     total = len(blobs)
 
     # Build per-subfolder breakdown (direct children only)
-    driver = get_graph_driver()
     sub_query = """
     MATCH (f:Folder {id: $folder_id, group_id: $partition_id})<-[:SUBFOLDER_OF]-(child:Folder)
     RETURN child.id AS id, child.name AS name
     ORDER BY child.name
     """
     breakdown = []
-    with driver.session() as session:
-        children = list(session.run(sub_query, folder_id=folder_id, partition_id=partition_id))
+    with graph_session() as (read, _write):
+        children = read(sub_query, folder_id=folder_id, partition_id=partition_id)
 
     for child in children:
         child_path = await _resolve_folder_path(partition_id, child["id"])
@@ -757,18 +777,17 @@ async def analyze_folder(
     4. On completion, marks the folder as 'analyzed' and stores stats.
     5. Creates a result folder under "Analysis Results".
     """
-    driver = get_graph_driver()
-
     # 1) Verify folder exists and is eligible for analysis
     verify_query = """
     MATCH (f:Folder {id: $folder_id, group_id: $partition_id})
     RETURN f.id as id, f.name as name, f.analysis_status as analysis_status,
            f.folder_type as folder_type
     """
-    with driver.session() as session:
-        record = session.run(verify_query,
-                             folder_id=folder_id,
-                             partition_id=partition_id).single()
+    with graph_session() as (read, _write):
+        records = read(verify_query,
+                       folder_id=folder_id,
+                       partition_id=partition_id)
+        record = records[0] if records else None
         if not record:
             raise HTTPException(status_code=404, detail="Folder not found")
         if record.get("folder_type") == "analysis_result":
@@ -791,8 +810,8 @@ async def analyze_folder(
         fld.updated_at = datetime()
     RETURN count(fld) as marked
     """
-    with driver.session() as session:
-        session.run(mark_query, folder_id=folder_id, partition_id=partition_id)
+    with graph_session() as (_read, write):
+        write(mark_query, folder_id=folder_id, partition_id=partition_id)
 
     # 3) Resolve the neo4j group_id for this folder tree
     from src.api_gateway.services.folder_resolver import resolve_neo4j_group_id
@@ -817,8 +836,8 @@ async def analyze_folder(
         UNWIND folders AS fld
         SET fld.analysis_status = 'not_analyzed', fld.updated_at = datetime()
         """
-        with driver.session() as session:
-            session.run(revert_query, folder_id=folder_id, partition_id=partition_id)
+        with graph_session() as (_read, write):
+            write(revert_query, folder_id=folder_id, partition_id=partition_id)
         raise HTTPException(status_code=400, detail="No files found in folder to analyze")
 
     # 5) Kick off indexing in background
@@ -831,12 +850,13 @@ async def analyze_folder(
     MATCH (f:Folder {id: $folder_id, group_id: $partition_id})
     SET f.analysis_group_id = $neo4j_gid
     """
-    with driver.session() as session:
-        session.run(set_gid_query,
-                    folder_id=folder_id,
-                    partition_id=partition_id,
-                    neo4j_gid=neo4j_gid)
+    with graph_session() as (_read, write):
+        write(set_gid_query,
+              folder_id=folder_id,
+              partition_id=partition_id,
+              neo4j_gid=neo4j_gid)
 
+    driver = get_graph_driver()
     background_tasks.add_task(
         _run_folder_analysis,
         driver=driver,
@@ -876,8 +896,6 @@ async def delete_folder_analysis(
 
     Resets the folder's analysis_status to 'not_analyzed'.
     """
-    driver = get_graph_driver()
-
     # 1) Verify folder exists and has analysis data
     verify_query = """
     MATCH (f:Folder {id: $folder_id, group_id: $partition_id})
@@ -886,10 +904,11 @@ async def delete_folder_analysis(
            f.analysis_group_id as analysis_group_id,
            f.folder_type as folder_type
     """
-    with driver.session() as session:
-        record = session.run(verify_query,
-                             folder_id=folder_id,
-                             partition_id=partition_id).single()
+    with graph_session() as (read, _write):
+        records = read(verify_query,
+                       folder_id=folder_id,
+                       partition_id=partition_id)
+        record = records[0] if records else None
         if not record:
             raise HTTPException(status_code=404, detail="Folder not found")
 
@@ -929,11 +948,11 @@ async def delete_folder_analysis(
         fld.updated_at = datetime()
     RETURN count(fld) as reset_count
     """
-    with driver.session() as session:
-        result = session.run(reset_query,
-                             folder_id=folder_id,
-                             partition_id=partition_id)
-        reset_record = result.single()
+    with graph_session() as (_read, write):
+        records = write(reset_query,
+                        folder_id=folder_id,
+                        partition_id=partition_id)
+        reset_record = records[0] if records else None
 
     # Note: we intentionally keep the "Analysis Results" subfolder and blobs.
     # Blob storage is cheap; the user can delete those files manually if desired.
@@ -962,16 +981,15 @@ async def cancel_folder_analysis(
     This only resets the folder metadata — any partially-indexed graph data
     remains (use DELETE /analysis to clean it up afterwards if needed).
     """
-    driver = get_graph_driver()
-
     verify_query = """
     MATCH (f:Folder {id: $folder_id, group_id: $partition_id})
     RETURN f.id as id, f.analysis_status as analysis_status
     """
-    with driver.session() as session:
-        record = session.run(verify_query,
-                             folder_id=folder_id,
-                             partition_id=partition_id).single()
+    with graph_session() as (read, _write):
+        records = read(verify_query,
+                       folder_id=folder_id,
+                       partition_id=partition_id)
+        record = records[0] if records else None
         if not record:
             raise HTTPException(status_code=404, detail="Folder not found")
         if record.get("analysis_status") != "analyzing":
@@ -989,10 +1007,10 @@ async def cancel_folder_analysis(
         fld.updated_at = datetime()
     RETURN count(fld) as reset_count
     """
-    with driver.session() as session:
-        session.run(cancel_query,
-                    folder_id=folder_id,
-                    partition_id=partition_id)
+    with graph_session() as (_read, write):
+        write(cancel_query,
+              folder_id=folder_id,
+              partition_id=partition_id)
 
     logger.info("folder_analysis_cancelled", folder_id=folder_id)
 

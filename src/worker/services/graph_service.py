@@ -467,6 +467,41 @@ class GraphService:
         else:
             logger.warning("NEO4J_URI not configured, graph store disabled")
 
+    def reconnect(self) -> bool:
+        """Attempt to reconnect to Neo4j if the driver is dead or None.
+        
+        Returns True if the driver is healthy after the attempt.
+        """
+        # If driver exists, check if it's still alive
+        if self._driver is not None:
+            try:
+                self._driver.verify_connectivity()
+                return True
+            except Exception:
+                logger.warning("Neo4j driver defunct, attempting reconnect...")
+                try:
+                    self._driver.close()
+                except Exception:
+                    pass
+                self._driver = None
+
+        # Try to create a new driver
+        if settings.NEO4J_URI and settings.NEO4J_USERNAME and settings.NEO4J_PASSWORD:
+            try:
+                driver = GraphDatabase.driver(
+                    settings.NEO4J_URI,
+                    auth=(settings.NEO4J_USERNAME, settings.NEO4J_PASSWORD)
+                )
+                driver.verify_connectivity()
+                self._driver = driver
+                logger.info("Neo4j reconnected successfully")
+                return True
+            except Exception as e:
+                logger.error(f"Neo4j reconnect failed: {e}")
+                self._driver = None
+                return False
+        return False
+
     def _initialize_uniqueness_constraints(self) -> None:
         """
         Create uniqueness constraints for MergeUniqueNode optimization.
