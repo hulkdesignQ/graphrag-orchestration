@@ -1501,7 +1501,11 @@ class HippoRAG2Handler(BaseRouteHandler):
         group_ids = self.group_ids
         driver = self.neo4j_driver
 
-        # ── Pass 1: Sentence metadata ──
+        # ── Pass 1: Sentence metadata (with ±1 window via NEXT_IN_SECTION) ──
+        sentence_window_enabled = os.getenv(
+            "ROUTE7_SENTENCE_WINDOW", "1"
+        ).strip().lower() in {"1", "true", "yes"}
+
         cypher_sentences = """
         UNWIND $sentence_ids AS cid
         MATCH (node:Sentence {id: cid})
@@ -1512,6 +1516,8 @@ class HippoRAG2Handler(BaseRouteHandler):
         WHERE $folder_id IS NULL OR d IS NULL
            OR EXISTS { MATCH (d)-[:IN_FOLDER]->(f:Folder) WHERE f.id = $folder_id AND f.group_id IN $group_ids }
         OPTIONAL MATCH (node)-[:IN_SECTION]->(s:Section)
+        OPTIONAL MATCH (node)-[:NEXT_IN_SECTION]->(next_sent:Sentence)
+        OPTIONAL MATCH (prev_sent:Sentence)-[:NEXT_IN_SECTION]->(node)
         RETURN cid AS sentence_id,
                coalesce(node.text, '') AS text,
                coalesce(node.index_in_doc, 0) AS index_in_doc,
@@ -1519,7 +1525,9 @@ class HippoRAG2Handler(BaseRouteHandler):
                node.page AS page,
                d.id AS document_id, d.title AS document_title,
                d.source AS document_source,
-               s.title AS section_title, s.id AS section_id
+               s.title AS section_title, s.id AS section_id,
+               prev_sent.text AS prev_text, prev_sent.id AS prev_id,
+               next_sent.text AS next_text, next_sent.id AS next_id
         """
 
         try:
@@ -1539,40 +1547,68 @@ class HippoRAG2Handler(BaseRouteHandler):
 
         scores = ppr_scores_map or {}
 
-        # ── Merge adjacent same-section sentences ──
+        # ── Merge contiguous runs + ±1 sentence window expansion ──
         from collections import defaultdict
+
+        retrieved_ids = {r.get("sentence_id", "") for r in results}
 
         section_groups: dict[tuple, list] = defaultdict(list)
         for r in results:
             key = (r.get("document_id", ""), r.get("section_title", ""))
             section_groups[key].append(r)
 
-        _MAX_MERGE = 2
-
         merged_results: list[dict] = []
         for _key, group in section_groups.items():
             group.sort(key=lambda x: x.get("index_in_doc", 0))
-            merged = [group[0]]
+
+            # Detect contiguous runs using hierarchical_id section prefix
+            runs: list[list[dict]] = []
+            current_run = [group[0]]
             for r in group[1:]:
-                prev = merged[-1]
+                prev = current_run[-1]
                 prev_idx = prev.get("index_in_doc", 0)
                 curr_idx = r.get("index_in_doc", 0)
-                merge_count = len(prev.get("_merged_ids", [prev.get("sentence_id", "")]))
-                # Option B: use hierarchical_id section prefix for merge guard
                 prev_sec = (prev.get("hierarchical_id") or "").rsplit("-S", 1)[0]
                 curr_sec = (r.get("hierarchical_id") or "").rsplit("-S", 1)[0]
                 same_section = (prev_sec == curr_sec) and bool(prev_sec)
-                if same_section and curr_idx == prev_idx + 1 and merge_count < _MAX_MERGE:
-                    prev["text"] = (
-                        (prev.get("text", "") + " " + r.get("text", ""))
-                        .strip()
-                    )
-                    prev["index_in_doc"] = curr_idx
-                    prev.setdefault("_merged_ids", [prev.get("sentence_id", "")])
-                    prev["_merged_ids"].append(r.get("sentence_id", ""))
+                if same_section and curr_idx == prev_idx + 1:
+                    current_run.append(r)
                 else:
-                    merged.append(r)
-            merged_results.extend(merged)
+                    runs.append(current_run)
+                    current_run = [r]
+            runs.append(current_run)
+
+            for run in runs:
+                first, last = run[0], run[-1]
+                all_ids = [r.get("sentence_id", "") for r in run]
+
+                # Assemble passage text
+                parts: list[str] = []
+                if sentence_window_enabled:
+                    # Prepend prev of first sentence (section-bounded,
+                    # skip if it is itself a retrieved sentence to avoid
+                    # duplication across passages)
+                    prev_txt = (first.get("prev_text") or "").strip()
+                    prev_id = first.get("prev_id") or ""
+                    if prev_txt and prev_id not in retrieved_ids:
+                        parts.append(prev_txt)
+
+                for r in run:
+                    parts.append((r.get("text") or "").strip())
+
+                if sentence_window_enabled:
+                    # Append next of last sentence (same rules)
+                    next_txt = (last.get("next_text") or "").strip()
+                    next_id = last.get("next_id") or ""
+                    if next_txt and next_id not in retrieved_ids:
+                        parts.append(next_txt)
+
+                passage = " ".join(p for p in parts if p)
+
+                merged_result = dict(first)
+                merged_result["text"] = passage
+                merged_result["_merged_ids"] = all_ids
+                merged_results.append(merged_result)
 
         chunks_list: List[Dict[str, Any]] = []
         for r in merged_results:
