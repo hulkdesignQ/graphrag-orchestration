@@ -577,6 +577,55 @@ var sharedEnvVars = concat([
     name: 'VOYAGE_EMBEDDING_DIM'
     value: '2048'
   }
+  // ── Route 7 (HippoRAG 2) tuning — mirrors local .env overrides ──
+  {
+    name: 'ROUTE7_RERANK'
+    value: '1'
+  }
+  {
+    name: 'ROUTE7_PPR_PASSAGE_TOP_K'
+    value: '50'
+  }
+  {
+    name: 'ROUTE7_SYNONYM_THRESHOLD'
+    value: '0.70'
+  }
+  {
+    name: 'ROUTE7_DPR_TOP_K'
+    value: '50'
+  }
+  {
+    name: 'ROUTE7_TRIPLE_CANDIDATES_K'
+    value: '500'
+  }
+  {
+    name: 'ROUTE7_TRIPLE_RERANK'
+    value: '1'
+  }
+  {
+    name: 'ROUTE7_SEMANTIC_PASSAGE_SEEDS'
+    value: '1'
+  }
+  {
+    name: 'ROUTE7_SEMANTIC_SEED_TOP_K'
+    value: '20'
+  }
+  {
+    name: 'ROUTE7_SEMANTIC_SEED_WEIGHT'
+    value: '0.05'
+  }
+  {
+    name: 'ROUTE7_TRIPLE_TOP_K'
+    value: '15'
+  }
+  {
+    name: 'ROUTE7_RERANK_ALL'
+    value: '0'
+  }
+  {
+    name: 'ROUTE7_ENTITY_SEED_TOP_K'
+    value: '15'
+  }
 ], useUserUpload ? userUploadEnvVars : [])
 
 // Shared secrets — Key Vault references + runtime-generated values

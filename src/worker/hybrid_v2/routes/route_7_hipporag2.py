@@ -234,7 +234,7 @@ class HippoRAG2Handler(BaseRouteHandler):
                 os.getenv("ROUTE7_PASSAGE_NODE_WEIGHT", "0.05")
             )
             synonym_threshold = float(
-                os.getenv("ROUTE7_SYNONYM_THRESHOLD", "0.65")
+                os.getenv("ROUTE7_SYNONYM_THRESHOLD", "0.70")
             )
 
             # Load triple store and PPR graph in parallel
@@ -294,11 +294,11 @@ class HippoRAG2Handler(BaseRouteHandler):
         ppr_damping = float(os.getenv("ROUTE7_DAMPING", "0.5"))
         passage_node_weight = float(os.getenv("ROUTE7_PASSAGE_NODE_WEIGHT", "0.05"))
         ppr_passage_top_k = preset.get("ppr_passage_top_k") or int(
-            os.getenv("ROUTE7_PPR_PASSAGE_TOP_K", "30")
+            os.getenv("ROUTE7_PPR_PASSAGE_TOP_K", "50")
         )
-        # Reranker: disabled by default to match upstream HippoRAG 2 (no passage reranker)
+        # Reranker: enabled by default — cross-encoder on PPR output improves Q-D10 accuracy
         rerank_enabled = os.getenv(
-            "ROUTE7_RERANK", "0"
+            "ROUTE7_RERANK", "1"
         ).strip().lower() in {"1", "true", "yes"}
         rerank_top_k = int(os.getenv("ROUTE7_RERANK_TOP_K", "30"))
         # Corpus-wide reranker: cross-encoder on ALL passages as parallel retrieval channel
