@@ -211,6 +211,37 @@ class Neo4jStoreV3:
         if self._driver:
             self._driver.close()
             self._driver = None
+
+    def _batched_write(
+        self,
+        query: str,
+        items: list,
+        *,
+        param_name: str = "batch",
+        batch_size: int = 50,
+        pause: float = 0.5,
+        **extra_params,
+    ) -> int:
+        """Run an UNWIND write in batches with a pause between each.
+
+        Prevents Neo4j Aura from being overwhelmed by large single-transaction
+        writes. Returns the sum of ``count`` from each batch (expects the query
+        to ``RETURN count(...) AS count``).
+        """
+        import time
+        if not items:
+            return 0
+        total = 0
+        for start in range(0, len(items), batch_size):
+            chunk = items[start : start + batch_size]
+            with self.get_retry_session() as session:
+                result = session.run(query, **{param_name: chunk}, **extra_params)
+                rec = result.single()
+                if rec:
+                    total += rec.get("count", 0)
+            if start + batch_size < len(items):
+                time.sleep(pause)
+        return total
     
     # ==================== Schema Management ====================
     
@@ -488,6 +519,7 @@ class Neo4jStoreV3:
             # Warm up connection — dedup can idle for 8+ minutes, staling pooled connections
             self.driver.verify_connectivity()
             # Batch UNWIND — smaller batches for Aura stability with 2048-dim embeddings
+            import time
             BATCH_SIZE = 25
             total_count = 0
             for i in range(0, len(entity_data), BATCH_SIZE):
@@ -496,6 +528,8 @@ class Neo4jStoreV3:
                     result = session.run(query, entities=batch, group_id=group_id)
                     record = result.single()
                     total_count += cast(int, record["count"]) if record else 0
+                if i + BATCH_SIZE < len(entity_data):
+                    time.sleep(0.5)
 
             mentions_count = sum(len(e.text_unit_ids) if hasattr(e, 'text_unit_ids') else 0 for e in entities)
             logger.info(f"Created {total_count} entities with {mentions_count} Sentence MENTIONS (async)")
@@ -815,6 +849,7 @@ class Neo4jStoreV3:
         
         # Batch UNWIND to avoid Neo4j "Index N out of bounds" internal error
         # on large MERGE operations (observed with Aura at ~640+ relationships).
+        import time
         BATCH_SIZE = 100
         total = 0
         for i in range(0, len(rel_data), BATCH_SIZE):
@@ -823,6 +858,8 @@ class Neo4jStoreV3:
                 result = session.run(query, relationships=batch, group_id=group_id)
                 record = result.single()
                 total += cast(int, record["count"]) if record else 0
+            if i + BATCH_SIZE < len(rel_data):
+                time.sleep(0.5)
         return total
 
     def backfill_rel_type(self, group_id: str) -> int:
@@ -910,6 +947,7 @@ class Neo4jStoreV3:
             for t, emb in zip(triples, embeddings)
         ]
         # Batch in groups of 100 to avoid transaction size limits
+        import time
         total = 0
         batch_size = 100
         for i in range(0, len(items), batch_size):
@@ -918,6 +956,8 @@ class Neo4jStoreV3:
                 result = session.run(cypher, items=batch, group_ids=group_ids)
                 record = result.single()
                 total += cast(int, record["count"]) if record else 0
+            if i + batch_size < len(items):
+                time.sleep(0.5)
         return total
 
     # ==================== Community Operations ====================
@@ -1251,9 +1291,17 @@ class Neo4jStoreV3:
             })
         
         with self.get_retry_session() as session:
-            result = session.run(query, sentences=sentence_data, group_id=group_id)
-            record = result.single()
-            count = cast(int, record["count"]) if record else 0
+            # Batch sentences to avoid overwhelming Neo4j Aura with one giant UNWIND
+            import time
+            BATCH = 50
+            count = 0
+            for start in range(0, len(sentence_data), BATCH):
+                chunk = sentence_data[start : start + BATCH]
+                result = session.run(query, sentences=chunk, group_id=group_id)
+                record = result.single()
+                count += cast(int, record["count"]) if record else 0
+                if start + BATCH < len(sentence_data):
+                    time.sleep(0.5)
             
             # Build NEXT edges between sequential sentences within each chunk
             self._create_sentence_next_edges(group_id, sentences)
@@ -1298,7 +1346,13 @@ class Neo4jStoreV3:
         """
         
         with self.get_retry_session() as session:
-            session.run(query, pairs=next_pairs, group_id=group_id)
+            import time
+            BATCH = 100
+            for start in range(0, len(next_pairs), BATCH):
+                chunk = next_pairs[start : start + BATCH]
+                session.run(query, pairs=chunk, group_id=group_id)
+                if start + BATCH < len(next_pairs):
+                    time.sleep(0.3)
 
         if next_in_section_pairs:
             query_section = """
@@ -1308,7 +1362,11 @@ class Neo4jStoreV3:
             MERGE (a)-[:NEXT_IN_SECTION]->(b)
             """
             with self.get_retry_session() as session:
-                session.run(query_section, pairs=next_in_section_pairs, group_id=group_id)
+                for start in range(0, len(next_in_section_pairs), BATCH):
+                    chunk = next_in_section_pairs[start : start + BATCH]
+                    session.run(query_section, pairs=chunk, group_id=group_id)
+                    if start + BATCH < len(next_in_section_pairs):
+                        time.sleep(0.3)
     
     def create_sentence_related_to_edges(
         self,
@@ -1342,9 +1400,11 @@ class Neo4jStoreV3:
         RETURN count(r) AS count
         """
         
-        with self.get_retry_session() as session:
-            result = session.run(query, edges=edges, group_id=group_id)
-            count = result.single()["count"]
+        count = self._batched_write(
+            query, edges,
+            param_name="edges", batch_size=100, pause=0.3,
+            group_id=group_id,
+        )
         
         logger.info(f"Created {count} sentence RELATED_TO edges for group {group_id}")
         return count
@@ -1375,9 +1435,11 @@ class Neo4jStoreV3:
         RETURN count(r) AS count
         """
 
-        with self.get_retry_session() as session:
-            result = session.run(query, edges=edges, group_id=group_id)
-            count = result.single()["count"]
+        count = self._batched_write(
+            query, edges,
+            param_name="edges", batch_size=100, pause=0.3,
+            group_id=group_id,
+        )
 
         logger.info(f"Created {count} sentence SEMANTICALLY_SIMILAR edges for group {group_id}")
         return count

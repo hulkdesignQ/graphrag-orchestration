@@ -432,11 +432,12 @@ class LazyGraphRAGIndexingPipeline:
         #   - 4.6  embed section content (for similarity edges)
         #   - 4.6.1 LLM section summaries (for structural embed)
         #   - 4.8  embed KVP keys (fully independent)
-        section_embed_stats, section_summary_stats, kvp_embed_stats = await asyncio.gather(
-            self._embed_section_nodes(group_id),
-            self._generate_section_summaries(group_id),
-            self._embed_keyvalue_keys(group_id),
-        )
+        # Run section enrichment sequentially to avoid overwhelming Neo4j Aura.
+        # Each step involves embedding writes (2048-dim vectors) that can saturate
+        # connection bandwidth when run concurrently.
+        section_embed_stats = await self._embed_section_nodes(group_id)
+        section_summary_stats = await self._generate_section_summaries(group_id)
+        kvp_embed_stats = await self._embed_keyvalue_keys(group_id)
         stats["sections_embedded"] = section_embed_stats.get("sections_embedded", 0)
         stats["sections_summarised"] = section_summary_stats.get("sections_summarised", 0)
         stats["key_values"] = kvp_embed_stats.get("kvps_total", 0)
@@ -445,10 +446,8 @@ class LazyGraphRAGIndexingPipeline:
         # Wave 2: Stages that depend on wave 1 results.
         #   - 4.6.2 structural embed (needs summaries from 4.6.1)
         #   - 4.7   similarity edges (needs embeddings from 4.6)
-        structural_embed_stats, similarity_stats = await asyncio.gather(
-            self._embed_section_structural(group_id),
-            self._build_section_similarity_edges(group_id),
-        )
+        structural_embed_stats = await self._embed_section_structural(group_id)
+        similarity_stats = await self._build_section_similarity_edges(group_id)
         stats["sections_structural_embedded"] = structural_embed_stats.get("sections_embedded", 0)
         stats["semantic_similarity_edges"] = similarity_stats.get("edges_created", 0)
 
@@ -3203,36 +3202,41 @@ Output:
                     edge_batch.append({"node1": n1, "node2": n2, "similarity": float(row["similarity"])})
             
             def _write_knn_edges(session):
+                import time
+                BATCH = 100
+                edges_created = 0
                 if edge_batch:
-                    if knn_config:
-                        result = session.run("""
-                            UNWIND $edges AS e
-                            MATCH (n1), (n2)
-                            WHERE id(n1) = e.node1 AND id(n2) = e.node2
-                              AND n1.group_id = $group_id AND n2.group_id = $group_id
-                            MERGE (n1)-[r:SEMANTICALLY_SIMILAR {knn_config: $knn_config}]->(n2)
-                            SET r.score = e.similarity, r.similarity = e.similarity,
-                                r.method = 'gds_knn', r.group_id = $group_id,
-                                r.knn_k = $knn_k, r.knn_cutoff = $knn_cutoff, r.created_at = datetime()
-                            RETURN count(r) AS cnt
-                        """, edges=edge_batch, knn_config=knn_config, group_id=group_id,
-                            knn_k=knn_top_k, knn_cutoff=knn_similarity_cutoff)
-                    else:
-                        result = session.run("""
-                            UNWIND $edges AS e
-                            MATCH (n1), (n2)
-                            WHERE id(n1) = e.node1 AND id(n2) = e.node2
-                              AND n1.group_id = $group_id AND n2.group_id = $group_id
-                            MERGE (n1)-[r:SEMANTICALLY_SIMILAR]->(n2)
-                            SET r.score = e.similarity, r.similarity = e.similarity,
-                                r.method = 'gds_knn', r.group_id = $group_id,
-                                r.knn_k = $knn_k, r.knn_cutoff = $knn_cutoff, r.created_at = datetime()
-                            RETURN count(r) AS cnt
-                        """, edges=edge_batch, group_id=group_id,
-                            knn_k=knn_top_k, knn_cutoff=knn_similarity_cutoff)
-                    edges_created = result.single()["cnt"]
-                else:
-                    edges_created = 0
+                    for start in range(0, len(edge_batch), BATCH):
+                        chunk = edge_batch[start : start + BATCH]
+                        if knn_config:
+                            result = session.run("""
+                                UNWIND $edges AS e
+                                MATCH (n1), (n2)
+                                WHERE id(n1) = e.node1 AND id(n2) = e.node2
+                                  AND n1.group_id = $group_id AND n2.group_id = $group_id
+                                MERGE (n1)-[r:SEMANTICALLY_SIMILAR {knn_config: $knn_config}]->(n2)
+                                SET r.score = e.similarity, r.similarity = e.similarity,
+                                    r.method = 'gds_knn', r.group_id = $group_id,
+                                    r.knn_k = $knn_k, r.knn_cutoff = $knn_cutoff, r.created_at = datetime()
+                                RETURN count(r) AS cnt
+                            """, edges=chunk, knn_config=knn_config, group_id=group_id,
+                                knn_k=knn_top_k, knn_cutoff=knn_similarity_cutoff)
+                        else:
+                            result = session.run("""
+                                UNWIND $edges AS e
+                                MATCH (n1), (n2)
+                                WHERE id(n1) = e.node1 AND id(n2) = e.node2
+                                  AND n1.group_id = $group_id AND n2.group_id = $group_id
+                                MERGE (n1)-[r:SEMANTICALLY_SIMILAR]->(n2)
+                                SET r.score = e.similarity, r.similarity = e.similarity,
+                                    r.method = 'gds_knn', r.group_id = $group_id,
+                                    r.knn_k = $knn_k, r.knn_cutoff = $knn_cutoff, r.created_at = datetime()
+                                RETURN count(r) AS cnt
+                            """, edges=chunk, group_id=group_id,
+                                knn_k=knn_top_k, knn_cutoff=knn_similarity_cutoff)
+                        edges_created += result.single()["cnt"]
+                        if start + BATCH < len(edge_batch):
+                            time.sleep(0.3)
 
                 stats["knn_edges"] = edges_created
                 config_msg = f" (config={knn_config})" if knn_config else ""
@@ -3256,12 +3260,18 @@ Output:
                 community_ids.add(community_id)
             
             def _write_louvain(session):
+                import time
+                BATCH = 100
                 if updates:
-                    session.run("""
-                        UNWIND $updates AS u
-                        MATCH (n) WHERE id(n) = u.nodeId AND n.group_id = $group_id
-                        SET n.community_id = u.communityId
-                    """, updates=updates, group_id=group_id)
+                    for start in range(0, len(updates), BATCH):
+                        chunk = updates[start : start + BATCH]
+                        session.run("""
+                            UNWIND $updates AS u
+                            MATCH (n) WHERE id(n) = u.nodeId AND n.group_id = $group_id
+                            SET n.community_id = u.communityId
+                        """, updates=chunk, group_id=group_id)
+                        if start + BATCH < len(updates):
+                            time.sleep(0.3)
 
                 stats["communities"] = len(community_ids)
                 logger.info(f"🏘️ GDS Louvain: {stats['communities']} communities")
@@ -3281,12 +3291,18 @@ Output:
             ]
             
             def _write_pagerank(session):
+                import time
+                BATCH = 100
                 if pr_updates:
-                    session.run("""
-                        UNWIND $updates AS u
-                        MATCH (n) WHERE id(n) = u.nodeId AND n.group_id = $group_id
-                        SET n.pagerank = u.score
-                    """, updates=pr_updates, group_id=group_id)
+                    for start in range(0, len(pr_updates), BATCH):
+                        chunk = pr_updates[start : start + BATCH]
+                        session.run("""
+                            UNWIND $updates AS u
+                            MATCH (n) WHERE id(n) = u.nodeId AND n.group_id = $group_id
+                            SET n.pagerank = u.score
+                        """, updates=chunk, group_id=group_id)
+                        if start + BATCH < len(pr_updates):
+                            time.sleep(0.3)
 
                 stats["pagerank_nodes"] = len(pr_updates)
                 logger.info(f"📈 GDS PageRank: scored {stats['pagerank_nodes']} nodes")
