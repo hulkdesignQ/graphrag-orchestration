@@ -1663,7 +1663,7 @@ class HippoRAG2Handler(BaseRouteHandler):
                 # citation.  The ±1 window still provides context at the
                 # edges of each sub-run.  Default 2 matches the original
                 # _MAX_MERGE=2 that was proven in production.
-                max_run = int(os.getenv("ROUTE7_MAX_MERGE_RUN", "2"))
+                max_run = int(os.getenv("ROUTE7_MAX_MERGE_RUN", "1"))
                 if max_run > 0:
                     capped: list[list[dict]] = []
                     for run in runs:
