@@ -9,6 +9,8 @@ from contextlib import contextmanager
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends, Request
 from typing import List, Optional
 from pydantic import BaseModel
+import asyncio
+import threading
 import structlog
 from datetime import datetime
 
@@ -765,7 +767,6 @@ async def get_folder_file_count(
 async def analyze_folder(
     folder_id: str,
     request: Request,
-    background_tasks: BackgroundTasks,
     partition_id: str = Depends(get_partition_id)
 ):
     """
@@ -856,15 +857,29 @@ async def analyze_folder(
               partition_id=partition_id,
               neo4j_gid=neo4j_gid)
 
-    background_tasks.add_task(
-        _run_folder_analysis,
-        doc_sync=doc_sync,
-        blobs=blobs,
-        neo4j_gid=neo4j_gid,
-        folder_id=folder_id,
-        folder_name=folder_name,
-        partition_id=partition_id,
-    )
+    # Run analysis in a SEPARATE THREAD with its own event loop.
+    # This prevents CPU-heavy pipeline work (entity dedup: 310K comparisons)
+    # from blocking the main API event loop, which would cause:
+    #   - liveness probe failures (health endpoint unresponsive)
+    #   - Neo4j connection pool staleness (no keepalive maintenance)
+    #   - stale driver errors when pipeline resumes after CPU work
+    def _run_in_thread():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(_run_folder_analysis(
+                doc_sync=doc_sync,
+                blobs=blobs,
+                neo4j_gid=neo4j_gid,
+                folder_id=folder_id,
+                folder_name=folder_name,
+                partition_id=partition_id,
+            ))
+        finally:
+            loop.close()
+
+    thread = threading.Thread(target=_run_in_thread, daemon=True)
+    thread.start()
 
     logger.info("folder_analysis_started",
                 folder_id=folder_id,
