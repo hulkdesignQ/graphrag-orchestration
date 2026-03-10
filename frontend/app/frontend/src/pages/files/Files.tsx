@@ -500,6 +500,12 @@ const Files = () => {
                         && (!activeFolder.folder_type || activeFolder.folder_type === "user")
                         && (recursiveFileCount != null ? recursiveFileCount > 0 : filteredFiles.length > 0) && (
                         <div className={styles.analysisCta}>
+                            {activeFolder.analysis_error && (
+                                <div className={styles.analysisErrorBanner}>
+                                    <span className={styles.analysisErrorIcon}>❌</span>
+                                    <span className={styles.analysisErrorText}>Previous analysis failed: {activeFolder.analysis_error}</span>
+                                </div>
+                            )}
                             <div className={styles.analysisCtaContent}>
                                 <span className={styles.analysisCtaIcon}>📊</span>
                                 <div className={styles.analysisCtaText}>
@@ -531,6 +537,13 @@ const Files = () => {
                                             : t("files.analysisComplete", "Analysis Complete")}
                                 </span>
                             </div>
+                            {/* Analysis error banner */}
+                            {activeFolder.analysis_error && (
+                                <div className={styles.analysisErrorBanner}>
+                                    <span className={styles.analysisErrorIcon}>❌</span>
+                                    <span className={styles.analysisErrorText}>{activeFolder.analysis_error}</span>
+                                </div>
+                            )}
                             <div className={styles.analysisSummaryStats}>
                                 {activeFolder.file_count != null && (
                                     <span className={styles.analysisStat}>📄 {activeFolder.file_count} files</span>
@@ -538,8 +551,17 @@ const Files = () => {
                                 {activeFolder.entity_count != null && (
                                     <span className={styles.analysisStat}>🔗 {activeFolder.entity_count} entities</span>
                                 )}
+                                {activeFolder.relationship_count != null && (
+                                    <span className={styles.analysisStat}>↔️ {activeFolder.relationship_count} relationships</span>
+                                )}
                                 {activeFolder.community_count != null && (
                                     <span className={styles.analysisStat}>🏘️ {activeFolder.community_count} communities</span>
+                                )}
+                                {activeFolder.section_count != null && (
+                                    <span className={styles.analysisStat}>📑 {activeFolder.section_count} sections</span>
+                                )}
+                                {activeFolder.sentence_count != null && (
+                                    <span className={styles.analysisStat}>💬 {activeFolder.sentence_count} sentences</span>
                                 )}
                                 {activeFolder.analyzed_at && (
                                     <span className={styles.analysisStat}>🕐 {new Date(activeFolder.analyzed_at).toLocaleString()}</span>
@@ -567,9 +589,25 @@ const Files = () => {
                                 </p>
                             )}
                             {activeFolder.analysis_status === "analyzing" && (
-                                <div className={styles.analysisProgressBar}>
-                                    <div className={styles.analysisProgressFill} />
-                                </div>
+                                <>
+                                    {activeFolder.analysis_files_total != null && activeFolder.analysis_files_total > 0 ? (
+                                        <>
+                                            <div className={styles.analysisProgressText}>
+                                                Processing file {activeFolder.analysis_files_processed ?? 0} of {activeFolder.analysis_files_total}
+                                            </div>
+                                            <div className={styles.analysisProgressBar}>
+                                                <div
+                                                    className={styles.analysisProgressFillDeterminate}
+                                                    style={{ width: `${Math.round(((activeFolder.analysis_files_processed ?? 0) / activeFolder.analysis_files_total) * 100)}%` }}
+                                                />
+                                            </div>
+                                        </>
+                                    ) : (
+                                        <div className={styles.analysisProgressBar}>
+                                            <div className={styles.analysisProgressFill} />
+                                        </div>
+                                    )}
+                                </>
                             )}
                         </div>
                     )}

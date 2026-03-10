@@ -33,6 +33,12 @@ def _folder_from_record(record) -> Folder:
         file_count=record.get("file_count"),
         entity_count=record.get("entity_count"),
         community_count=record.get("community_count"),
+        analysis_files_total=record.get("analysis_files_total"),
+        analysis_files_processed=record.get("analysis_files_processed"),
+        section_count=record.get("section_count"),
+        sentence_count=record.get("sentence_count"),
+        relationship_count=record.get("relationship_count"),
+        analysis_error=record.get("analysis_error"),
         created_at=record["created_at"],
         updated_at=record["updated_at"],
     )
@@ -50,6 +56,12 @@ _FOLDER_RETURN = """
     f.file_count as file_count,
     f.entity_count as entity_count,
     f.community_count as community_count,
+    f.analysis_files_total as analysis_files_total,
+    f.analysis_files_processed as analysis_files_processed,
+    f.section_count as section_count,
+    f.sentence_count as sentence_count,
+    f.relationship_count as relationship_count,
+    f.analysis_error as analysis_error,
     f.created_at as created_at, f.updated_at as updated_at
 """
 
@@ -672,6 +684,12 @@ class AnalysisStatusResponse(BaseModel):
     file_count: Optional[int]
     entity_count: Optional[int]
     community_count: Optional[int]
+    analysis_files_total: Optional[int] = None
+    analysis_files_processed: Optional[int] = None
+    section_count: Optional[int] = None
+    sentence_count: Optional[int] = None
+    relationship_count: Optional[int] = None
+    analysis_error: Optional[str] = None
 
 
 @router.get("/{folder_id}/file-count")
@@ -757,13 +775,17 @@ async def analyze_folder(
 
     folder_name = record["name"]
 
-    # 2) Mark folder + subfolders as 'analyzing'
+    # 2) Mark folder + subfolders as 'analyzing', clear previous error/progress
     mark_query = """
     MATCH (f:Folder {id: $folder_id, group_id: $partition_id})
     OPTIONAL MATCH (f)<-[:SUBFOLDER_OF*0..]-(sub:Folder)
     WITH collect(f) + collect(sub) AS folders
     UNWIND folders AS fld
-    SET fld.analysis_status = 'analyzing', fld.updated_at = datetime()
+    SET fld.analysis_status = 'analyzing',
+        fld.analysis_error = null,
+        fld.analysis_files_total = null,
+        fld.analysis_files_processed = null,
+        fld.updated_at = datetime()
     RETURN count(fld) as marked
     """
     with driver.session() as session:
@@ -891,6 +913,12 @@ async def delete_folder_analysis(
         fld.file_count = null,
         fld.entity_count = null,
         fld.community_count = null,
+        fld.analysis_files_total = null,
+        fld.analysis_files_processed = null,
+        fld.section_count = null,
+        fld.sentence_count = null,
+        fld.relationship_count = null,
+        fld.analysis_error = null,
         fld.updated_at = datetime()
     RETURN count(fld) as reset_count
     """
@@ -931,30 +959,65 @@ async def _run_folder_analysis(
     import traceback
     file_count = len(blobs)
     try:
-        for blob in blobs:
+        # Set total file count so the UI can show determinate progress
+        init_query = """
+        MATCH (f:Folder {id: $folder_id, group_id: $partition_id})
+        SET f.analysis_files_total = $total,
+            f.analysis_files_processed = 0
+        """
+        with driver.session() as session:
+            session.run(init_query,
+                        folder_id=folder_id,
+                        partition_id=partition_id,
+                        total=file_count)
+
+        for idx, blob in enumerate(blobs):
             await doc_sync.on_file_uploaded(
                 group_id=neo4j_gid,
                 filename=blob["name"],
                 blob_url=blob["url"],
                 user_id=partition_id,
             )
+            # Update per-file progress
+            progress_query = """
+            MATCH (f:Folder {id: $folder_id, group_id: $partition_id})
+            SET f.analysis_files_processed = $processed
+            """
+            with driver.session() as session:
+                session.run(progress_query,
+                            folder_id=folder_id,
+                            partition_id=partition_id,
+                            processed=idx + 1)
 
-        # Count entities and communities for the stats
+        # Count entities, communities, sections, sentences, relationships
         stats_query = """
-        MATCH (e:Entity {group_id: $gid})
+        OPTIONAL MATCH (e:Entity {group_id: $gid})
         WITH count(e) as entity_count
         OPTIONAL MATCH (c:Community {group_id: $gid})
-        RETURN entity_count, count(c) as community_count
+        WITH entity_count, count(c) as community_count
+        OPTIONAL MATCH (sec:Section {group_id: $gid})
+        WITH entity_count, community_count, count(sec) as section_count
+        OPTIONAL MATCH (sent:Sentence {group_id: $gid})
+        WITH entity_count, community_count, section_count, count(sent) as sentence_count
+        OPTIONAL MATCH (:Entity {group_id: $gid})-[r:RELATED_TO]->()
+        RETURN entity_count, community_count, section_count, sentence_count,
+               count(r) as relationship_count
         """
         entity_count = 0
         community_count = 0
+        section_count = 0
+        sentence_count = 0
+        relationship_count = 0
         with driver.session() as session:
             record = session.run(stats_query, gid=neo4j_gid).single()
             if record:
                 entity_count = record["entity_count"]
                 community_count = record["community_count"]
+                section_count = record["section_count"]
+                sentence_count = record["sentence_count"]
+                relationship_count = record["relationship_count"]
 
-        # Mark folder + subfolders as 'analyzed'
+        # Mark folder + subfolders as 'analyzed' with full stats
         complete_query = """
         MATCH (f:Folder {id: $folder_id, group_id: $partition_id})
         OPTIONAL MATCH (f)<-[:SUBFOLDER_OF*0..]-(sub:Folder)
@@ -965,6 +1028,12 @@ async def _run_folder_analysis(
             fld.file_count = $file_count,
             fld.entity_count = $entity_count,
             fld.community_count = $community_count,
+            fld.section_count = $section_count,
+            fld.sentence_count = $sentence_count,
+            fld.relationship_count = $relationship_count,
+            fld.analysis_files_total = null,
+            fld.analysis_files_processed = null,
+            fld.analysis_error = null,
             fld.updated_at = datetime()
         """
         with driver.session() as session:
@@ -973,7 +1042,10 @@ async def _run_folder_analysis(
                         partition_id=partition_id,
                         file_count=file_count,
                         entity_count=entity_count,
-                        community_count=community_count)
+                        community_count=community_count,
+                        section_count=section_count,
+                        sentence_count=sentence_count,
+                        relationship_count=relationship_count)
 
         # Auto-create result folder under "Analysis Results"
         await _create_analysis_result_folder(
@@ -991,26 +1063,35 @@ async def _run_folder_analysis(
                      folder_id=folder_id,
                      file_count=file_count,
                      entity_count=entity_count,
-                     community_count=community_count)
+                     community_count=community_count,
+                     section_count=section_count,
+                     sentence_count=sentence_count,
+                     relationship_count=relationship_count)
 
     except Exception as e:
         logger.error("folder_analysis_failed",
                      folder_id=folder_id,
                      error=str(e),
                      traceback=traceback.format_exc())
-        # Mark folder as stale (not 'analyzed') so user can retry
+        # Store error detail and mark folder as stale so user can retry
         try:
+            error_msg = str(e)[:500]
             fail_query = """
             MATCH (f:Folder {id: $folder_id, group_id: $partition_id})
             OPTIONAL MATCH (f)<-[:SUBFOLDER_OF*0..]-(sub:Folder)
             WITH collect(f) + collect(sub) AS folders
             UNWIND folders AS fld
-            SET fld.analysis_status = 'stale', fld.updated_at = datetime()
+            SET fld.analysis_status = 'stale',
+                fld.analysis_error = $error_msg,
+                fld.analysis_files_total = null,
+                fld.analysis_files_processed = null,
+                fld.updated_at = datetime()
             """
             with driver.session() as session:
                 session.run(fail_query,
                             folder_id=folder_id,
-                            partition_id=partition_id)
+                            partition_id=partition_id,
+                            error_msg=error_msg)
         except Exception:
             pass
 

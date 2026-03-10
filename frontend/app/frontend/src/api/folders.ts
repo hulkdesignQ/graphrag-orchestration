@@ -25,6 +25,12 @@ export interface Folder {
     file_count: number | null;
     entity_count: number | null;
     community_count: number | null;
+    analysis_files_total: number | null;
+    analysis_files_processed: number | null;
+    section_count: number | null;
+    sentence_count: number | null;
+    relationship_count: number | null;
+    analysis_error: string | null;
     created_at: string;
     updated_at: string;
 }
