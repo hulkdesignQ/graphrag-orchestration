@@ -70,6 +70,7 @@ const Files = () => {
     const [searchQuery, setSearchQuery] = useState("");
     const [uploading, setUploading] = useState(false);
     const [uploadProgress, setUploadProgress] = useState(0);
+    const [analyzingFolderIds, setAnalyzingFolderIds] = useState<Set<string>>(new Set());
     const [uploadedCount, setUploadedCount] = useState(0);
     const [uploadTotal, setUploadTotal] = useState(0);
     const [renameFile, setRenameFile] = useState<string | null>(null);
@@ -338,17 +339,36 @@ const Files = () => {
     // Analyze a folder (trigger Neo4j indexing)
     const handleAnalyzeFolder = useCallback(
         async (folderId: string) => {
+            if (analyzingFolderIds.has(folderId)) return;
+            // Optimistic UI: immediately show "analyzing" state
+            setAnalyzingFolderIds(prev => new Set(prev).add(folderId));
+            setFolders(prev => prev.map(f =>
+                f.id === folderId
+                    ? { ...f, analysis_status: "analyzing" as const, analysis_error: null }
+                    : f
+            ));
             try {
                 const token = client ? await getToken(client) : undefined;
                 if (useLogin && !token) throw new Error("Not authenticated");
-                const result = await analyzeFolderApi(folderId, token as string);
-                addToast("info", result.message || "Analysis started");
+                await analyzeFolderApi(folderId, token as string);
                 await loadFolders();
             } catch (err: any) {
+                // Revert optimistic update on failure
+                setFolders(prev => prev.map(f =>
+                    f.id === folderId
+                        ? { ...f, analysis_status: "not_analyzed" as const }
+                        : f
+                ));
                 addToast("error", err.message || "Analysis failed");
+            } finally {
+                setAnalyzingFolderIds(prev => {
+                    const next = new Set(prev);
+                    next.delete(folderId);
+                    return next;
+                });
             }
         },
-        [client, addToast, loadFolders]
+        [client, addToast, loadFolders, analyzingFolderIds]
     );
 
     // Navigate to chat scoped to a folder's analysis group
@@ -516,8 +536,11 @@ const Files = () => {
                             <button
                                 className={styles.analysisCtaBtn}
                                 onClick={() => handleAnalyzeFolder(activeFolder.id)}
+                                disabled={analyzingFolderIds.has(activeFolder.id)}
                             >
-                                🔍 {t("files.analyzeNow", "Analyze Now")}
+                                {analyzingFolderIds.has(activeFolder.id)
+                                    ? "⏳ Starting…"
+                                    : `🔍 ${t("files.analyzeNow", "Analyze Now")}`}
                             </button>
                         </div>
                     )}
