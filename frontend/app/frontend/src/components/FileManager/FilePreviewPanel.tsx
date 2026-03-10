@@ -66,16 +66,6 @@ export const FilePreviewPanel = ({ filename, allFiles, folder, onDismiss, onNavi
         }
     }, []);
 
-    // Download
-    const handleDownload = useCallback(() => {
-        if (blobUrl) {
-            const a = document.createElement("a");
-            a.href = blobUrl;
-            a.download = filename;
-            a.click();
-        }
-    }, [blobUrl, filename]);
-
     const zoomPercent = Math.round(zoom * 100);
 
     return (
@@ -101,7 +91,6 @@ export const FilePreviewPanel = ({ filename, allFiles, folder, onDismiss, onNavi
                         <span className={styles.sep} />
                     </>
                 )}
-                <button className={styles.toolBtn} onClick={handleDownload} disabled={!blobUrl} title={t("preview.download")}>⬇</button>
             </div>
 
             {/* Content */}
@@ -159,11 +148,11 @@ const ContentRenderer = ({ category, blobUrl, rawBytes, contentType, filename }:
         case "xlsx":
             return <XlsxRenderer rawBytes={rawBytes} />;
         case "pptx":
-            return <FallbackRenderer filename={filename} blobUrl={blobUrl} />;
+            return <FallbackRenderer />;
         case "text":
             return <TextRenderer rawBytes={rawBytes} />;
         default:
-            return <FallbackRenderer filename={filename} blobUrl={blobUrl} />;
+            return <FallbackRenderer />;
     }
 };
 
@@ -257,23 +246,13 @@ const XlsxRenderer = ({ rawBytes }: { rawBytes: ArrayBuffer | null }) => {
     return <div className={styles.xlsxWrapper} dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(tableHtml) }} />;
 };
 
-/* Fallback with download button */
-const FallbackRenderer = ({ filename, blobUrl }: { filename: string; blobUrl: string }) => {
+/* Fallback for unsupported formats */
+const FallbackRenderer = () => {
     const { t } = useTranslation();
-    const handleDownload = () => {
-        const a = document.createElement("a");
-        a.href = blobUrl;
-        a.download = filename;
-        a.click();
-    };
-
     return (
         <div className={styles.stateCard}>
             <p><strong>{t("preview.noPreview")}</strong></p>
             <p>{t("preview.noPreviewHint")}</p>
-            <button className={styles.downloadBtn} onClick={handleDownload}>
-                ⬇ {t("preview.downloadFile")}
-            </button>
         </div>
     );
 };

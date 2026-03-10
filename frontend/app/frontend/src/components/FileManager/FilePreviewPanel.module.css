@@ -195,24 +195,6 @@
     font-size: 13px;
 }
 
-.downloadBtn {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 8px 18px;
-    background: linear-gradient(135deg, #0078d4, #106ebe);
-    color: #fff;
-    border: none;
-    border-radius: 6px;
-    cursor: pointer;
-    font-size: 13px;
-    font-weight: 600;
-    margin-top: 12px;
-}
-.downloadBtn:hover {
-    opacity: 0.9;
-}
-
 .spinner {
     display: inline-block;
     width: 24px;
