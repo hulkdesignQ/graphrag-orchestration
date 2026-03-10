@@ -132,9 +132,12 @@ export async function bulkDeleteFilesApi(filenames: string[], idToken: string, f
 
 // ======================== List ========================
 
-export async function listFilesApi(idToken: string, folder?: string): Promise<string[]> {
-    const params = folder ? `?folder=${encodeURIComponent(folder)}` : "";
-    const response = await fetchWithAuthRetry(`/list_uploaded${params}`, {
+export async function listFilesApi(idToken: string, folder?: string, folderId?: string): Promise<string[]> {
+    const searchParams = new URLSearchParams();
+    if (folderId) searchParams.set("folder_id", folderId);
+    else if (folder) searchParams.set("folder", folder);
+    const qs = searchParams.toString();
+    const response = await fetchWithAuthRetry(`/list_uploaded${qs ? `?${qs}` : ""}`, {
         method: "GET",
         headers: await getHeaders(idToken),
     });

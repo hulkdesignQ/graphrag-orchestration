@@ -682,38 +682,51 @@ async def get_folder_file_count(
 ):
     """Return the recursive file count for a folder (including all subfolders).
 
-    Blob storage is flat ({group_id}/{folder_name}/), so we traverse the
-    Neo4j SUBFOLDER_OF hierarchy to collect all descendant folder names,
-    then count blobs in each.
+    Uses _resolve_folder_path to build the full hierarchical path for each
+    folder in the tree, then counts blobs via ADLS Gen2 recursive listing.
     """
     driver = get_graph_driver()
+    from src.api_gateway.routers.files import _resolve_folder_path
 
-    query = """
+    # Verify the folder exists
+    verify_query = """
+    MATCH (f:Folder {id: $folder_id, group_id: $partition_id})
+    RETURN f.id AS id
+    """
+    with driver.session() as session:
+        record = session.run(verify_query, folder_id=folder_id, partition_id=partition_id).single()
+        if not record:
+            raise HTTPException(status_code=404, detail="Folder not found")
+
+    # Collect the root folder + all descendant folder IDs
+    sub_query = """
     MATCH (f:Folder {id: $folder_id, group_id: $partition_id})
     OPTIONAL MATCH (f)<-[:SUBFOLDER_OF*1..]-(sub:Folder)
     WITH f, collect(sub) AS subs
-    WITH [x IN [f] + subs | x.name] AS names
-    RETURN [n IN names WHERE n IS NOT NULL] AS folder_names
+    WITH [x IN [f] + subs | x.id] AS ids
+    RETURN [i IN ids WHERE i IS NOT NULL] AS folder_ids
     """
     with driver.session() as session:
-        result = session.run(query, folder_id=folder_id, partition_id=partition_id)
-        record = result.single()
-        if not record or not record["folder_names"]:
-            raise HTTPException(status_code=404, detail="Folder not found")
-        folder_names = record["folder_names"]
+        result = session.run(sub_query, folder_id=folder_id, partition_id=partition_id)
+        rec = result.single()
+        folder_ids = rec["folder_ids"] if rec else [folder_id]
 
     blob_manager = getattr(request.app.state, "user_blob_manager", None)
     if not blob_manager:
         raise HTTPException(status_code=400, detail="File storage not configured")
 
     total = 0
-    for name in folder_names:
-        blobs = await blob_manager.list_blobs_recursive(partition_id, name)
-        total += len(blobs)
+    folder_paths = []
+    for fid in folder_ids:
+        path = await _resolve_folder_path(partition_id, fid)
+        if path:
+            folder_paths.append(path)
+            blobs = await blob_manager.list_blobs_recursive(partition_id, path)
+            total += len(blobs)
 
-    logger.info("folder_file_count", folder_id=folder_id, folder_names=folder_names,
+    logger.info("folder_file_count", folder_id=folder_id, folder_paths=folder_paths,
                 partition_id=partition_id, count=total)
-    return {"folder_id": folder_id, "folder_names": folder_names, "count": total}
+    return {"folder_id": folder_id, "count": total}
 
 
 @router.post("/{folder_id}/analyze")
@@ -769,12 +782,31 @@ async def analyze_folder(
     from src.api_gateway.services.folder_resolver import resolve_neo4j_group_id
     neo4j_gid = await resolve_neo4j_group_id(partition_id, folder_id)
 
-    # 4) List all blobs recursively
+    # 4) Collect all folder paths and list blobs across the whole tree
     blob_manager = getattr(request.app.state, "user_blob_manager", None)
     if not blob_manager:
         raise HTTPException(status_code=400, detail="File storage not configured")
 
-    blobs = await blob_manager.list_blobs_recursive(partition_id, folder_name)
+    # Resolve full path for the root folder
+    from src.api_gateway.routers.files import _resolve_folder_path
+    folder_path = await _resolve_folder_path(partition_id, folder_id)
+    blobs = await blob_manager.list_blobs_recursive(partition_id, folder_path or folder_name)
+
+    # Also collect blobs from subfolder paths
+    sub_query = """
+    MATCH (f:Folder {id: $folder_id, group_id: $partition_id})<-[:SUBFOLDER_OF*1..]-(sub:Folder)
+    RETURN sub.id AS sub_id
+    """
+    with driver.session() as session:
+        sub_result = session.run(sub_query, folder_id=folder_id, partition_id=partition_id)
+        sub_ids = [r["sub_id"] for r in sub_result]
+
+    for sub_id in sub_ids:
+        sub_path = await _resolve_folder_path(partition_id, sub_id)
+        if sub_path:
+            sub_blobs = await blob_manager.list_blobs_recursive(partition_id, sub_path)
+            blobs.extend(sub_blobs)
+
     if not blobs:
         # Revert status since there's nothing to analyze
         revert_query = """

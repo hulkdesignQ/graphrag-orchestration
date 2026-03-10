@@ -78,8 +78,9 @@ const Files = () => {
     const [recursiveFileCount, setRecursiveFileCount] = useState<number | null>(null);
     const toastIdRef = useRef(0);
 
-    // Track active folder name via ref (avoids callback dependency on `folders` state)
+    // Track active folder name/id via ref (avoids callback dependency on `folders` state)
     const activeFolderNameRef = useRef<string | undefined>(undefined);
+    const activeFolderIdRef = useRef<string | null>(null);
 
     // Toast helper
     const addToast = useCallback((type: ToastMessage["type"], text: string) => {
@@ -101,7 +102,7 @@ const Files = () => {
                 setFiles([]);
                 return;
             }
-            const result = await listFilesApi(token as string, activeFolderNameRef.current);
+            const result = await listFilesApi(token as string, undefined, activeFolderIdRef.current ?? undefined);
             setFiles(result);
         } catch (err: any) {
             addToast("error", `Failed to load files: ${err.message}`);
@@ -136,6 +137,7 @@ const Files = () => {
         activeFolderNameRef.current = activeFolderId
             ? folders.find(f => f.id === activeFolderId)?.name
             : undefined;
+        activeFolderIdRef.current = activeFolderId;
         loadFiles();
         setSelected(new Set());
         // Fetch recursive file count for the selected folder

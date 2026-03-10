@@ -22,16 +22,25 @@ _SAFE_FOLDER_RE = re.compile(r'^[\w\s.\-]+$')
 
 
 def sanitize_folder_name(folder: str | None) -> str | None:
-    """Validate and sanitize a folder name to prevent path traversal."""
+    """Validate and sanitize a folder name or path to prevent path traversal.
+
+    Accepts both single names ("input_docs") and hierarchical paths
+    ("insurance_claims_review/input_docs") for ADLS Gen2 compatibility.
+    """
     if not folder:
         return None
     folder = folder.strip().strip("/")
     if not folder:
         return None
-    if ".." in folder or "/" in folder or "\\" in folder:
+    if ".." in folder or "\\" in folder:
         raise ValueError(f"Invalid folder name: {folder}")
-    if not _SAFE_FOLDER_RE.match(folder):
-        raise ValueError(f"Folder name contains invalid characters: {folder}")
+    # Validate each segment individually
+    for segment in folder.split("/"):
+        segment = segment.strip()
+        if not segment:
+            raise ValueError(f"Folder path contains empty segment: {folder}")
+        if not _SAFE_FOLDER_RE.match(segment):
+            raise ValueError(f"Folder name contains invalid characters: {folder}")
     return folder
 
 
