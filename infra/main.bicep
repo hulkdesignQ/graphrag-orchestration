@@ -626,6 +626,10 @@ var sharedEnvVars = concat([
     name: 'ROUTE7_ENTITY_SEED_TOP_K'
     value: '15'
   }
+  {
+    name: 'ROUTE7_SENTENCE_WINDOW'
+    value: '1'
+  }
 ], useUserUpload ? userUploadEnvVars : [])
 
 // Shared secrets — Key Vault references + runtime-generated values
