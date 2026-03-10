@@ -636,7 +636,7 @@ var sharedEnvVars = concat([
   }
   {
     name: 'ROUTE7_MAX_MERGE_RUN'
-    value: '3'
+    value: '2'
   }
 ], useUserUpload ? userUploadEnvVars : [])
 
