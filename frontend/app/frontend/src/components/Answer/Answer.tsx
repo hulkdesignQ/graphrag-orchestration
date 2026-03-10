@@ -43,6 +43,11 @@ export const Answer = ({
     const parsedAnswer = useMemo(() => parseAnswerToHtml(answer, isStreaming, onCitationClicked), [answer, isStreaming, onCitationClicked]);
     const { t } = useTranslation();
     const sanitizedAnswerHtml = DOMPurify.sanitize(parsedAnswer.answerHtml);
+    // Ensure blank lines before markdown block elements so ReactMarkdown
+    // correctly parses list items / headers even with inline HTML citation spans
+    const markdownReady = sanitizedAnswerHtml
+        .replace(/([^\n])\n(#{1,6} )/g, "$1\n\n$2")
+        .replace(/([^\n])\n([-*•] |\d+[.)]\s)/g, "$1\n\n$2");
     const [copied, setCopied] = useState(false);
 
     const handleCopy = () => {
@@ -99,7 +104,7 @@ export const Answer = ({
                         }
                     }}
                 >
-                    <ReactMarkdown children={sanitizedAnswerHtml} rehypePlugins={[rehypeRaw]} remarkPlugins={[remarkGfm]} />
+                    <ReactMarkdown children={markdownReady} rehypePlugins={[rehypeRaw]} remarkPlugins={[remarkGfm]} />
                 </div>
             </div>
 
