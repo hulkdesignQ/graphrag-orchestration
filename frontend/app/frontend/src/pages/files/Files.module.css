@@ -375,6 +375,33 @@
     font-size: 14px;
 }
 
+/* ── Subfolder Breakdown (in empty state) ────────── */
+.subfolderBreakdown {
+    display: inline-flex;
+    flex-direction: column;
+    gap: 6px;
+    text-align: left;
+    margin-top: 4px;
+}
+.subfolderRow {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    color: #666;
+}
+.subfolderIcon {
+    font-size: 16px;
+}
+.subfolderName {
+    font-weight: 500;
+    color: #444;
+}
+.subfolderCount {
+    color: #888;
+    margin-left: auto;
+}
+
 /* ── Rename Dialog Overlay ───────────────────────── */
 .overlay {
     position: fixed;

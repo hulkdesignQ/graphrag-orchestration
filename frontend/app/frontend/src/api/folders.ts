@@ -236,10 +236,21 @@ export async function getFolderAnalysisStatusApi(
     };
 }
 
+export interface SubfolderCount {
+    name: string;
+    count: number;
+}
+
+export interface FolderFileCountResult {
+    folder_id: string;
+    count: number;
+    subfolders: SubfolderCount[];
+}
+
 export async function getFolderFileCountApi(
     folderId: string,
     idToken: string
-): Promise<{ folder_id: string; count: number }> {
+): Promise<FolderFileCountResult> {
     const response = await fetchWithAuthRetry(
         `/folders/${encodeURIComponent(folderId)}/file-count`,
         {

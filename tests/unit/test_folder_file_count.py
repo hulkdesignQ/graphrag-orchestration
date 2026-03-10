@@ -35,7 +35,7 @@ def test_file_count_single_folder(mock_graph_cls, mock_resolve):
     resp = TestClient(app).get("/folders/folder-123/file-count")
 
     assert resp.status_code == 200
-    assert resp.json() == {"folder_id": "folder-123", "count": 2}
+    assert resp.json() == {"folder_id": "folder-123", "count": 2, "subfolders": []}
     blob_manager.list_blobs_recursive.assert_awaited_once_with("test-group", "Contracts")
 
 

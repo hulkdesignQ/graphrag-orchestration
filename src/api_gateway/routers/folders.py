@@ -680,10 +680,10 @@ async def get_folder_file_count(
     request: Request,
     partition_id: str = Depends(get_partition_id)
 ):
-    """Return the recursive file count for a folder (including all subfolders).
+    """Return the recursive file count for a folder, with per-subfolder breakdown.
 
-    Resolves the folder's hierarchical path via Neo4j, then does a single
-    recursive ADLS Gen2 listing — subfolders are included automatically.
+    Response includes total count and a breakdown array showing each direct
+    child subfolder's name and file count (recursively).
     """
     from src.api_gateway.routers.files import _resolve_folder_path
 
@@ -696,11 +696,28 @@ async def get_folder_file_count(
         raise HTTPException(status_code=400, detail="File storage not configured")
 
     blobs = await blob_manager.list_blobs_recursive(partition_id, folder_path)
-    count = len(blobs)
+    total = len(blobs)
+
+    # Build per-subfolder breakdown (direct children only)
+    driver = get_graph_driver()
+    sub_query = """
+    MATCH (f:Folder {id: $folder_id, group_id: $partition_id})<-[:SUBFOLDER_OF]-(child:Folder)
+    RETURN child.id AS id, child.name AS name
+    ORDER BY child.name
+    """
+    breakdown = []
+    with driver.session() as session:
+        children = list(session.run(sub_query, folder_id=folder_id, partition_id=partition_id))
+
+    for child in children:
+        child_path = await _resolve_folder_path(partition_id, child["id"])
+        if child_path:
+            child_blobs = await blob_manager.list_blobs_recursive(partition_id, child_path)
+            breakdown.append({"name": child["name"], "count": len(child_blobs)})
 
     logger.info("folder_file_count", folder_id=folder_id, folder_path=folder_path,
-                partition_id=partition_id, count=count)
-    return {"folder_id": folder_id, "count": count}
+                partition_id=partition_id, count=total)
+    return {"folder_id": folder_id, "count": total, "subfolders": breakdown}
 
 
 @router.post("/{folder_id}/analyze")

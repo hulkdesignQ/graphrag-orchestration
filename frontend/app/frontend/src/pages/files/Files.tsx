@@ -36,6 +36,7 @@ import {
     deleteFolderAnalysisApi,
     getFolderFileCountApi,
     Folder,
+    SubfolderCount,
 } from "../../api/folders";
 import { UploadZone } from "../../components/FileManager/UploadZone";
 import { FileList } from "../../components/FileManager/FileList";
@@ -76,6 +77,7 @@ const Files = () => {
     const [previewFile, setPreviewFile] = useState<string | null>(null);
     const [toasts, setToasts] = useState<ToastMessage[]>([]);
     const [recursiveFileCount, setRecursiveFileCount] = useState<number | null>(null);
+    const [subfolderCounts, setSubfolderCounts] = useState<SubfolderCount[]>([]);
     const toastIdRef = useRef(0);
 
     // Track active folder name/id via ref (avoids callback dependency on `folders` state)
@@ -140,19 +142,20 @@ const Files = () => {
         activeFolderIdRef.current = activeFolderId;
         loadFiles();
         setSelected(new Set());
-        // Fetch recursive file count for the selected folder
+        // Fetch recursive file count + subfolder breakdown
         setRecursiveFileCount(null);
+        setSubfolderCounts([]);
         if (activeFolderId) {
             (async () => {
                 try {
                     const token = client ? await getToken(client) : undefined;
                     if (!useLogin || token) {
                         const result = await getFolderFileCountApi(activeFolderId, token as string);
-                        console.log("[file-count] recursive count for folder", activeFolderId, "=", result.count);
                         setRecursiveFileCount(result.count);
+                        setSubfolderCounts(result.subfolders || []);
                     }
                 } catch (err) {
-                    console.warn("[file-count] failed to fetch recursive count, falling back to direct count", err);
+                    console.warn("[file-count] failed to fetch recursive count", err);
                 }
             })();
         }
@@ -603,6 +606,7 @@ const Files = () => {
                         onRename={(f) => setRenameFile(f)}
                         onMove={(f) => setMoveFile(f)}
                         onPreview={(f) => setPreviewFile(f)}
+                        subfolderCounts={subfolderCounts}
                     />
                 </div>
 
