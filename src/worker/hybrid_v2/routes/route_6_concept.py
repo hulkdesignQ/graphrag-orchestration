@@ -120,6 +120,8 @@ class ConceptSearchHandler(BaseRouteHandler):
         sentence_top_k = int(os.getenv("ROUTE6_SENTENCE_TOP_K", "30"))
         section_top_k = int(os.getenv("ROUTE6_SECTION_TOP_K", "10"))
 
+        logger.info(
+            "route_6_start",
             query=query[:80],
             response_type=response_type,
             community_top_k=community_top_k,

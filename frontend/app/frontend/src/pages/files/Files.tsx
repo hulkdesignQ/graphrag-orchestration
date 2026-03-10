@@ -71,6 +71,7 @@ const Files = () => {
     const [uploading, setUploading] = useState(false);
     const [uploadProgress, setUploadProgress] = useState(0);
     const [analyzingFolderIds, setAnalyzingFolderIds] = useState<Set<string>>(new Set());
+    const analyzingGuardRef = useRef<Set<string>>(new Set());
     const [uploadedCount, setUploadedCount] = useState(0);
     const [uploadTotal, setUploadTotal] = useState(0);
     const [renameFile, setRenameFile] = useState<string | null>(null);
@@ -339,7 +340,9 @@ const Files = () => {
     // Analyze a folder (trigger Neo4j indexing)
     const handleAnalyzeFolder = useCallback(
         async (folderId: string) => {
-            if (analyzingFolderIds.has(folderId)) return;
+            // Use ref for double-click guard (immune to stale closures)
+            if (analyzingGuardRef.current.has(folderId)) return;
+            analyzingGuardRef.current.add(folderId);
             // Optimistic UI: immediately show "analyzing" state
             setAnalyzingFolderIds(prev => new Set(prev).add(folderId));
             setFolders(prev => prev.map(f =>
@@ -353,14 +356,22 @@ const Files = () => {
                 await analyzeFolderApi(folderId, token as string);
                 await loadFolders();
             } catch (err: any) {
-                // Revert optimistic update on failure
-                setFolders(prev => prev.map(f =>
-                    f.id === folderId
-                        ? { ...f, analysis_status: "not_analyzed" as const }
-                        : f
-                ));
-                addToast("error", err.message || "Analysis failed");
+                const msg = err.message || "";
+                const isAlreadyRunning = msg.includes("already in progress");
+                if (isAlreadyRunning) {
+                    // 409: analysis IS running — keep showing "analyzing", just reload
+                    await loadFolders();
+                } else {
+                    // Real failure — revert optimistic update
+                    setFolders(prev => prev.map(f =>
+                        f.id === folderId
+                            ? { ...f, analysis_status: "not_analyzed" as const }
+                            : f
+                    ));
+                    addToast("error", msg || "Analysis failed");
+                }
             } finally {
+                analyzingGuardRef.current.delete(folderId);
                 setAnalyzingFolderIds(prev => {
                     const next = new Set(prev);
                     next.delete(folderId);
@@ -368,7 +379,7 @@ const Files = () => {
                 });
             }
         },
-        [client, addToast, loadFolders, analyzingFolderIds]
+        [client, addToast, loadFolders]
     );
 
     // Navigate to chat scoped to a folder's analysis group

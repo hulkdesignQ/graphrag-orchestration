@@ -941,7 +941,12 @@ class HippoRAG2Handler(BaseRouteHandler):
             self._narrow_citations_to_sentences(
                 citations, synthesis_result.get("response", ""), sentence_map
             )
-        self._enrich_citations_with_geometry(citations)
+        # Skip geometry enrichment for local_search: the Sentence node
+        # metadata may contain table-level polygons (from DI fallback
+        # fuzzy matching) that widen individual row citations to the
+        # whole table.  Normal Route 7 still enriches as usual.
+        if sentence_window_enabled:
+            self._enrich_citations_with_geometry(citations)
 
         # ------------------------------------------------------------------
         # Assemble metadata
@@ -1856,15 +1861,9 @@ class HippoRAG2Handler(BaseRouteHandler):
         cypher = """CYPHER 25
         CALL {
             MATCH (sent:Sentence)
-            SEARCH sent IN (VECTOR INDEX sentence_embedding FOR $embedding WHERE sent.group_id = $group_id LIMIT $top_k)
+            SEARCH sent IN (VECTOR INDEX sentence_embedding FOR $embedding LIMIT $top_k)
             SCORE AS score
-            WHERE score >= $threshold
-            RETURN sent, score
-            UNION ALL
-            MATCH (sent:Sentence)
-            SEARCH sent IN (VECTOR INDEX sentence_embedding FOR $embedding WHERE sent.group_id = $global_group_id LIMIT $top_k)
-            SCORE AS score
-            WHERE score >= $threshold
+            WHERE score >= $threshold AND sent.group_id IN $group_ids
             RETURN sent, score
         }
 
@@ -2079,15 +2078,9 @@ class HippoRAG2Handler(BaseRouteHandler):
         cypher = """CYPHER 25
         CALL {
             MATCH (sent:Sentence)
-            SEARCH sent IN (VECTOR INDEX sentence_embedding FOR $embedding WHERE sent.group_id = $group_id LIMIT $top_k)
+            SEARCH sent IN (VECTOR INDEX sentence_embedding FOR $embedding LIMIT $top_k)
             SCORE AS score
-            WHERE score >= $threshold
-            RETURN sent, score
-            UNION ALL
-            MATCH (sent:Sentence)
-            SEARCH sent IN (VECTOR INDEX sentence_embedding FOR $embedding WHERE sent.group_id = $global_group_id LIMIT $top_k)
-            SCORE AS score
-            WHERE score >= $threshold
+            WHERE score >= $threshold AND sent.group_id IN $group_ids
             RETURN sent, score
         }
         RETURN sent.id AS sentence_id, score
@@ -2102,8 +2095,7 @@ class HippoRAG2Handler(BaseRouteHandler):
                     records = session.run(
                         cypher,
                         embedding=query_embedding,
-                        group_id=self.group_id,
-                        global_group_id=settings.GLOBAL_GROUP_ID,
+                        group_ids=self.group_ids,
                         top_k=top_k,
                         threshold=threshold,
                     )
