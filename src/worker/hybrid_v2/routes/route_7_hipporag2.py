@@ -276,6 +276,7 @@ class HippoRAG2Handler(BaseRouteHandler):
         language: Optional[str] = None,
         query_mode: Optional[str] = None,
         folder_id: Optional[str] = None,
+        config_overrides: Optional[Dict[str, str]] = None,
     ) -> RouteResult:
         """Execute Route 7: True HippoRAG 2 retrieval pipeline."""
         enable_timings = os.getenv(
@@ -286,26 +287,27 @@ class HippoRAG2Handler(BaseRouteHandler):
 
         # Apply query_mode preset (router-adaptive parameters)
         preset = self.QUERY_MODE_PRESETS.get(query_mode or "", {})
+        _co = config_overrides or {}
 
-        # Config from env, with preset overrides
-        triple_top_k = int(os.getenv("ROUTE7_TRIPLE_TOP_K", "15"))
-        dpr_top_k = int(os.getenv("ROUTE7_DPR_TOP_K", "50"))  # upstream default; set -1 to disable
-        dpr_sentence_top_k = int(os.getenv("ROUTE7_DPR_SENTENCE_TOP_K", "0"))
-        ppr_damping = float(os.getenv("ROUTE7_DAMPING", "0.5"))
-        passage_node_weight = float(os.getenv("ROUTE7_PASSAGE_NODE_WEIGHT", "0.05"))
+        # Config from env, with per-request overrides taking precedence
+        def _ov(key: str, env_var: str, default: str) -> str:
+            """Return config_overrides[key] → env_var → default."""
+            return _co.get(key) or os.getenv(env_var, default)
+
+        triple_top_k = int(_ov("triple_top_k", "ROUTE7_TRIPLE_TOP_K", "15"))
+        dpr_top_k = int(_ov("dpr_top_k", "ROUTE7_DPR_TOP_K", "50"))  # upstream default; set -1 to disable
+        dpr_sentence_top_k = int(_ov("dpr_sentence_top_k", "ROUTE7_DPR_SENTENCE_TOP_K", "0"))
+        ppr_damping = float(_ov("damping", "ROUTE7_DAMPING", "0.5"))
+        passage_node_weight = float(_ov("passage_node_weight", "ROUTE7_PASSAGE_NODE_WEIGHT", "0.05"))
         ppr_passage_top_k = preset.get("ppr_passage_top_k") or int(
-            os.getenv("ROUTE7_PPR_PASSAGE_TOP_K", "50")
+            _ov("ppr_passage_top_k", "ROUTE7_PPR_PASSAGE_TOP_K", "50")
         )
         # Reranker: enabled by default — cross-encoder on PPR output improves Q-D10 accuracy
-        rerank_enabled = os.getenv(
-            "ROUTE7_RERANK", "1"
-        ).strip().lower() in {"1", "true", "yes"}
-        rerank_top_k = int(os.getenv("ROUTE7_RERANK_TOP_K", "30"))
+        rerank_enabled = _ov("rerank", "ROUTE7_RERANK", "1").strip().lower() in {"1", "true", "yes"}
+        rerank_top_k = int(_ov("rerank_top_k", "ROUTE7_RERANK_TOP_K", "30"))
         # Corpus-wide reranker: cross-encoder on ALL passages as parallel retrieval channel
-        rerank_all_enabled = os.getenv(
-            "ROUTE7_RERANK_ALL", "0"
-        ).strip().lower() in {"1", "true", "yes"}
-        rerank_all_top_k = int(os.getenv("ROUTE7_RERANK_ALL_TOP_K", "50"))
+        rerank_all_enabled = _ov("rerank_all", "ROUTE7_RERANK_ALL", "0").strip().lower() in {"1", "true", "yes"}
+        rerank_all_top_k = int(_ov("rerank_all_top_k", "ROUTE7_RERANK_ALL_TOP_K", "50"))
 
         # Preset can override prompt_variant (only if caller didn't explicitly set one)
         if prompt_variant is None and preset.get("prompt_variant"):
@@ -318,38 +320,38 @@ class HippoRAG2Handler(BaseRouteHandler):
         synthesis_max_tokens: Optional[int] = preset.get("max_tokens")
 
         # Phase 2 feature flags
-        structural_seeds_enabled = os.getenv(
-            "ROUTE7_STRUCTURAL_SEEDS", "0"
+        structural_seeds_enabled = _ov(
+            "structural_seeds", "ROUTE7_STRUCTURAL_SEEDS", "0"
         ).strip().lower() in {"1", "true", "yes"}
-        community_seeds_enabled = os.getenv(
-            "ROUTE7_COMMUNITY_SEEDS", "0"
+        community_seeds_enabled = _ov(
+            "community_seeds", "ROUTE7_COMMUNITY_SEEDS", "0"
         ).strip().lower() in {"1", "true", "yes"}
-        sentence_search_enabled = os.getenv(
-            "ROUTE7_SENTENCE_SEARCH", "0"
+        sentence_search_enabled = _ov(
+            "sentence_search", "ROUTE7_SENTENCE_SEARCH", "0"
         ).strip().lower() in {"1", "true", "yes"}
 
         # Cross-encoder passage seeding: rerank ALL passages and feed top results
         # into passage_seeds BEFORE PPR, so the graph walk starts from semantically
         # relevant passages (catches graph-isolated sentences that DPR misses).
-        semantic_passage_seeds_enabled = os.getenv(
-            "ROUTE7_SEMANTIC_PASSAGE_SEEDS", "1"
+        semantic_passage_seeds_enabled = _ov(
+            "semantic_passage_seeds", "ROUTE7_SEMANTIC_PASSAGE_SEEDS", "1"
         ).strip().lower() in {"1", "true", "yes"}
-        semantic_seed_top_k = int(os.getenv("ROUTE7_SEMANTIC_SEED_TOP_K", "20"))
-        semantic_seed_weight = float(os.getenv("ROUTE7_SEMANTIC_SEED_WEIGHT", "0.05"))
+        semantic_seed_top_k = int(_ov("semantic_seed_top_k", "ROUTE7_SEMANTIC_SEED_TOP_K", "20"))
+        semantic_seed_weight = float(_ov("semantic_seed_weight", "ROUTE7_SEMANTIC_SEED_WEIGHT", "0.05"))
 
         # Triple reranking config (read early for logging)
-        triple_rerank_enabled = os.getenv(
-            "ROUTE7_TRIPLE_RERANK", "1"
+        triple_rerank_enabled = _ov(
+            "triple_rerank", "ROUTE7_TRIPLE_RERANK", "1"
         ).strip().lower() in {"1", "true", "yes"}
-        triple_candidates_k = int(os.getenv("ROUTE7_TRIPLE_CANDIDATES_K", "500"))
+        triple_candidates_k = int(_ov("triple_candidates_k", "ROUTE7_TRIPLE_CANDIDATES_K", "500"))
 
         # PPR coverage fixes (ref: standard PageRank literature)
-        ppr_dangling = os.getenv(
-            "ROUTE7_PPR_DANGLING", "0"
+        ppr_dangling = _ov(
+            "ppr_dangling", "ROUTE7_PPR_DANGLING", "0"
         ).strip().lower() in {"1", "true", "yes"}
-        ppr_self_loops = float(os.getenv("ROUTE7_PPR_SELF_LOOPS", "0.0"))
-        ppr_hub_deval = os.getenv(
-            "ROUTE7_PPR_HUB_DEVAL", "0"
+        ppr_self_loops = float(_ov("ppr_self_loops", "ROUTE7_PPR_SELF_LOOPS", "0.0"))
+        ppr_hub_deval = _ov(
+            "ppr_hub_deval", "ROUTE7_PPR_HUB_DEVAL", "0"
         ).strip().lower() in {"1", "true", "yes"}
 
         logger.info(
@@ -360,11 +362,13 @@ class HippoRAG2Handler(BaseRouteHandler):
             triple_top_k=triple_top_k,
             dpr_top_k=dpr_top_k,
             rerank_enabled=rerank_enabled,
+            rerank_top_k=rerank_top_k,
             triple_rerank=triple_rerank_enabled,
             triple_candidates_k=triple_candidates_k if triple_rerank_enabled else triple_top_k,
             query_mode=query_mode,
             ppr_passage_top_k=ppr_passage_top_k,
             prompt_variant=prompt_variant,
+            config_overrides=bool(_co),
         )
 
         # ------------------------------------------------------------------

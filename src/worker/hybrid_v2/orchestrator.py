@@ -422,6 +422,7 @@ class HybridPipeline:
         include_context: bool = False,
         language: Optional[str] = None,
         folder_id: Optional[str] = None,
+        config_overrides: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """
         Execute a query through the appropriate route.
@@ -484,6 +485,8 @@ class HybridPipeline:
                 extra_kwargs["weight_profile"] = weight_profile
             if route == QueryRoute.HIPPORAG2_SEARCH:
                 extra_kwargs["query_mode"] = original_route.value
+                if config_overrides:
+                    extra_kwargs["config_overrides"] = config_overrides
             result = await handler.execute(
                 search_query, response_type,
                 knn_config=knn_config,
@@ -2319,6 +2322,7 @@ Sub-questions:"""
         language: Optional[str] = None,
         query_mode: Optional[str] = None,
         folder_id: Optional[str] = None,
+        config_overrides: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """
         Force a specific route regardless of classification.
@@ -2351,6 +2355,8 @@ Sub-questions:"""
                 )
             if route == QueryRoute.HIPPORAG2_SEARCH:
                 extra_kwargs["query_mode"] = query_mode or route.value
+                if config_overrides:
+                    extra_kwargs["config_overrides"] = config_overrides
             result = await handler.execute(
                 search_query, response_type,
                 knn_config=knn_config,

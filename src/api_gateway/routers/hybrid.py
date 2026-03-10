@@ -287,6 +287,10 @@ class HybridQueryRequest(BaseModel):
         default=None,
         description="Optional folder ID to scope the query to a specific folder within the group. If None, all folders are searched."
     )
+    config_overrides: Optional[Dict[str, str]] = Field(
+        default=None,
+        description="Per-request overrides for route configuration. Keys are env-var names without the route prefix (e.g. 'rerank_top_k' overrides ROUTE7_RERANK_TOP_K). Only applies to the active route handler."
+    )
 
 
 class HybridQueryResponse(BaseModel):
@@ -571,9 +575,10 @@ async def hybrid_query(
                 language=body.language,
                 query_mode=body.query_mode,
                 folder_id=body.folder_id,
+                config_overrides=body.config_overrides,
             )
         else:
-            result = await pipeline.query(body.query, body.response_type, knn_config=body.knn_config, prompt_variant=body.prompt_variant, synthesis_model=body.synthesis_model, include_context=body.include_context, language=body.language, folder_id=body.folder_id)
+            result = await pipeline.query(body.query, body.response_type, knn_config=body.knn_config, prompt_variant=body.prompt_variant, synthesis_model=body.synthesis_model, include_context=body.include_context, language=body.language, folder_id=body.folder_id, config_overrides=body.config_overrides)
         
         # Fire-and-forget instrumentation tracking
         latency_ms = (time.time() - start_time) * 1000

@@ -253,6 +253,7 @@ def benchmark_scenario(
     no_auth: bool = False, query_delay: float = 0,
     query_mode: Optional[str] = None,
     prompt_variant: Optional[str] = None,
+    config_overrides: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     print(f"\n{'=' * 70}")
     print(f"Scenario: {scenario_name} (response_type={response_type})")
@@ -299,6 +300,8 @@ def benchmark_scenario(
                 payload["query_mode"] = query_mode
             if prompt_variant:
                 payload["prompt_variant"] = prompt_variant
+            if config_overrides:
+                payload["config_overrides"] = config_overrides
 
             status, resp, elapsed, err = _http_post_json(
                 url=url, headers=headers, payload=payload, timeout_s=timeout_s,
@@ -528,6 +531,11 @@ def main():
         "--prompt-variant", type=str, default=None,
         help="Synthesis prompt variant: 'v0' (default structured), 'v1_concise' (direct), 'v2_table' (markdown table).",
     )
+    parser.add_argument(
+        "--config-override", type=str, action="append", default=None,
+        metavar="KEY=VALUE",
+        help="Per-request config overrides for the route handler (e.g. --config-override rerank_top_k=10). Can be repeated.",
+    )
 
     args = parser.parse_args()
 
@@ -586,6 +594,19 @@ def main():
     if args.prompt_variant:
         print(f"Prompt variant: {args.prompt_variant}")
 
+    # Parse config overrides
+    config_overrides: Optional[Dict[str, str]] = None
+    if args.config_override:
+        config_overrides = {}
+        for item in args.config_override:
+            if "=" not in item:
+                print(f"WARNING: Ignoring malformed --config-override '{item}' (must be KEY=VALUE)")
+                continue
+            k, v = item.split("=", 1)
+            config_overrides[k.strip()] = v.strip()
+        if config_overrides:
+            print(f"Config overrides: {config_overrides}")
+
     # When query_mode is set, reflect it in the label for distinct output filenames
     effective_label = ROUTE_LABEL
     if args.query_mode:
@@ -601,6 +622,7 @@ def main():
         no_auth=args.no_auth, query_delay=args.query_delay,
         query_mode=args.query_mode,
         prompt_variant=args.prompt_variant,
+        config_overrides=config_overrides,
     )
 
     out_dir = Path(__file__).resolve().parents[1] / "benchmarks"
@@ -618,6 +640,7 @@ def main():
                 "force_route": FORCE_ROUTE,
                 "query_mode": args.query_mode,
                 "prompt_variant": args.prompt_variant,
+                "config_overrides": config_overrides,
                 "response_type": args.response_type,
                 "synthesis_model": args.synthesis_model or "default",
                 "comparison_baseline": "route5_unified (53/57)",
