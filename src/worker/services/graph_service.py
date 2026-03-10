@@ -449,9 +449,9 @@ class GraphService:
             try:
                 driver = GraphDatabase.driver(
                     settings.NEO4J_URI,
-                    auth=(settings.NEO4J_USERNAME, settings.NEO4J_PASSWORD)
+                    auth=(settings.NEO4J_USERNAME, settings.NEO4J_PASSWORD),
+                    max_connection_lifetime=300,
                 )
-                # Verify connectivity
                 driver.verify_connectivity()
                 self._driver = driver
                 logger.info(f"Connected to Neo4j at {settings.NEO4J_URI}")
@@ -490,7 +490,8 @@ class GraphService:
             try:
                 driver = GraphDatabase.driver(
                     settings.NEO4J_URI,
-                    auth=(settings.NEO4J_USERNAME, settings.NEO4J_PASSWORD)
+                    auth=(settings.NEO4J_USERNAME, settings.NEO4J_PASSWORD),
+                    max_connection_lifetime=300,
                 )
                 driver.verify_connectivity()
                 self._driver = driver
