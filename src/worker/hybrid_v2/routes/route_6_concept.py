@@ -1000,7 +1000,8 @@ class ConceptSearchHandler(BaseRouteHandler):
 
             # Sort by score descending, filter low-importance
             points = sorted(points, key=lambda p: p.get("score", 0), reverse=True)
-            points = [p for p in points if p.get("score", 0) >= 20]
+            min_score = int(os.getenv("ROUTE6_EXTRACT_MIN_SCORE", "40"))
+            points = [p for p in points if p.get("score", 0) >= min_score]
             if not points:
                 return self._format_raw_summaries(communities)
 
@@ -1760,7 +1761,32 @@ class ConceptSearchHandler(BaseRouteHandler):
                     return [dict(r) for r in records]
 
             results = await loop.run_in_executor(self._executor, _run)
-            entity_map = {r["entity_name"]: r["doc_titles"] for r in results}
+
+            # Filter noise: remove entities that are numbers, single generic
+            # words, or too short to be meaningful names.
+            def _is_meaningful(name: str) -> bool:
+                n = name.strip()
+                if len(n) < 3:
+                    return False
+                # Pure numbers / dates / zip codes
+                if re.match(r'^[\d\s,.\-/]+$', n):
+                    return False
+                # Single generic word (lowercase, no spaces)
+                generic = {
+                    "contract", "agreement", "document", "owner", "agent",
+                    "builder", "customer", "party", "property", "state",
+                    "county", "section", "change", "notice", "date",
+                    "service", "term", "condition", "fee", "payment",
+                }
+                if n.lower() in generic:
+                    return False
+                return True
+
+            entity_map = {
+                r["entity_name"]: r["doc_titles"]
+                for r in results
+                if _is_meaningful(r["entity_name"])
+            }
 
             logger.info(
                 "route6_entity_doc_map_complete",
