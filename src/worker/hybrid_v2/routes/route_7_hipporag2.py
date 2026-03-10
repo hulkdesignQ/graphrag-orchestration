@@ -190,6 +190,7 @@ class HippoRAG2Handler(BaseRouteHandler):
             "ppr_passage_top_k": 5,
             "prompt_variant": "v1_concise",
             "max_tokens": 150,
+            "sentence_window": False,  # skip ±1 enrichment — keeps table-cell citations precise
         },
         "global_search": {             # Thematic/community-level — needs breadth
             "ppr_passage_top_k": 15,
@@ -354,6 +355,15 @@ class HippoRAG2Handler(BaseRouteHandler):
             "ppr_hub_deval", "ROUTE7_PPR_HUB_DEVAL", "0"
         ).strip().lower() in {"1", "true", "yes"}
 
+        # Sentence window: preset can explicitly disable (local_search keeps
+        # citations narrow); otherwise fall back to env / config_overrides.
+        if "sentence_window" in preset:
+            sentence_window_enabled = bool(preset["sentence_window"])
+        else:
+            sentence_window_enabled = _ov(
+                "sentence_window", "ROUTE7_SENTENCE_WINDOW", "1"
+            ).strip().lower() in {"1", "true", "yes"}
+
         logger.info(
             "route_7_hipporag2_start",
             query=query[:80],
@@ -368,6 +378,7 @@ class HippoRAG2Handler(BaseRouteHandler):
             query_mode=query_mode,
             ppr_passage_top_k=ppr_passage_top_k,
             prompt_variant=prompt_variant,
+            sentence_window=sentence_window_enabled,
             config_overrides=bool(_co),
         )
 
@@ -752,7 +763,11 @@ class HippoRAG2Handler(BaseRouteHandler):
         # Sentence text fetch (always needed for synthesis)
         _parallel_tasks.append((
             "chunks",
-            self._fetch_sentences_by_ids(top_sentence_ids, ppr_scores_map=ppr_scores_map),
+            self._fetch_sentences_by_ids(
+                top_sentence_ids,
+                ppr_scores_map=ppr_scores_map,
+                sentence_window_enabled=sentence_window_enabled,
+            ),
         ))
 
         # Entity-doc map (conditional: only for exhaustive enumeration queries)
@@ -1487,6 +1502,7 @@ class HippoRAG2Handler(BaseRouteHandler):
         sentence_ids: List[str],
         ppr_scores_map: Optional[Dict[str, float]] = None,
         entity_names: Optional[List[str]] = None,
+        sentence_window_enabled: Optional[bool] = None,
     ) -> List[Dict[str, Any]]:
         """Fetch sentence text + metadata from Neo4j by sentence IDs.
 
@@ -1494,6 +1510,10 @@ class HippoRAG2Handler(BaseRouteHandler):
         *entity_names* is provided, builds focused 3-sentence windows
         around sentences that mention those entities (via graph MENTIONS
         edges), falling back to full sentence text otherwise.
+
+        When *sentence_window_enabled* is ``False``, the ±1 neighbour
+        expansion is skipped — useful for local_search where retrieved
+        sentences are already concise and widening would dilute citations.
 
         Returns flat list of sentence dicts in the format expected by the
         synthesizer's ``pre_fetched_chunks`` parameter, sorted by PPR
@@ -1506,9 +1526,10 @@ class HippoRAG2Handler(BaseRouteHandler):
         driver = self.neo4j_driver
 
         # ── Pass 1: Sentence metadata (with ±1 window via NEXT_IN_SECTION) ──
-        sentence_window_enabled = os.getenv(
-            "ROUTE7_SENTENCE_WINDOW", "1"
-        ).strip().lower() in {"1", "true", "yes"}
+        if sentence_window_enabled is None:
+            sentence_window_enabled = os.getenv(
+                "ROUTE7_SENTENCE_WINDOW", "1"
+            ).strip().lower() in {"1", "true", "yes"}
 
         cypher_sentences = """
         UNWIND $sentence_ids AS cid
@@ -1565,22 +1586,28 @@ class HippoRAG2Handler(BaseRouteHandler):
         for _key, group in section_groups.items():
             group.sort(key=lambda x: x.get("index_in_doc", 0))
 
-            # Detect contiguous runs using hierarchical_id section prefix
-            runs: list[list[dict]] = []
-            current_run = [group[0]]
-            for r in group[1:]:
-                prev = current_run[-1]
-                prev_idx = prev.get("index_in_doc", 0)
-                curr_idx = r.get("index_in_doc", 0)
-                prev_sec = (prev.get("hierarchical_id") or "").rsplit("-S", 1)[0]
-                curr_sec = (r.get("hierarchical_id") or "").rsplit("-S", 1)[0]
-                same_section = (prev_sec == curr_sec) and bool(prev_sec)
-                if same_section and curr_idx == prev_idx + 1:
-                    current_run.append(r)
-                else:
-                    runs.append(current_run)
-                    current_run = [r]
-            runs.append(current_run)
+            # Detect contiguous runs using hierarchical_id section prefix.
+            # When sentence_window is disabled (local_search), skip merging
+            # so each sentence stays a separate citation — keeps table-row
+            # and element-level citations precise.
+            if not sentence_window_enabled:
+                runs = [[r] for r in group]
+            else:
+                runs = []
+                current_run = [group[0]]
+                for r in group[1:]:
+                    prev = current_run[-1]
+                    prev_idx = prev.get("index_in_doc", 0)
+                    curr_idx = r.get("index_in_doc", 0)
+                    prev_sec = (prev.get("hierarchical_id") or "").rsplit("-S", 1)[0]
+                    curr_sec = (r.get("hierarchical_id") or "").rsplit("-S", 1)[0]
+                    same_section = (prev_sec == curr_sec) and bool(prev_sec)
+                    if same_section and curr_idx == prev_idx + 1:
+                        current_run.append(r)
+                    else:
+                        runs.append(current_run)
+                        current_run = [r]
+                runs.append(current_run)
 
             for run in runs:
                 first, last = run[0], run[-1]
