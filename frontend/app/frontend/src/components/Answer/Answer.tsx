@@ -43,11 +43,14 @@ export const Answer = ({
     const parsedAnswer = useMemo(() => parseAnswerToHtml(answer, isStreaming, onCitationClicked), [answer, isStreaming, onCitationClicked]);
     const { t } = useTranslation();
     const sanitizedAnswerHtml = DOMPurify.sanitize(parsedAnswer.answerHtml);
-    // Ensure blank lines before markdown block elements so ReactMarkdown
-    // correctly parses list items / headers even with inline HTML citation spans
+    // Normalize markdown so ReactMarkdown renders lists/headers correctly
+    // even when inline HTML citation spans are present:
+    // 1) Convert Unicode bullets (•) to markdown list syntax (- )
+    // 2) Ensure blank lines before block elements (headers, list items)
     const markdownReady = sanitizedAnswerHtml
+        .replace(/^• /gm, "- ")
         .replace(/([^\n])\n(#{1,6} )/g, "$1\n\n$2")
-        .replace(/([^\n])\n([-*•] |\d+[.)]\s)/g, "$1\n\n$2");
+        .replace(/([^\n])\n([-*] |\d+[.)]\s)/g, "$1\n\n$2");
     const [copied, setCopied] = useState(false);
 
     const handleCopy = () => {
@@ -125,8 +128,8 @@ export const Answer = ({
 
                 return (
                     <div>
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: "5px" }}>
-                            <span className={styles.citationLearnMore}>{t("citationWithColon")}</span>
+                        <div className={styles.citationLearnMore}>{t("citationWithColon")}</div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
                             {uniqueCitations.map((sc, idx) => {
                                 const rawName = sc.document_title || sc.source || "Unknown";
                                 const docName = (() => { try { return decodeURIComponent(rawName); } catch { return rawName; } })();
