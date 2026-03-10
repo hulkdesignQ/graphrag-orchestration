@@ -146,10 +146,11 @@ const Files = () => {
                     const token = client ? await getToken(client) : undefined;
                     if (!useLogin || token) {
                         const result = await getFolderFileCountApi(activeFolderId, token as string);
+                        console.log("[file-count] recursive count for folder", activeFolderId, "=", result.count);
                         setRecursiveFileCount(result.count);
                     }
-                } catch {
-                    // Fall back to direct file count via filteredFiles
+                } catch (err) {
+                    console.warn("[file-count] failed to fetch recursive count, falling back to direct count", err);
                 }
             })();
         }
