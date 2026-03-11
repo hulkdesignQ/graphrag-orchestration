@@ -257,6 +257,10 @@ class LazyGraphRAGIndexingPipeline:
         knn_config: Optional[str] = None,  # Tag for KNN edges (e.g., "knn-1", "knn-2") for A/B testing
         # Entity synonymy parameters (cross-doc bridging via embedding similarity)
         entity_synonymy_threshold: float = 0.65,
+        # When True, skip steps 7.5-9 (triple embeddings, synonymy edges, GDS,
+        # communities).  Used for multi-doc folder indexing: run extraction for
+        # each doc, then run graph algorithms once at the end on the full graph.
+        extraction_only: bool = False,
     ) -> Dict[str, Any]:
         start_time = time.time()
         
@@ -554,6 +558,12 @@ class LazyGraphRAGIndexingPipeline:
         else:
             logger.info("pipeline_skip_entities (checkpoint >= entities_committed)")
 
+        # ── extraction_only: skip graph-wide steps (7.5-9) ─────────────────
+        if extraction_only:
+            logger.info("extraction_only=True — skipping steps 7.5-9 (will run once after all docs)")
+            stats["elapsed_s"] = round(time.time() - start_time, 2)
+            return stats
+
         # ── Step 7.5: Triple embeddings ────────────────────────────────────
         if not self.neo4j_store._step_done(checkpoint, "triple_embeddings"):
             try:
@@ -686,6 +696,98 @@ class LazyGraphRAGIndexingPipeline:
         self.neo4j_store.clear_pipeline_checkpoint(group_id)
         
         stats["elapsed_s"] = round(time.time() - start_time, 2)
+        return stats
+
+    async def run_graph_algorithms_only(
+        self,
+        *,
+        group_id: str,
+        knn_enabled: bool = True,
+        knn_top_k: int = 5,
+        knn_similarity_cutoff: float = 0.60,
+        knn_config: Optional[str] = None,
+        entity_synonymy_threshold: float = 0.65,
+    ) -> Dict[str, Any]:
+        """Run only the graph-wide steps (7.5-9) after all docs have been extracted.
+
+        This is the second phase of a two-phase folder indexing:
+        Phase 1: index_documents(extraction_only=True) per doc
+        Phase 2: run_graph_algorithms_only() once on the full graph
+        """
+        import time
+        start_time = time.time()
+        stats: Dict[str, Any] = {}
+
+        logger.info(f"🔬 Running graph algorithms on full graph for group {group_id}")
+
+        # Step 7.5: Triple embeddings
+        try:
+            triple_embed_stats = await self._precompute_triple_embeddings(group_id)
+            stats["triple_embeddings_stored"] = triple_embed_stats.get("stored", 0)
+            logger.info(f"✅ Step 7.5: Pre-computed {stats['triple_embeddings_stored']} triple embeddings")
+        except Exception as e:
+            logger.warning(f"⚠️  Triple embedding pre-computation failed: {e}")
+            stats["triple_embeddings_stored"] = 0
+
+        # Step 7.6: Entity synonymy edges
+        try:
+            synonymy_stats = await self._compute_entity_synonymy_edges(
+                group_id=group_id,
+                threshold=entity_synonymy_threshold,
+            )
+            stats["entity_synonymy_edges"] = synonymy_stats.get("edges_created", 0)
+            logger.info(
+                "✅ Step 7.6: %d entity synonymy edges at threshold %.2f",
+                stats["entity_synonymy_edges"], entity_synonymy_threshold,
+            )
+        except Exception as e:
+            logger.warning(f"⚠️  Entity synonymy computation failed: {e}")
+            stats["entity_synonymy_edges"] = 0
+
+        # Step 8: GDS algorithms (KNN, Louvain, PageRank)
+        gds_stats: Dict[str, int] = {}
+        try:
+            if knn_enabled:
+                logger.info(f"🔬 Running GDS algorithms (KNN k={knn_top_k}, cutoff={knn_similarity_cutoff}, Louvain, PageRank)...")
+                gds_stats = await self._run_gds_graph_algorithms(
+                    group_id=group_id,
+                    knn_top_k=knn_top_k,
+                    knn_similarity_cutoff=knn_similarity_cutoff,
+                    knn_config=knn_config,
+                )
+            else:
+                gds_stats = await self._run_gds_graph_algorithms(
+                    group_id=group_id, knn_top_k=0,
+                    knn_similarity_cutoff=1.0, knn_config=None,
+                )
+        except Exception as e:
+            logger.warning(f"⚠️  GDS algorithms failed: {e}")
+
+        stats["gds_knn_edges"] = gds_stats.get("knn_edges", 0)
+        stats["gds_communities"] = gds_stats.get("communities", 0)
+        stats["gds_pagerank_nodes"] = gds_stats.get("pagerank_nodes", 0)
+        if gds_stats:
+            logger.info(f"✅ GDS complete: {stats['gds_knn_edges']} KNN edges, {stats['gds_communities']} communities")
+
+        # Step 9: Materialize Louvain communities
+        if stats.get("gds_communities", 0) > 0:
+            try:
+                logger.info("📦 Step 9: Materializing Louvain communities with LLM summaries...")
+                community_stats = await self._materialize_louvain_communities(
+                    group_id=group_id,
+                    min_community_size=2,
+                )
+                stats["communities_created"] = community_stats.get("communities_created", 0)
+                stats["summaries_generated"] = community_stats.get("summaries_generated", 0)
+                logger.info(
+                    "✅ Step 9 complete: %d communities, %d summaries",
+                    stats["communities_created"], stats["summaries_generated"],
+                )
+            except Exception as e:
+                logger.warning(f"⚠️  Community materialization failed: {e}")
+
+        stats["elapsed_s"] = round(time.time() - start_time, 2)
+        logger.info(f"✅ Graph algorithms complete in {stats['elapsed_s']}s")
         return stats
 
     async def _prepare_documents(

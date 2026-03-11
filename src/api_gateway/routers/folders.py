@@ -1123,6 +1123,7 @@ async def _run_folder_analysis(
                 filename=blob["name"],
                 blob_url=blob["url"],
                 user_id=partition_id,
+                extraction_only=True,
             )
             # Update per-file progress
             progress_query = """
@@ -1134,6 +1135,10 @@ async def _run_folder_analysis(
                             folder_id=folder_id,
                             partition_id=partition_id,
                             processed=idx + 1)
+
+        # ── Graph algorithms (steps 7.5-9) — run ONCE on full graph ──
+        logger.info(f"folder_analysis_graph_algorithms group={neo4j_gid} files={file_count}")
+        await doc_sync.pipeline.run_graph_algorithms_only(group_id=neo4j_gid)
 
         # Count entities, communities, sections, sentences, relationships
         stats_query = """

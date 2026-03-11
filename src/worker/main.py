@@ -254,7 +254,11 @@ class Worker:
                     fid=folder_id, pid=partition_id, total=file_count, processed=resume_from,
                 )
 
-            # ── Per-file indexing loop ──
+            # ── Per-file extraction loop (steps 1-7 only) ──
+            # Graph-wide steps (7.5-9: triple embeddings, synonymy edges,
+            # KNN, Louvain, communities) are deferred to after all docs are
+            # extracted — running them per-doc is wasted work since each
+            # subsequent doc deletes and rebuilds them.
             for idx, blob in enumerate(blobs):
                 if idx < resume_from:
                     continue
@@ -263,6 +267,7 @@ class Worker:
                     filename=blob["name"],
                     blob_url=blob["url"],
                     user_id=partition_id,
+                    extraction_only=True,
                 )
                 with _neo4j_session() as session:
                     session.run(
@@ -270,6 +275,12 @@ class Worker:
                         "SET f.analysis_files_processed = $processed",
                         fid=folder_id, pid=partition_id, processed=idx + 1,
                     )
+
+            # ── Graph algorithms (steps 7.5-9) — run ONCE on full graph ──
+            logger.info(f"index_folder_graph_algorithms group={neo4j_gid} files={file_count}")
+            graph_stats = await doc_sync.pipeline.run_graph_algorithms_only(
+                group_id=neo4j_gid,
+            )
 
             # ── Collect stats ──
             stats_query = """
