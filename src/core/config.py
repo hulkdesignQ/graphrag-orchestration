@@ -182,6 +182,12 @@ class Settings(BaseSettings):
     AURA_DS_CLIENT_ID: Optional[str] = None
     AURA_DS_CLIENT_SECRET: Optional[str] = None
     
+    # Local graph algorithms threshold: when entity count is below this value,
+    # run KNN/Louvain/PageRank in-process (numpy + networkx) instead of
+    # provisioning an Aura GDS session. Eliminates 60-120s GDS overhead for
+    # small graphs. Set to 0 to always use GDS sessions.
+    GDS_LOCAL_THRESHOLD: int = 500
+    
     # Cosmos DB (Schema Vault)
     COSMOS_ENDPOINT: Optional[str] = None
     COSMOS_KEY: Optional[str] = None

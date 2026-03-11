@@ -2972,6 +2972,235 @@ Output:
         composite_key = f"kvp:{group_id}:{doc_id}:{key}:{value}"
         return f"kvp_{hashlib.md5(composite_key.encode()).hexdigest()[:16]}"
 
+    # ==================== Step 8 (local): In-Process Graph Algorithms ====================
+
+    async def _run_local_graph_algorithms(
+        self,
+        *,
+        group_id: str,
+        knn_top_k: int = 5,
+        knn_similarity_cutoff: float = 0.60,
+        knn_config: Optional[str] = None,
+    ) -> Dict[str, int]:
+        """Run KNN/Louvain/PageRank in-process using numpy + networkx.
+
+        This replaces the remote Aura GDS session for small graphs (< GDS_LOCAL_THRESHOLD
+        entities), eliminating the 60-120s provisioning overhead. For 50-500 entities the
+        computation takes < 1s; the bottleneck is only Neo4j read/write I/O (~2-5s total).
+
+        The algorithms are mathematically equivalent to the GDS versions:
+        - KNN: cosine similarity via numpy, same top-k + cutoff semantics
+        - Louvain: networkx community detection (resolution=1.0 matches GDS default)
+        - PageRank: networkx pagerank (damping=0.85, tol=1e-6 matches GDS defaults)
+
+        Returns same stats dict as _run_gds_graph_algorithms for drop-in compatibility.
+        """
+        import numpy as np
+        import networkx as nx
+        from networkx.algorithms.community import louvain_communities
+
+        stats = {"knn_edges": 0, "entity_edges": 0, "communities": 0, "pagerank_nodes": 0}
+        algo_start = time.time()
+
+        # ── 1. Fetch entity embeddings from Neo4j ──────────────────────────
+        logger.info("📊 [local] Fetching entity embeddings from Neo4j...")
+
+        def _fetch_entities(session):
+            result = session.run("""
+                MATCH (n:Entity)
+                WHERE n.group_id IN $group_ids
+                  AND NOT n:Deprecated
+                  AND n.entity_embedding IS NOT NULL
+                RETURN elementId(n) AS eid, n.entity_embedding AS emb
+            """, group_ids=[group_id, settings.GLOBAL_GROUP_ID])
+            return [(r["eid"], r["emb"]) for r in result]
+
+        entity_rows = await self.neo4j_store.arun_in_session(_fetch_entities, read_only=True)
+
+        if not entity_rows:
+            logger.warning("⚠️  [local] No entities with embeddings — skipping graph algorithms")
+            return stats
+
+        entity_ids = [r[0] for r in entity_rows]
+        n_entities = len(entity_ids)
+        logger.info(f"📊 [local] Loaded {n_entities} entity embeddings")
+
+        # Build normalized embedding matrix (n × d) for cosine similarity
+        embeddings = np.array([r[1] for r in entity_rows], dtype=np.float32)
+        norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+        norms = np.where(norms == 0, 1.0, norms)  # avoid division by zero
+        embeddings_normed = embeddings / norms
+
+        # ── 2. KNN via cosine similarity matrix ────────────────────────────
+        knn_edge_batch: List[Dict[str, Any]] = []
+        if knn_top_k > 0:
+            logger.info(f"🔗 [local] Computing KNN (k={knn_top_k}, cutoff={knn_similarity_cutoff})...")
+            # Cosine similarity = dot product of L2-normed vectors
+            sim_matrix = await asyncio.to_thread(
+                lambda: embeddings_normed @ embeddings_normed.T
+            )
+            # Zero out self-similarity
+            np.fill_diagonal(sim_matrix, 0.0)
+
+            # For each entity, pick top-k neighbors above cutoff
+            seen_pairs: set = set()
+            for i in range(n_entities):
+                row = sim_matrix[i]
+                # Get indices sorted by descending similarity
+                candidates = np.argsort(row)[::-1][:knn_top_k]
+                for j_idx in candidates:
+                    j = int(j_idx)
+                    sim_val = float(row[j])
+                    if sim_val < knn_similarity_cutoff:
+                        break  # sorted desc, so rest will be lower
+                    pair = (min(i, j), max(i, j))
+                    if pair not in seen_pairs:
+                        seen_pairs.add(pair)
+                        knn_edge_batch.append({
+                            "eid1": entity_ids[pair[0]],
+                            "eid2": entity_ids[pair[1]],
+                            "similarity": sim_val,
+                        })
+
+            logger.info(f"🔗 [local] KNN found {len(knn_edge_batch)} edges")
+
+        # ── 3. Write KNN edges to Neo4j ────────────────────────────────────
+        if knn_edge_batch:
+            def _write_knn_edges(session):
+                BATCH = 500
+                edges_created = 0
+                for start in range(0, len(knn_edge_batch), BATCH):
+                    chunk = knn_edge_batch[start:start + BATCH]
+                    if knn_config:
+                        result = session.run("""
+                            UNWIND $edges AS e
+                            MATCH (n1) WHERE elementId(n1) = e.eid1
+                            MATCH (n2) WHERE elementId(n2) = e.eid2
+                            MERGE (n1)-[r:SEMANTICALLY_SIMILAR {knn_config: $knn_config}]->(n2)
+                            SET r.score = e.similarity, r.similarity = e.similarity,
+                                r.method = 'local_knn', r.group_id = $group_id,
+                                r.knn_k = $knn_k, r.knn_cutoff = $knn_cutoff,
+                                r.created_at = datetime()
+                            RETURN count(r) AS cnt
+                        """, edges=chunk, knn_config=knn_config, group_id=group_id,
+                            knn_k=knn_top_k, knn_cutoff=knn_similarity_cutoff)
+                    else:
+                        result = session.run("""
+                            UNWIND $edges AS e
+                            MATCH (n1) WHERE elementId(n1) = e.eid1
+                            MATCH (n2) WHERE elementId(n2) = e.eid2
+                            MERGE (n1)-[r:SEMANTICALLY_SIMILAR]->(n2)
+                            SET r.score = e.similarity, r.similarity = e.similarity,
+                                r.method = 'local_knn', r.group_id = $group_id,
+                                r.knn_k = $knn_k, r.knn_cutoff = $knn_cutoff,
+                                r.created_at = datetime()
+                            RETURN count(r) AS cnt
+                        """, edges=chunk, group_id=group_id,
+                            knn_k=knn_top_k, knn_cutoff=knn_similarity_cutoff)
+                    edges_created += result.single()["cnt"]
+                return edges_created
+
+            stats["knn_edges"] = await self.neo4j_store.arun_in_session(_write_knn_edges)
+            logger.info(f"🔗 [local] KNN: {stats['knn_edges']} SEMANTICALLY_SIMILAR edges written")
+
+        # ── 4. Build networkx graph for Louvain + PageRank ─────────────────
+        # Include KNN edges + existing relationships between entities
+        logger.info("🏘️ [local] Building graph for Louvain + PageRank...")
+
+        def _fetch_relationships(session):
+            result = session.run("""
+                MATCH (n:Entity)-[r]->(m:Entity)
+                WHERE n.group_id IN $group_ids
+                  AND m.group_id IN $group_ids
+                  AND NOT n:Deprecated AND NOT m:Deprecated
+                  AND n.entity_embedding IS NOT NULL
+                  AND m.entity_embedding IS NOT NULL
+                RETURN DISTINCT elementId(n) AS src, elementId(m) AS tgt
+            """, group_ids=[group_id, settings.GLOBAL_GROUP_ID])
+            return [(r["src"], r["tgt"]) for r in result]
+
+        rel_rows = await self.neo4j_store.arun_in_session(_fetch_relationships, read_only=True)
+
+        G = nx.Graph()
+        G.add_nodes_from(entity_ids)
+        # Add existing relationships
+        for src, tgt in rel_rows:
+            if src in G and tgt in G:
+                G.add_edge(src, tgt, weight=1.0)
+        # Add KNN edges (with similarity as weight)
+        for e in knn_edge_batch:
+            G.add_edge(e["eid1"], e["eid2"], weight=e["similarity"])
+
+        # ── 5. Louvain community detection ─────────────────────────────────
+        logger.info("🏘️ [local] Running Louvain community detection...")
+        communities_list = await asyncio.to_thread(
+            lambda: louvain_communities(G, resolution=1.0, seed=42)
+        )
+
+        # Assign community IDs (match GDS convention: integer IDs)
+        louvain_updates: List[Dict[str, Any]] = []
+        community_ids_set: set = set()
+        for comm_idx, comm_members in enumerate(communities_list):
+            community_ids_set.add(comm_idx)
+            for eid in comm_members:
+                louvain_updates.append({"eid": eid, "communityId": comm_idx})
+
+        if louvain_updates:
+            def _write_louvain(session):
+                BATCH = 500
+                for start in range(0, len(louvain_updates), BATCH):
+                    chunk = louvain_updates[start:start + BATCH]
+                    session.run("""
+                        UNWIND $updates AS u
+                        MATCH (n) WHERE elementId(n) = u.eid AND n.group_id IN $group_ids
+                        SET n.community_id = u.communityId
+                    """, updates=chunk, group_ids=[group_id, settings.GLOBAL_GROUP_ID])
+
+            await self.neo4j_store.arun_in_session(_write_louvain)
+
+        stats["communities"] = len(community_ids_set)
+        logger.info(f"🏘️ [local] Louvain: {stats['communities']} communities detected")
+
+        # ── 6. PageRank ────────────────────────────────────────────────────
+        logger.info("📈 [local] Running PageRank...")
+        pr_scores = await asyncio.to_thread(
+            lambda: nx.pagerank(G, alpha=0.85, max_iter=100, tol=1e-6)
+        )
+
+        pr_updates = [
+            {"eid": eid, "score": float(score)}
+            for eid, score in pr_scores.items()
+        ]
+
+        if pr_updates:
+            def _write_pagerank(session):
+                BATCH = 500
+                for start in range(0, len(pr_updates), BATCH):
+                    chunk = pr_updates[start:start + BATCH]
+                    session.run("""
+                        UNWIND $updates AS u
+                        MATCH (n) WHERE elementId(n) = u.eid AND n.group_id IN $group_ids
+                        SET n.pagerank = u.score
+                    """, updates=chunk, group_ids=[group_id, settings.GLOBAL_GROUP_ID])
+
+            await self.neo4j_store.arun_in_session(_write_pagerank)
+
+        stats["pagerank_nodes"] = len(pr_updates)
+        logger.info(f"📈 [local] PageRank: scored {stats['pagerank_nodes']} nodes")
+
+        # Mark GDS as freshly computed
+        self.neo4j_store.clear_gds_stale(group_id)
+
+        elapsed = round(time.time() - algo_start, 2)
+        logger.info(
+            f"✅ [local] Graph algorithms complete in {elapsed}s: "
+            f"{stats['knn_edges']} KNN edges, {stats['communities']} communities, "
+            f"{stats['pagerank_nodes']} nodes scored"
+        )
+        return stats
+
+    # ==================== Step 8 (GDS): Remote Aura GDS Session ====================
+
     async def _run_gds_graph_algorithms(
         self,
         *,
@@ -2982,8 +3211,9 @@ Output:
     ) -> Dict[str, int]:
         """Run GDS algorithms to enhance the graph with computed properties.
         
-        Uses Aura Serverless Graph Analytics via GdsSessions API.
-        Requires AURA_DS_CLIENT_ID and AURA_DS_CLIENT_SECRET configured.
+        Routes to in-process computation (numpy + networkx) for small graphs
+        when entity count < GDS_LOCAL_THRESHOLD, or falls back to Aura Serverless
+        GDS sessions for large graphs.
         
         Algorithms run:
         1. **KNN** - Creates similarity edges:
@@ -3002,7 +3232,40 @@ Output:
             Statistics dictionary with algorithm results
         """
         stats = {"knn_edges": 0, "entity_edges": 0, "communities": 0, "pagerank_nodes": 0}
-        
+
+        # ── Dispatch: local vs GDS ─────────────────────────────────────────
+        threshold = settings.GDS_LOCAL_THRESHOLD
+        if threshold > 0:
+            def _count_entities(session):
+                result = session.run("""
+                    MATCH (n:Entity)
+                    WHERE n.group_id IN $group_ids
+                      AND NOT n:Deprecated
+                      AND n.entity_embedding IS NOT NULL
+                    RETURN count(n) AS cnt
+                """, group_ids=[group_id, settings.GLOBAL_GROUP_ID])
+                return result.single()["cnt"]
+
+            entity_count = await self.neo4j_store.arun_in_session(
+                _count_entities, read_only=True,
+            )
+            if entity_count < threshold:
+                logger.info(
+                    f"📊 Entity count ({entity_count}) < GDS_LOCAL_THRESHOLD ({threshold}) "
+                    f"→ using in-process graph algorithms (numpy + networkx)"
+                )
+                return await self._run_local_graph_algorithms(
+                    group_id=group_id,
+                    knn_top_k=knn_top_k,
+                    knn_similarity_cutoff=knn_similarity_cutoff,
+                    knn_config=knn_config,
+                )
+            else:
+                logger.info(
+                    f"📊 Entity count ({entity_count}) >= GDS_LOCAL_THRESHOLD ({threshold}) "
+                    f"→ using Aura GDS session"
+                )
+
         if not GDS_SESSIONS_AVAILABLE:
             logger.warning("⚠️  GDS sessions not available - skipping graph algorithms. Install: pip install graphdatascience")
             return stats
