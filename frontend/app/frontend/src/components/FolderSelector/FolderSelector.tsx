@@ -14,8 +14,6 @@ interface FolderSelectorProps {
     onFolderChange: (folderId: string | undefined) => void;
 }
 
-const ALL_DOCUMENTS_VALUE = "__all__";
-
 export const FolderSelector = ({ selectedFolderId, onFolderChange }: FolderSelectorProps) => {
     const { t } = useTranslation();
     const client = useLogin ? useMsal().instance : undefined;
@@ -51,9 +49,9 @@ export const FolderSelector = ({ selectedFolderId, onFolderChange }: FolderSelec
         loadFolders();
     }, [loadFolders]);
 
-    // Auto-select when exactly one analyzed folder and no folder pre-selected
+    // Auto-select the first analyzed folder when none is pre-selected
     useEffect(() => {
-        if (!selectedFolderId && analyzedFolders.length === 1) {
+        if (!selectedFolderId && analyzedFolders.length > 0) {
             const folder = analyzedFolders[0];
             onFolderChange(folder.analysis_group_id || folder.id);
         }
@@ -61,9 +59,7 @@ export const FolderSelector = ({ selectedFolderId, onFolderChange }: FolderSelec
 
     const handleSelect = (_ev: SelectionEvents, data: OptionOnSelectData) => {
         const value = data.optionValue;
-        if (value === ALL_DOCUMENTS_VALUE || !value) {
-            onFolderChange(undefined);
-        } else {
+        if (value) {
             onFolderChange(value);
         }
     };
@@ -98,8 +94,8 @@ export const FolderSelector = ({ selectedFolderId, onFolderChange }: FolderSelec
     const selectedFolder = analyzedFolders.find(
         f => (f.analysis_group_id || f.id) === selectedFolderId
     );
-    const displayValue = selectedFolder ? `📁 ${selectedFolder.name}` : t("folderSelector.allDocuments");
-    const selectedOption = selectedFolderId || ALL_DOCUMENTS_VALUE;
+    const displayValue = selectedFolder ? `📁 ${selectedFolder.name}` : t("folderSelector.placeholder");
+    const selectedOption = selectedFolderId || "";
 
     return (
         <div className={styles.container}>
@@ -112,9 +108,6 @@ export const FolderSelector = ({ selectedFolderId, onFolderChange }: FolderSelec
                 onOptionSelect={handleSelect}
                 size="small"
             >
-                <Option key={ALL_DOCUMENTS_VALUE} value={ALL_DOCUMENTS_VALUE} text={t("folderSelector.allDocuments")}>
-                    {t("folderSelector.allDocuments")}
-                </Option>
                 {analyzedFolders.map(folder => {
                     const label = `📁 ${folder.name}${folder.analysis_status === "stale" ? " ⚠" : ""}`;
                     return (

@@ -34,7 +34,6 @@
     "folderSelector": {
         "label": "Knowledge base:",
         "placeholder": "Select a knowledge base…",
-        "allDocuments": "All documents",
         "noFolders": "No analyzed folders yet",
         "loadError": "Could not load folders"
     },
