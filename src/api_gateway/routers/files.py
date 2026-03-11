@@ -691,23 +691,40 @@ async def content_file(
     """
     filename = path.split("/")[-1]
 
-    # --- Primary path: proxy from the original source blob URL ---
+    # --- Primary path: download from source blob URL via authenticated SDK ---
     if source:
         try:
-            from urllib.parse import urlparse
+            from urllib.parse import urlparse, unquote
             parsed = urlparse(source)
             if parsed.hostname and parsed.hostname.endswith(".blob.core.windows.net"):
-                import httpx
-                async with httpx.AsyncClient() as client:
-                    resp = await client.get(source, follow_redirects=True, timeout=30.0)
-                    if resp.status_code == 200:
-                        content_type = resp.headers.get("content-type") or mimetypes.guess_type(path)[0] or "application/octet-stream"
-                        return StreamingResponse(
-                            iter([resp.content]),
-                            media_type=content_type,
-                            headers={"Content-Disposition": f'inline; filename="{filename}"'},
-                        )
-                    logger.debug("Source URL returned %s for %s", resp.status_code, source)
+                # Extract container and blob path from the URL
+                # URL format: https://<account>.blob.core.windows.net/<container>/<blob_path>
+                path_parts = parsed.path.lstrip("/").split("/", 1)
+                if len(path_parts) == 2:
+                    container_name, blob_name = path_parts[0], unquote(path_parts[1])
+                    # Try user blob manager first (same storage account)
+                    if user_blob_manager is not None:
+                        try:
+                            container_client = user_blob_manager.blob_service_client.get_container_client(container_name)
+                            blob_client = container_client.get_blob_client(blob_name)
+                            download = await blob_client.download_blob()
+                            content_bytes = await download.readall()
+                            ct = "application/octet-stream"
+                            if (
+                                hasattr(download.properties, "content_settings")
+                                and download.properties.content_settings
+                                and hasattr(download.properties.content_settings, "content_type")
+                                and download.properties.content_settings.content_type
+                            ):
+                                ct = download.properties.content_settings.content_type
+                            content_type = ct or mimetypes.guess_type(path)[0] or "application/octet-stream"
+                            return StreamingResponse(
+                                iter([content_bytes]),
+                                media_type=content_type,
+                                headers={"Content-Disposition": f'inline; filename="{filename}"'},
+                            )
+                        except Exception as e:
+                            logger.debug("SDK download from source URL failed: %s", e)
             else:
                 logger.warning("Rejected non-Azure source URL: %s", parsed.hostname)
         except Exception as e:
