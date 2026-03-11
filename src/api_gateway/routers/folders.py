@@ -1228,14 +1228,9 @@ async def _create_analysis_result_folder(
     community_count: int,
 ):
     """Auto-create an 'Analysis Results' root folder (if missing) and a result subfolder."""
-    # Ensure "Analysis Results" root exists
-    root_query = """
-    MERGE (r:Folder {name: 'Analysis Results', group_id: $pid, folder_type: 'analysis_result', parent_folder_id: null_value})
-    ON CREATE SET r.id = randomUUID(),
-                  r.created_at = datetime(),
-                  r.updated_at = datetime()
-    RETURN r.id as root_id
-    """
+    def _session():
+        return get_graph_driver().session()
+
     # Neo4j doesn't support null in MERGE, use a sentinel approach
     root_find_query = """
     MATCH (r:Folder {name: 'Analysis Results', group_id: $pid, folder_type: 'analysis_result'})
@@ -1254,7 +1249,7 @@ async def _create_analysis_result_folder(
     })
     RETURN r.id as root_id
     """
-    with _get_session() as session:
+    with _session() as session:
         record = session.run(root_find_query, pid=partition_id).single()
         if not record:
             record = session.run(root_create_query, pid=partition_id).single()
@@ -1284,7 +1279,7 @@ async def _create_analysis_result_folder(
     CREATE (f)-[:SUBFOLDER_OF]->(root)
     RETURN f.id as result_id
     """
-    with _get_session() as session:
+    with _session() as session:
         session.run(result_query,
                     name=result_name,
                     pid=partition_id,
