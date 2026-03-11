@@ -254,27 +254,41 @@ class Worker:
                     fid=folder_id, pid=partition_id, total=file_count, processed=resume_from,
                 )
 
-            # ── Per-file extraction loop (steps 1-7 only) ──
+            # ── Parallel per-file extraction (steps 1-7 only) ──
             # Graph-wide steps (7.5-9: triple embeddings, synonymy edges,
             # KNN, Louvain, communities) are deferred to after all docs are
             # extracted — running them per-doc is wasted work since each
             # subsequent doc deletes and rebuilds them.
-            for idx, blob in enumerate(blobs):
-                if idx < resume_from:
-                    continue
-                await doc_sync.on_file_uploaded(
-                    group_id=neo4j_gid,
-                    filename=blob["name"],
-                    blob_url=blob["url"],
-                    user_id=partition_id,
-                    extraction_only=True,
-                )
-                with _neo4j_session() as session:
-                    session.run(
-                        "MATCH (f:Folder {id: $fid, group_id: $pid}) "
-                        "SET f.analysis_files_processed = $processed",
-                        fid=folder_id, pid=partition_id, processed=idx + 1,
+            import asyncio as _aio
+            _extract_sem = _aio.Semaphore(int(os.environ.get("INDEX_PARALLEL_DOCS", "3")))
+            _processed_count = resume_from
+
+            async def _extract_one(idx: int, blob: dict) -> None:
+                nonlocal _processed_count
+                async with _extract_sem:
+                    logger.info(f"index_file_start {idx+1}/{file_count}: {blob['name']}")
+                    await doc_sync.on_file_uploaded(
+                        group_id=neo4j_gid,
+                        filename=blob["name"],
+                        blob_url=blob["url"],
+                        user_id=partition_id,
+                        extraction_only=True,
                     )
+                    _processed_count += 1
+                    with _neo4j_session() as session:
+                        session.run(
+                            "MATCH (f:Folder {id: $fid, group_id: $pid}) "
+                            "SET f.analysis_files_processed = $processed",
+                            fid=folder_id, pid=partition_id, processed=_processed_count,
+                        )
+                    logger.info(f"index_file_done {idx+1}/{file_count}: {blob['name']}")
+
+            tasks = [
+                _extract_one(idx, blob)
+                for idx, blob in enumerate(blobs)
+                if idx >= resume_from
+            ]
+            await _aio.gather(*tasks)
 
             # ── Graph algorithms (steps 7.5-9) — run ONCE on full graph ──
             logger.info(f"index_folder_graph_algorithms group={neo4j_gid} files={file_count}")

@@ -362,12 +362,18 @@ class LazyGraphRAGIndexingPipeline:
         self.neo4j_store.initialize_group_meta(group_id)
 
         # ── Resume support: read last checkpoint ───────────────────────────
-        checkpoint = self.neo4j_store.get_pipeline_checkpoint(group_id)
-        if checkpoint:
-            logger.info(
-                "pipeline_resuming_from_checkpoint",
-                extra={"group_id": group_id, "checkpoint": checkpoint},
-            )
+        # In extraction_only mode (parallel doc processing), skip checkpointing
+        # since the checkpoint is group-level and would conflict between docs.
+        # File-level resume (analysis_files_processed) handles crash recovery.
+        if extraction_only:
+            checkpoint = None
+        else:
+            checkpoint = self.neo4j_store.get_pipeline_checkpoint(group_id)
+            if checkpoint:
+                logger.info(
+                    "pipeline_resuming_from_checkpoint",
+                    extra={"group_id": group_id, "checkpoint": checkpoint},
+                )
 
         # Pre-load wtpsplit model BEFORE DI extraction so its ~1.4GB allocation
         # happens while memory is still plentiful (DI results add ~1GB for 5 PDFs).
@@ -426,7 +432,8 @@ class LazyGraphRAGIndexingPipeline:
                 stats["elapsed_s"] = round(time.time() - start_time, 2)
                 return stats
 
-            self.neo4j_store.set_pipeline_checkpoint(group_id, "sentences")
+            if not extraction_only:
+                self.neo4j_store.set_pipeline_checkpoint(group_id, "sentences")
         else:
             logger.info("pipeline_skip_sentences (checkpoint >= sentences)")
             # We still need expanded_docs for later steps — re-prepare them
@@ -505,7 +512,8 @@ class LazyGraphRAGIndexingPipeline:
             stats["di_barcodes"] = di_metadata_stats.get("barcodes_created", 0)
             stats["di_languages"] = di_metadata_stats.get("languages_updated", 0)
 
-            self.neo4j_store.set_pipeline_checkpoint(group_id, "section_graph")
+            if not extraction_only:
+                self.neo4j_store.set_pipeline_checkpoint(group_id, "section_graph")
         else:
             logger.info("pipeline_skip_section_graph (checkpoint >= section_graph)")
 
@@ -554,7 +562,8 @@ class LazyGraphRAGIndexingPipeline:
             stats["relationships"] = len(relationships)
             stats["foundation_edges"] = commit_result.get("details", {}).get("foundation_edges", {})
 
-            self.neo4j_store.set_pipeline_checkpoint(group_id, "entities_committed")
+            if not extraction_only:
+                self.neo4j_store.set_pipeline_checkpoint(group_id, "entities_committed")
         else:
             logger.info("pipeline_skip_entities (checkpoint >= entities_committed)")
 
