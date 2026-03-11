@@ -691,6 +691,9 @@ async def content_file(
     """
     filename = path.split("/")[-1]
 
+    global_blob_manager = getattr(request.app.state, "global_blob_manager", None)
+    user_blob_manager = getattr(request.app.state, "user_blob_manager", None)
+
     # --- Primary path: download from source blob URL via authenticated SDK ---
     if source:
         try:
@@ -731,8 +734,6 @@ async def content_file(
             logger.debug("Source URL proxy failed for %s: %s", source, e)
 
     # --- Fallback: blob manager lookups (user-uploaded files) ---
-    global_blob_manager = getattr(request.app.state, "global_blob_manager", None)
-    user_blob_manager = getattr(request.app.state, "user_blob_manager", None)
 
     # Try user storage first (files stored as {group_id}/{filename})
     if user_blob_manager is not None:
