@@ -66,8 +66,9 @@ except ImportError:
 # Voyage-context-3 has a 32K token context window for contextualized_embed()
 # Leave headroom for safety (30K instead of 32K)
 MAX_CONTEXT_TOKENS = 30000
-# Approximate tokens per character (conservative estimate for English)
-TOKENS_PER_CHAR_ESTIMATE = 0.25
+# Approximate tokens per character.  0.30 is conservative for mixed
+# English/table/numeric content where token density is higher.
+TOKENS_PER_CHAR_ESTIMATE = 0.30
 
 # ============================================================================
 # API Batch Limits (per contextualized_embed() call)
@@ -192,18 +193,20 @@ class VoyageEmbedService:
         for chunk in chunks:
             chunk_tokens = self._estimate_tokens(chunk)
             
-            # If this chunk alone exceeds the limit, it's a single-chunk bin
+            # If this chunk alone exceeds the limit, truncate it to fit
             if chunk_tokens > max_context_tokens:
                 # Save current bin if non-empty
                 if current_bin:
                     bins.append(current_bin)
-                # Large chunk gets its own bin (will be truncated by API if needed)
-                bins.append([chunk])
+                # Truncate chunk to fit within context window
+                max_chars = int(max_context_tokens / TOKENS_PER_CHAR_ESTIMATE)
+                truncated = chunk[:max_chars]
+                bins.append([truncated])
                 current_bin = []
                 current_tokens = 0
                 logger.warning(
-                    f"Chunk exceeds context window ({chunk_tokens} > {max_context_tokens} tokens). "
-                    "Placed in separate bin - may lose some context."
+                    f"Chunk truncated to fit context window ({chunk_tokens} > {max_context_tokens} tokens, "
+                    f"kept {max_chars} chars)."
                 )
             elif current_tokens + chunk_tokens > max_context_tokens:
                 # Start a new bin
@@ -392,9 +395,18 @@ class VoyageEmbedService:
             result = self.embed_documents_contextualized([texts])
             return result[0]  # Return the embeddings for the single document
         else:
-            # Standard embedding - still use contextualized_embed for consistency
-            result = self.embed_documents_contextualized([texts])
-            return result[0]
+            # Independent texts — batch into groups that fit within context window
+            # to avoid exceeding voyage-context-3's 32K token limit
+            bins = self._bin_pack_chunks(texts)
+            if len(bins) == 1:
+                result = self.embed_documents_contextualized([bins[0]])
+                return result[0]
+            else:
+                all_embeddings: List[List[float]] = []
+                result = self.embed_documents_contextualized(bins)
+                for bin_embeddings in result:
+                    all_embeddings.extend(bin_embeddings)
+                return all_embeddings
     
     def embed_query(self, query: str, group_id: Optional[str] = None, user_id: Optional[str] = None) -> List[float]:
         """
