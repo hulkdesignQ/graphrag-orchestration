@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 import os
@@ -48,6 +49,97 @@ logger = structlog.get_logger()
 
 # Frontend static directory
 STATIC_DIR = Path(os.getenv("FRONTEND_STATIC_DIR", "/app/static"))
+
+
+async def _auto_resume_zombie_analyses(app: FastAPI):
+    """Detect folders stuck in 'analyzing' and auto-resume their pipelines.
+
+    Runs once after startup.  Uses the same code path as the /analyze endpoint
+    but skips already-processed files (file-level resume) and already-completed
+    pipeline steps (step checkpoint on GroupMeta).
+    """
+    await asyncio.sleep(10)  # let all services finish initializing
+
+    try:
+        from src.worker.services.graph_service import get_graph_driver
+
+        driver = get_graph_driver()
+        if driver is None:
+            return
+
+        # Find zombie folders: status = "analyzing" means a previous container
+        # was killed mid-pipeline.
+        with driver.session() as session:
+            records = list(session.run("""
+                MATCH (f:Folder {analysis_status: "analyzing"})
+                RETURN f.id AS folder_id, f.name AS folder_name,
+                       f.group_id AS partition_id, f.analysis_group_id AS neo4j_gid,
+                       f.analysis_files_processed AS processed,
+                       f.analysis_files_total AS total
+            """))
+
+        if not records:
+            logger.info("auto_resume: no zombie analyses found")
+            return
+
+        doc_sync = getattr(app.state, "document_sync_service", None)
+        blob_manager = getattr(app.state, "user_blob_manager", None)
+        if not doc_sync or not blob_manager:
+            logger.warning("auto_resume: doc_sync or blob_manager not available, skipping")
+            return
+
+        for rec in records:
+            folder_id = rec["folder_id"]
+            folder_name = rec["folder_name"]
+            partition_id = rec["partition_id"]
+            neo4j_gid = rec["neo4j_gid"]
+
+            if not neo4j_gid or not partition_id:
+                logger.warning(f"auto_resume: skipping folder {folder_id} — missing neo4j_gid or partition_id")
+                continue
+
+            logger.info(
+                "auto_resume: resuming analysis",
+                folder_id=folder_id,
+                folder_name=folder_name,
+                processed=rec["processed"],
+                total=rec["total"],
+            )
+
+            try:
+                # Resolve blob list (same logic as analyze_folder endpoint)
+                from src.api_gateway.routers.files import _resolve_folder_path
+                folder_path = await _resolve_folder_path(partition_id, folder_id)
+                blobs = await blob_manager.list_blobs_recursive(partition_id, folder_path or folder_name)
+
+                if not blobs:
+                    logger.warning(f"auto_resume: no blobs found for folder {folder_id}, marking stale")
+                    with driver.session() as session:
+                        session.run("""
+                            MATCH (f:Folder {id: $fid, group_id: $pid})
+                            SET f.analysis_status = 'stale',
+                                f.analysis_error = 'Auto-resume found no files'
+                        """, fid=folder_id, pid=partition_id)
+                    continue
+
+                from src.api_gateway.routers.folders import _run_folder_analysis
+                asyncio.create_task(
+                    _run_folder_analysis(
+                        doc_sync=doc_sync,
+                        blobs=blobs,
+                        neo4j_gid=neo4j_gid,
+                        folder_id=folder_id,
+                        folder_name=folder_name,
+                        partition_id=partition_id,
+                    )
+                )
+                logger.info(f"auto_resume: kicked off analysis for folder {folder_id}")
+
+            except Exception as e:
+                logger.error(f"auto_resume: failed for folder {folder_id}: {e}")
+
+    except Exception as e:
+        logger.error(f"auto_resume: top-level error: {e}")
 
 
 @asynccontextmanager
@@ -249,6 +341,13 @@ async def lifespan(app: FastAPI):
 
     except Exception as e:
         logger.error("frontend_services_init_failed", error=str(e))
+
+    # ── Auto-resume zombie analyses on container restart ───────────────
+    # If the previous container was killed mid-indexing, the folder stays
+    # as "analyzing" with a partial pipeline_checkpoint.  We detect this
+    # and auto-resume in the background so the user doesn't have to
+    # manually re-trigger.
+    asyncio.create_task(_auto_resume_zombie_analyses(app))
 
     yield  # Application runs here
 
