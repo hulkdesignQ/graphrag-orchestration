@@ -2,7 +2,7 @@
 Chat History Router (Cosmos DB)
 
 Provides CRUD endpoints for chat session history stored in Azure Cosmos DB.
-Replaces the Quart chat_history_cosmosdb_bp blueprint.
+Container partition key: /entra_oid (single-level, Hash).
 """
 
 import logging
@@ -67,10 +67,10 @@ async def post_chat_history(
             "title": title,
             "timestamp": timestamp,
         }
+        await container.upsert_item(body=session_item, partition_key=user_id)
 
-        message_pair_items = []
         for ind, pair in enumerate(body.answers):
-            message_pair_items.append({
+            msg_item = {
                 "id": f"{body.id}-{ind}",
                 "version": version,
                 "session_id": body.id,
@@ -78,15 +78,9 @@ async def post_chat_history(
                 "type": "message_pair",
                 "question": pair[0],
                 "response": pair[1],
-            })
+            }
+            await container.upsert_item(body=msg_item, partition_key=user_id)
 
-        batch_operations = [("upsert", (session_item,))] + [
-            ("upsert", (item,)) for item in message_pair_items
-        ]
-        await container.execute_item_batch(
-            batch_operations=batch_operations,
-            partition_key=[user_id, body.id],
-        )
         return JSONResponse({}, status_code=201)
     except Exception as e:
         logger.exception("Error saving chat history")
@@ -114,7 +108,7 @@ async def get_chat_history_sessions(
                 {"name": "@entra_oid", "value": user_id},
                 {"name": "@type", "value": "session"},
             ],
-            partition_key=[user_id],
+            partition_key=user_id,
             max_item_count=count,
         )
 
@@ -151,12 +145,16 @@ async def get_chat_history_session(
 
     try:
         res = container.query_items(
-            query="SELECT * FROM c WHERE c.session_id = @session_id AND c.type = @type",
+            query=(
+                "SELECT * FROM c WHERE c.session_id = @session_id "
+                "AND c.entra_oid = @entra_oid AND c.type = @type"
+            ),
             parameters=[
                 {"name": "@session_id", "value": session_id},
+                {"name": "@entra_oid", "value": user_id},
                 {"name": "@type", "value": "message_pair"},
             ],
-            partition_key=[user_id, session_id],
+            partition_key=user_id,
         )
 
         message_pairs = []
@@ -185,21 +183,22 @@ async def delete_chat_history_session(
 
     try:
         res = container.query_items(
-            query="SELECT c.id FROM c WHERE c.session_id = @session_id",
-            parameters=[{"name": "@session_id", "value": session_id}],
-            partition_key=[user_id, session_id],
+            query=(
+                "SELECT c.id FROM c WHERE c.session_id = @session_id "
+                "AND c.entra_oid = @entra_oid"
+            ),
+            parameters=[
+                {"name": "@session_id", "value": session_id},
+                {"name": "@entra_oid", "value": user_id},
+            ],
+            partition_key=user_id,
         )
 
-        ids_to_delete = []
         async for page in res.by_page():
             async for item in page:
-                ids_to_delete.append(item["id"])
-
-        batch_operations = [("delete", (id_,)) for id_ in ids_to_delete]
-        await container.execute_item_batch(
-            batch_operations=batch_operations,
-            partition_key=[user_id, session_id],
-        )
+                await container.delete_item(
+                    item=item["id"], partition_key=user_id,
+                )
         return Response(status_code=204)
     except Exception as e:
         logger.exception("Error deleting chat session %s", session_id)
