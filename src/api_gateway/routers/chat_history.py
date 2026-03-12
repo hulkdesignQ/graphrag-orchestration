@@ -13,6 +13,7 @@ import logging
 import time
 from typing import List, Optional
 
+from azure.storage.blob import ContentSettings
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
@@ -64,7 +65,7 @@ async def _write_json(container, blob_path: str, data):
     await blob.upload_blob(
         json.dumps(data, ensure_ascii=False),
         overwrite=True,
-        content_settings={"content_type": "application/json"},
+        content_settings=ContentSettings(content_type="application/json"),
     )
 
 

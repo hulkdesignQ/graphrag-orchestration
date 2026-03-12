@@ -229,6 +229,7 @@ class Settings(BaseSettings):
     # Azure Translator (query translation for multilingual chat)
     AZURE_TRANSLATOR_ENDPOINT: Optional[str] = None
     AZURE_TRANSLATOR_REGION: str = "swedencentral"
+    AZURE_TRANSLATOR_RESOURCE_ID: Optional[str] = None
 
     # Azure Key Vault (optional — secrets auto-loaded at module import when set)
     AZURE_KEY_VAULT_URL: Optional[str] = None

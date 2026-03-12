@@ -52,9 +52,11 @@ class TranslatorService:
         self,
         endpoint: Optional[str] = None,
         region: Optional[str] = None,
+        resource_id: Optional[str] = None,
     ) -> None:
         self.endpoint = (endpoint or settings.AZURE_TRANSLATOR_ENDPOINT or "").rstrip("/")
         self.region = region or settings.AZURE_TRANSLATOR_REGION or "swedencentral"
+        self.resource_id = resource_id or settings.AZURE_TRANSLATOR_RESOURCE_ID or ""
         self._credential: Optional[DefaultAzureCredential] = None
         self._session: Optional[aiohttp.ClientSession] = None
         if not self.endpoint:
@@ -111,9 +113,12 @@ class TranslatorService:
         token = await self._get_token()
         headers = {
             "Authorization": f"Bearer {token}",
-            "Ocp-Apim-Subscription-Region": self.region,
             "Content-Type": "application/json",
         }
+        if self.resource_id:
+            headers["Ocp-Apim-ResourceId"] = self.resource_id
+        else:
+            headers["Ocp-Apim-Subscription-Region"] = self.region
         body = [{"Text": text}]
 
         session = await self._get_session()

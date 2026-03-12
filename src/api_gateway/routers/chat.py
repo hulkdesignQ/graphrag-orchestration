@@ -1209,6 +1209,9 @@ async def frontend_chat(
         query_preview=query[:50],
     )
 
+    # Generate session_state UUID so the frontend can save chat history
+    session_id = body.session_state if isinstance(body.session_state, str) and body.session_state else str(uuid.uuid4())
+
     try:
         folder_id = overrides.folder_id if overrides else None
         result = await _execute_query(query, approach, group_id, folder_id=folder_id, force_route=force_route_str, language=overrides.language if overrides else None)
@@ -1278,7 +1281,7 @@ async def frontend_chat(
                 thoughts=thoughts,
                 original_answer=result.get("original_answer"),
             ),
-            session_state=body.session_state,
+            session_state=session_id,
         )
         
     except Exception as e:
@@ -1332,8 +1335,11 @@ async def frontend_chat_stream(
         query_preview=query[:50],
     )
 
+    # Generate session_state UUID so the frontend can save chat history
+    session_id = body.session_state if isinstance(body.session_state, str) and body.session_state else str(uuid.uuid4())
+
     return StreamingResponse(
-        _frontend_stream_response(query, approach, group_id, user_id, body.session_state, overrides, force_route_str,
+        _frontend_stream_response(query, approach, group_id, user_id, session_id, overrides, force_route_str,
                                   query_recorded=getattr(request.state, "query_recorded", False)),
         media_type="text/event-stream",
         headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
