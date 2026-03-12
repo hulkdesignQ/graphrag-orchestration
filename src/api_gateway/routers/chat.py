@@ -360,6 +360,7 @@ async def _execute_query(
     folder_id: Optional[str] = None,
     response_type: str = "detailed_report",
     force_route: Optional[str] = None,
+    language: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Execute a GraphRAG query via HybridPipeline.
@@ -409,9 +410,10 @@ async def _execute_query(
                 route=route,
                 response_type=response_type,
                 folder_id=folder_id,
+                language=language,
             )
         else:
-            result = await pipeline.query(query, response_type, folder_id=folder_id)
+            result = await pipeline.query(query, response_type, folder_id=folder_id, language=language)
         
         # Extract thoughts from result
         thoughts = _extract_thoughts(result)
@@ -614,7 +616,7 @@ async def chat_completions(
     
     # Sync route (local/hybrid) - execute immediately
     try:
-        result = await _execute_query(query, approach, group_id, body.folder_id)
+        result = await _execute_query(query, approach, group_id, body.folder_id, language=getattr(body, "language", None))
         
         response_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
         route_used = result.get("route_used", approach)
@@ -1209,7 +1211,7 @@ async def frontend_chat(
 
     try:
         folder_id = overrides.folder_id if overrides else None
-        result = await _execute_query(query, approach, group_id, folder_id=folder_id, force_route=force_route_str)
+        result = await _execute_query(query, approach, group_id, folder_id=folder_id, force_route=force_route_str, language=overrides.language if overrides else None)
         
         # Build frontend-compatible response
         thoughts = [
@@ -1377,7 +1379,7 @@ async def _frontend_stream_response(
         # Execute query in background while sending keepalive pings
         folder_id = overrides.folder_id if overrides else None
         query_task = asyncio.create_task(
-            _execute_query(query, approach, group_id, folder_id=folder_id, force_route=force_route)
+            _execute_query(query, approach, group_id, folder_id=folder_id, force_route=force_route, language=overrides.language if overrides else None)
         )
         while not query_task.done():
             await asyncio.sleep(2)
