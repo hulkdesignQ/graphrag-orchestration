@@ -303,7 +303,7 @@ export const FolderSidebar = ({
             {analysisResultFolders.length > 0 && (
                 <div className={styles.zone}>
                     {renderZoneHeader("results", "📊", t("files.zoneAnalysisResults", "Analysis Results"), analysisResultFolders.length)}
-                    {!collapsedZones["results"] && <div className={styles.zoneFolders}>{analysisResultFolders.map(f => renderFolder(f, 0))}</div>}
+                    {!collapsedZones["results"] && <div className={`${styles.zoneFolders} ${styles.zoneFoldersResults}`}>{analysisResultFolders.map(f => renderFolder(f, 0))}</div>}
                 </div>
             )}
 
@@ -311,7 +311,7 @@ export const FolderSidebar = ({
             {analyzedFolders.length > 0 && (
                 <div className={styles.zone}>
                     {renderZoneHeader("analyzed", "✅", t("files.zoneAnalyzed", "Analyzed"), analyzedFolders.length)}
-                    {!collapsedZones["analyzed"] && <div className={styles.zoneFolders}>{analyzedFolders.map(f => renderFolder(f, 0))}</div>}
+                    {!collapsedZones["analyzed"] && <div className={`${styles.zoneFolders} ${styles.zoneFoldersAnalyzed}`}>{analyzedFolders.map(f => renderFolder(f, 0))}</div>}
                 </div>
             )}
 
@@ -319,7 +319,7 @@ export const FolderSidebar = ({
             {notAnalyzedFolders.length > 0 && (
                 <div className={styles.zone}>
                     {renderZoneHeader("folders", "📁", t("files.zoneFolders", "Folders"), notAnalyzedFolders.length)}
-                    {!collapsedZones["folders"] && <div className={styles.zoneFolders}>{notAnalyzedFolders.map(f => renderFolder(f, 0))}</div>}
+                    {!collapsedZones["folders"] && <div className={`${styles.zoneFolders} ${styles.zoneFoldersNotAnalyzed}`}>{notAnalyzedFolders.map(f => renderFolder(f, 0))}</div>}
                 </div>
             )}
 

@@ -356,7 +356,18 @@
     flex-shrink: 0;
 }
 
-/* Indent folder rows inside zones */
+/* Indent folder rows inside zones + colored left accent */
 .zoneFolders {
-    padding-left: 6px;
+    padding-left: 10px;
+    margin-left: 4px;
+    border-left: 3px solid transparent;
+}
+.zoneFoldersResults {
+    border-left-color: #7c3aed;
+}
+.zoneFoldersAnalyzed {
+    border-left-color: #2ecc71;
+}
+.zoneFoldersNotAnalyzed {
+    border-left-color: #d0d0d0;
 }

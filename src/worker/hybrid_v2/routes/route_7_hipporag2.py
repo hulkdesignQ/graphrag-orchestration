@@ -469,7 +469,7 @@ class HippoRAG2Handler(BaseRouteHandler):
         # ------------------------------------------------------------------
         t0 = time.perf_counter()
         voyage_service = _get_voyage_service()
-        query_embedding = voyage_service.embed_query(community_guided_query)
+        query_embedding = voyage_service.embed_query(query)
         timings_ms["step_1_embed_ms"] = int((time.perf_counter() - t0) * 1000)
 
         # ------------------------------------------------------------------
@@ -506,7 +506,7 @@ class HippoRAG2Handler(BaseRouteHandler):
         if semantic_passage_seeds_enabled:
             semantic_seed_task = asyncio.create_task(
                 self._rerank_all_passages(
-                    community_guided_query, top_k=semantic_seed_top_k,
+                    query, top_k=semantic_seed_top_k,
                     relevance_threshold=rerank_relevance_threshold if rerank_dynamic_cutoff else 0.0,
                     dynamic_max=rerank_dynamic_max if rerank_dynamic_cutoff else 0,
                 )
@@ -756,7 +756,7 @@ class HippoRAG2Handler(BaseRouteHandler):
             if len(candidate_ids) >= 2:
                 try:
                     reranked_scored = await self._rerank_passages(
-                        community_guided_query, candidate_ids, top_k=rerank_top_k,
+                        query, candidate_ids, top_k=rerank_top_k,
                         relevance_threshold=0.0,
                         dynamic_max=0,
                     )
