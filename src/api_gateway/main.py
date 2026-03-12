@@ -281,47 +281,32 @@ async def lifespan(app: FastAPI):
 
         app.state.azure_credential = azure_credential
 
-        # Chat history (Cosmos DB)
-        _cosmos_history_enabled = (
+        # Chat history (Azure Blob Storage)
+        _chat_history_enabled = (
             os.getenv("ENABLE_CHAT_HISTORY_COSMOS", "").lower() == "true"
             or os.getenv("USE_CHAT_HISTORY_COSMOS", "").lower() == "true"
+            or os.getenv("ENABLE_CHAT_HISTORY", "").lower() == "true"
         )
-        if _cosmos_history_enabled:
-            # Support both naming conventions for env vars
-            cosmosdb_endpoint = os.getenv("COSMOS_DB_ENDPOINT") or ""
-            cosmosdb_account = os.getenv("AZURE_COSMOSDB_ACCOUNT") or ""
-            history_db = (
-                os.getenv("AZURE_CHAT_HISTORY_DATABASE")
-                or os.getenv("COSMOS_DB_DATABASE_NAME")
+        if _chat_history_enabled:
+            storage_account = (
+                os.getenv("AZURE_USERSTORAGE_ACCOUNT")
+                or os.getenv("AZURE_STORAGE_ACCOUNT")
             )
-            history_container_name = (
-                os.getenv("AZURE_CHAT_HISTORY_CONTAINER")
-                or os.getenv("COSMOS_DB_CHAT_HISTORY_CONTAINER")
-            )
-
-            # Derive URL: prefer explicit endpoint, else build from account name
-            cosmos_url = cosmosdb_endpoint.rstrip("/") if cosmosdb_endpoint else ""
-            if not cosmos_url and cosmosdb_account:
-                cosmos_url = f"https://{cosmosdb_account}.documents.azure.com:443"
-
-            if cosmos_url and history_db and history_container_name:
-                from azure.cosmos.aio import CosmosClient
-                cosmos_client = CosmosClient(
-                    url=cosmos_url,
+            if storage_account:
+                from azure.storage.blob.aio import BlobServiceClient
+                blob_svc = BlobServiceClient(
+                    account_url=f"https://{storage_account}.blob.core.windows.net",
                     credential=azure_credential,
                 )
-                db = cosmos_client.get_database_client(history_db)
-                app.state.cosmos_history_container = db.get_container_client(history_container_name)
-                app.state.cosmos_history_version = os.getenv("AZURE_CHAT_HISTORY_VERSION", "1")
-                app.state._cosmos_history_client = cosmos_client
-                logger.info("cosmos_chat_history_initialized", db=history_db, container=history_container_name)
+                # Ensure the chat-history container exists
+                try:
+                    await blob_svc.create_container("chat-history")
+                except Exception:
+                    pass  # Already exists
+                app.state.chat_history_blob_service = blob_svc
+                logger.info("chat_history_blob_initialized", account=storage_account)
             else:
-                logger.warning(
-                    "cosmos_chat_history_skipped_missing_config",
-                    cosmos_url=bool(cosmos_url),
-                    history_db=bool(history_db),
-                    history_container=bool(history_container_name),
-                )
+                logger.warning("chat_history_skipped_no_storage_account")
 
         # File metadata (Cosmos DB)
         if os.getenv("USE_FILE_METADATA", "").lower() == "true":
@@ -414,7 +399,7 @@ async def lifespan(app: FastAPI):
         logger.error("neo4j_close_failed", error=str(e))
 
     # Close Cosmos DB clients
-    for attr in ["_cosmos_history_client", "_cosmos_metadata_client"]:
+    for attr in ["_cosmos_metadata_client"]:
         client = getattr(app.state, attr, None)
         if client:
             try:
@@ -422,8 +407,8 @@ async def lifespan(app: FastAPI):
             except Exception as e:
                 logger.error("%s_close_failed", attr, error=str(e))
 
-    # Close blob managers
-    for attr in ["user_blob_manager", "global_blob_manager"]:
+    # Close blob managers / services
+    for attr in ["user_blob_manager", "global_blob_manager", "chat_history_blob_service"]:
         manager = getattr(app.state, attr, None)
         if manager:
             try:
