@@ -303,53 +303,60 @@
 
 /* Zone grouping */
 .zone {
-    border-top: 1px solid #f0f0f0;
-    margin-top: 2px;
+    margin-top: 10px;
 }
 .zone:first-of-type {
-    margin-top: 4px;
+    margin-top: 8px;
 }
 
 .zoneHeader {
     display: flex;
     align-items: center;
     gap: 5px;
-    padding: 6px 12px;
+    padding: 7px 12px;
     cursor: pointer;
     user-select: none;
+    background: #f0f2f5;
+    border-top: 1px solid #e4e7eb;
+    border-bottom: 1px solid #e4e7eb;
     transition: background 0.1s;
 }
 .zoneHeader:hover {
-    background: #f8f9fa;
+    background: #e8ebf0;
 }
 
 .zoneChevron {
     font-size: 10px;
-    color: #999;
+    color: #777;
     width: 12px;
     flex-shrink: 0;
 }
 
 .zoneIcon {
-    font-size: 12px;
+    font-size: 13px;
     flex-shrink: 0;
 }
 
 .zoneLabel {
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.4px;
-    color: #999;
+    letter-spacing: 0.5px;
+    color: #666;
     flex: 1;
 }
 
 .zoneCount {
     font-size: 10px;
     font-weight: 600;
-    color: #bbb;
-    background: #f4f4f4;
+    color: #888;
+    background: #e0e3e8;
     border-radius: 8px;
-    padding: 1px 6px;
+    padding: 1px 7px;
     flex-shrink: 0;
+}
+
+/* Indent folder rows inside zones */
+.zoneFolders {
+    padding-left: 6px;
 }
