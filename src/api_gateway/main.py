@@ -282,22 +282,46 @@ async def lifespan(app: FastAPI):
         app.state.azure_credential = azure_credential
 
         # Chat history (Cosmos DB)
-        if os.getenv("USE_CHAT_HISTORY_COSMOS", "").lower() == "true":
-            cosmosdb_account = os.getenv("AZURE_COSMOSDB_ACCOUNT")
-            history_db = os.getenv("AZURE_CHAT_HISTORY_DATABASE")
-            history_container_name = os.getenv("AZURE_CHAT_HISTORY_CONTAINER")
+        _cosmos_history_enabled = (
+            os.getenv("ENABLE_CHAT_HISTORY_COSMOS", "").lower() == "true"
+            or os.getenv("USE_CHAT_HISTORY_COSMOS", "").lower() == "true"
+        )
+        if _cosmos_history_enabled:
+            # Support both naming conventions for env vars
+            cosmosdb_endpoint = os.getenv("COSMOS_DB_ENDPOINT") or ""
+            cosmosdb_account = os.getenv("AZURE_COSMOSDB_ACCOUNT") or ""
+            history_db = (
+                os.getenv("AZURE_CHAT_HISTORY_DATABASE")
+                or os.getenv("COSMOS_DB_DATABASE_NAME")
+            )
+            history_container_name = (
+                os.getenv("AZURE_CHAT_HISTORY_CONTAINER")
+                or os.getenv("COSMOS_DB_CHAT_HISTORY_CONTAINER")
+            )
 
-            if cosmosdb_account and history_db and history_container_name:
+            # Derive URL: prefer explicit endpoint, else build from account name
+            cosmos_url = cosmosdb_endpoint.rstrip("/") if cosmosdb_endpoint else ""
+            if not cosmos_url and cosmosdb_account:
+                cosmos_url = f"https://{cosmosdb_account}.documents.azure.com:443"
+
+            if cosmos_url and history_db and history_container_name:
                 from azure.cosmos.aio import CosmosClient
                 cosmos_client = CosmosClient(
-                    url=f"https://{cosmosdb_account}.documents.azure.com:443/",
+                    url=cosmos_url,
                     credential=azure_credential,
                 )
                 db = cosmos_client.get_database_client(history_db)
                 app.state.cosmos_history_container = db.get_container_client(history_container_name)
                 app.state.cosmos_history_version = os.getenv("AZURE_CHAT_HISTORY_VERSION", "1")
                 app.state._cosmos_history_client = cosmos_client
-                logger.info("cosmos_chat_history_initialized")
+                logger.info("cosmos_chat_history_initialized", db=history_db, container=history_container_name)
+            else:
+                logger.warning(
+                    "cosmos_chat_history_skipped_missing_config",
+                    cosmos_url=bool(cosmos_url),
+                    history_db=bool(history_db),
+                    history_container=bool(history_container_name),
+                )
 
         # File metadata (Cosmos DB)
         if os.getenv("USE_FILE_METADATA", "").lower() == "true":

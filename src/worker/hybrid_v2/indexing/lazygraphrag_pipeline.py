@@ -458,30 +458,36 @@ class LazyGraphRAGIndexingPipeline:
         # ── Steps 4.2-4.9: Section graph + enrichment ────────────────────
         if not self.neo4j_store._step_done(checkpoint, "section_graph"):
             t_section_start = time.perf_counter()
-            # 4.2) Sparse sentence-to-sentence RELATED_TO edges.
-            if stats["sentences"] > 1:
-                try:
-                    knn_stats = await self._build_sentence_knn_edges(group_id)
-                    stats["skeleton_related_to_edges"] = knn_stats.get("edges_created", 0)
-                    logger.info(
-                        "step_4.2_sentence_knn_complete",
-                        extra={"edges": stats["skeleton_related_to_edges"]},
-                    )
-                except Exception as e:
-                    logger.warning(f"step_4.2_sentence_knn_failed: {e}")
-                    stats["skeleton_related_to_edges"] = 0
 
-            # 4.5) Build Section graph from DI unit metadata.
-            section_stats = await self._build_section_graph_from_docs(group_id, expanded_docs)
+            # 4.2 and 4.5 have no data dependencies — run them in parallel.
+            async def _step_4_2():
+                if stats["sentences"] > 1:
+                    try:
+                        knn_stats = await self._build_sentence_knn_edges(group_id)
+                        return knn_stats.get("edges_created", 0)
+                    except Exception as e:
+                        logger.warning(f"step_4.2_sentence_knn_failed: {e}")
+                        return 0
+                return 0
+
+            async def _step_4_5():
+                return await self._build_section_graph_from_docs(group_id, expanded_docs)
+
+            knn_edge_count, section_stats = await asyncio.gather(
+                _step_4_2(), _step_4_5(),
+            )
+            stats["skeleton_related_to_edges"] = knn_edge_count
+            if knn_edge_count:
+                logger.info("step_4.2_sentence_knn_complete", extra={"edges": knn_edge_count})
             stats["sections"] = section_stats.get("sections_created", 0)
             stats["section_edges"] = section_stats.get("in_section_edges", 0)
 
-            # 4.5.1) Assign hierarchical IDs to sentences (needs both sentences + sections).
-            h_id_stats = await self._assign_sentence_hierarchical_ids(group_id)
+            # 4.5.1 and 4.5.2 both depend on 4.5 but are independent of each other.
+            h_id_stats, total_stats = await asyncio.gather(
+                self._assign_sentence_hierarchical_ids(group_id),
+                self._backfill_section_total_sentences(group_id),
+            )
             stats["hierarchical_ids_assigned"] = h_id_stats.get("assigned", 0)
-
-            # 4.5.2) Backfill Section.total_sentences from IN_SECTION edge count.
-            total_stats = await self._backfill_section_total_sentences(group_id)
             stats["section_totals_backfilled"] = total_stats.get("updated", 0)
             
             # 4.6–4.8) Section enrichment + KVP embedding.
@@ -509,9 +515,12 @@ class LazyGraphRAGIndexingPipeline:
             stats["key_values"] = kvp_embed_stats.get("kvps_total", 0)
             stats["key_values_embedded"] = kvp_embed_stats.get("keys_embedded", 0)
 
-            # Wave 2: Stages that depend on wave 1 results.
-            structural_embed_stats = await self._embed_section_structural(group_id)
-            similarity_stats = await self._build_section_similarity_edges(group_id)
+            # Wave 2: structural embedding depends on wave 1 summaries, but
+            # similarity edges read section_embedding (wave 1) — independent.
+            structural_embed_stats, similarity_stats = await asyncio.gather(
+                self._embed_section_structural(group_id),
+                self._build_section_similarity_edges(group_id),
+            )
             stats["sections_structural_embedded"] = structural_embed_stats.get("sections_embedded", 0)
             stats["semantic_similarity_edges"] = similarity_stats.get("edges_created", 0)
 
@@ -2919,19 +2928,19 @@ Output:
             )
             details["relationships_committed"] = len(relationships)
 
-        # Best-effort: compute ranking fields so query-time Cypher can use them
-        # without property-key warnings (importance_score/degree/chunk_count).
-        await asyncio.to_thread(self.neo4j_store.compute_entity_importance, group_id)
-        
-        # Create foundation edges for graph schema enhancement (Phase 1 Week 1-2)
-        # These edges enable O(1) retrieval and provide LazyGraphRAG→HippoRAG bridge
-        foundation_stats = await self._create_foundation_edges(group_id)
+        # Foundation and connectivity edges are independent — run in parallel.
+        # compute_entity_importance must run AFTER these because it counts
+        # all Entity relationships (including the APPEARS_IN_* edges created here).
+        foundation_stats, connectivity_stats = await asyncio.gather(
+            self._create_foundation_edges(group_id),
+            self._create_connectivity_edges(group_id),
+        )
         details["foundation_edges"] = foundation_stats
-        
-        # Create connectivity edges (Phase 2 Week 3-4)
-        # SHARES_ENTITY edges connect sections that discuss the same entities across documents
-        connectivity_stats = await self._create_connectivity_edges(group_id)
         details["connectivity_edges"] = connectivity_stats
+
+        # Best-effort: compute ranking fields (degree, chunk_count, importance_score)
+        # after all edges exist so counts are accurate.
+        await asyncio.to_thread(self.neo4j_store.compute_entity_importance, group_id)
         
         # NOTE: Semantic edges (SIMILAR_TO) are now created by GDS KNN in Step 8 (index_documents)
         # as SEMANTICALLY_SIMILAR edges. The legacy _create_semantic_edges() method is kept
@@ -3757,8 +3766,6 @@ Output:
                             """, edges=chunk, group_id=group_id,
                                 knn_k=knn_top_k, knn_cutoff=knn_similarity_cutoff)
                         edges_created += result.single()["cnt"]
-                        if start + BATCH < len(edge_batch):
-                            time.sleep(0.3)
 
                 stats["knn_edges"] = edges_created
                 config_msg = f" (config={knn_config})" if knn_config else ""
@@ -3782,7 +3789,6 @@ Output:
                 community_ids.add(community_id)
             
             def _write_louvain(session):
-                import time
                 BATCH = 100
                 if updates:
                     for start in range(0, len(updates), BATCH):
@@ -3792,8 +3798,6 @@ Output:
                             MATCH (n) WHERE id(n) = u.nodeId AND n.group_id = $group_id
                             SET n.community_id = u.communityId
                         """, updates=chunk, group_id=group_id)
-                        if start + BATCH < len(updates):
-                            time.sleep(0.3)
 
                 stats["communities"] = len(community_ids)
                 logger.info(f"🏘️ GDS Louvain: {stats['communities']} communities")
@@ -3813,7 +3817,6 @@ Output:
             ]
             
             def _write_pagerank(session):
-                import time
                 BATCH = 100
                 if pr_updates:
                     for start in range(0, len(pr_updates), BATCH):
@@ -3823,8 +3826,6 @@ Output:
                             MATCH (n) WHERE id(n) = u.nodeId AND n.group_id = $group_id
                             SET n.pagerank = u.score
                         """, updates=chunk, group_id=group_id)
-                        if start + BATCH < len(pr_updates):
-                            time.sleep(0.3)
 
                 stats["pagerank_nodes"] = len(pr_updates)
                 logger.info(f"📈 GDS PageRank: scored {stats['pagerank_nodes']} nodes")
@@ -4534,8 +4535,6 @@ SUMMARY: <summary>"""
                 updates=chunk,
                 group_id=group_id,
             )
-            if start + BATCH < len(updates):
-                await asyncio.sleep(0.3)
         
         logger.info(
             "section_nodes_embedded",

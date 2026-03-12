@@ -1372,7 +1372,6 @@ class Neo4jStoreV3:
         
         with self.get_retry_session() as session:
             # Batch sentences to avoid overwhelming Neo4j Aura with one giant UNWIND
-            import time
             BATCH = 50
             count = 0
             for start in range(0, len(sentence_data), BATCH):
@@ -1380,8 +1379,6 @@ class Neo4jStoreV3:
                 result = session.run(query, sentences=chunk, group_id=group_id)
                 record = result.single()
                 count += cast(int, record["count"]) if record else 0
-                if start + BATCH < len(sentence_data):
-                    time.sleep(0.5)
             
             # Build NEXT edges between sequential sentences within each chunk
             self._create_sentence_next_edges(group_id, sentences)
@@ -1426,13 +1423,10 @@ class Neo4jStoreV3:
         """
         
         with self.get_retry_session() as session:
-            import time
             BATCH = 100
             for start in range(0, len(next_pairs), BATCH):
                 chunk = next_pairs[start : start + BATCH]
                 session.run(query, pairs=chunk, group_id=group_id)
-                if start + BATCH < len(next_pairs):
-                    time.sleep(0.3)
 
         if next_in_section_pairs:
             query_section = """
@@ -1445,8 +1439,6 @@ class Neo4jStoreV3:
                 for start in range(0, len(next_in_section_pairs), BATCH):
                     chunk = next_in_section_pairs[start : start + BATCH]
                     session.run(query_section, pairs=chunk, group_id=group_id)
-                    if start + BATCH < len(next_in_section_pairs):
-                        time.sleep(0.3)
     
     def create_sentence_related_to_edges(
         self,

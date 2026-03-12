@@ -202,6 +202,12 @@ class HippoRAG2Handler(BaseRouteHandler):
             "prompt_variant": None,
             "max_tokens": None,
         },
+        "community_search": {          # Community-dominant (abstract themes, exhaustive)
+            "ppr_passage_top_k": 20,   # broader retrieval for thematic coverage
+            "prompt_variant": None,
+            "max_tokens": None,
+            "community_passage_seeds": True,  # inject Community→Entity→Sentence into passage seeds
+        },
     }
 
     def __init__(self, pipeline: Any) -> None:
@@ -330,6 +336,18 @@ class HippoRAG2Handler(BaseRouteHandler):
         sentence_search_enabled = _ov(
             "sentence_search", "ROUTE7_SENTENCE_SEARCH", "0"
         ).strip().lower() in {"1", "true", "yes"}
+
+        # Community passage seeding: Community→Entity→Sentence IDs injected
+        # into passage_seeds for PPR.  Activated by community_search preset
+        # or env var.  Gives community-dominant queries thematic coverage.
+        community_passage_seeds_enabled = (
+            preset.get("community_passage_seeds", False)
+            or _ov("community_passage_seeds", "ROUTE7_COMMUNITY_PASSAGE_SEEDS", "0"
+                   ).strip().lower() in {"1", "true", "yes"}
+        )
+        community_sentence_weight = float(
+            _ov("community_sentence_weight", "ROUTE7_COMMUNITY_SENTENCE_WEIGHT", "0.03")
+        )
 
         # Cross-encoder passage seeding: rerank ALL passages and feed top results
         # into passage_seeds BEFORE PPR, so the graph walk starts from semantically
@@ -517,12 +535,17 @@ class HippoRAG2Handler(BaseRouteHandler):
         # Phase 2+3: Add structural seeds (Tier 2) and community seeds (Tier 3) in parallel
         structural_sections: List[str] = []
         community_data: List[Dict[str, Any]] = []
+        community_sentence_ids: List[str] = []
 
         _seed_tasks: List[Tuple[str, Any]] = []
         if structural_seeds_enabled and self._async_neo4j:
             _seed_tasks.append(("structural", self._resolve_structural_seeds(query)))
-        if community_seeds_enabled and self.pipeline.community_matcher:
-            _seed_tasks.append(("community", self._resolve_community_seeds(query)))
+        # Activate community seeds when either entity seeding OR passage seeding is enabled
+        _need_community = (community_seeds_enabled or community_passage_seeds_enabled) and self.pipeline.community_matcher
+        if _need_community:
+            _seed_tasks.append(("community", self._resolve_community_seeds(
+                query, include_sentences=community_passage_seeds_enabled,
+            )))
 
         if _seed_tasks:
             _seed_results = await asyncio.gather(*[t[1] for t in _seed_tasks])
@@ -533,10 +556,11 @@ class HippoRAG2Handler(BaseRouteHandler):
                     for eid in structural_entity_ids:
                         entity_seeds[eid] = entity_seeds.get(eid, 0) + w_structural
                 else:
-                    community_entity_ids, community_data = result
-                    w_community = float(os.getenv("ROUTE7_W_COMMUNITY", "0.1"))
-                    for eid in community_entity_ids:
-                        entity_seeds[eid] = entity_seeds.get(eid, 0) + w_community
+                    community_entity_ids, community_data, community_sentence_ids = result
+                    if community_seeds_enabled:
+                        w_community = float(os.getenv("ROUTE7_W_COMMUNITY", "0.1"))
+                        for eid in community_entity_ids:
+                            entity_seeds[eid] = entity_seeds.get(eid, 0) + w_community
 
         # P2: Keep only top-5 entity seeds (upstream alignment)
         # Concentrates PPR mass on the most relevant entities.
@@ -581,6 +605,22 @@ class HippoRAG2Handler(BaseRouteHandler):
                 top_score=round(_ss_max, 4),
             )
 
+        # Community passage seeds: inject Community→Entity→Sentence IDs
+        # as low-weight passage seeds so PPR walks from community-linked passages.
+        community_seeds_added = 0
+        if community_passage_seeds_enabled and community_sentence_ids:
+            for sent_eid in community_sentence_ids:
+                if sent_eid not in passage_seeds:
+                    passage_seeds[sent_eid] = community_sentence_weight
+                    community_seeds_added += 1
+                # Don't overwrite higher-weighted DPR/semantic seeds
+            logger.info(
+                "step_3_community_passage_seeds",
+                community_sentences=len(community_sentence_ids),
+                new_seeds=community_seeds_added,
+                weight=community_sentence_weight,
+            )
+
         timings_ms["step_3_seed_build_ms"] = int((time.perf_counter() - t0) * 1000)
 
         logger.info(
@@ -588,6 +628,7 @@ class HippoRAG2Handler(BaseRouteHandler):
             entity_seeds=len(entity_seeds),
             passage_seeds=len(passage_seeds),
             semantic_seeds_added=semantic_seeds_added,
+            community_seeds_added=community_seeds_added,
         )
 
         # ------------------------------------------------------------------
@@ -1826,27 +1867,29 @@ class HippoRAG2Handler(BaseRouteHandler):
     async def _resolve_community_seeds(
         self,
         query: str,
-    ) -> Tuple[List[str], List[Dict[str, Any]]]:
+        include_sentences: bool = False,
+    ) -> Tuple[List[str], List[Dict[str, Any]], List[str]]:
         """Resolve community seeds via community embedding matching.
 
         Returns:
-            Tuple of (entity_ids, community_data).
+            Tuple of (entity_ids, community_data, sentence_ids).
+            sentence_ids is populated only when include_sentences=True.
         """
         try:
             community_matcher = self.pipeline.community_matcher
             if not community_matcher or not self._async_neo4j:
-                return [], []
+                return [], [], []
 
             # Match communities (returns list of (community_dict, score) tuples)
             matched_tuples = await community_matcher.match_communities(query, top_k=3)
             if not matched_tuples:
-                return [], []
+                return [], [], []
 
             matched = [t[0] for t in matched_tuples]
             # Resolve entities from matched communities
             community_ids = [c.get("id") for c in matched if c.get("id")]
             if not community_ids:
-                return [], matched
+                return [], matched, []
 
             cypher = """
             UNWIND $community_ids AS cid
@@ -1877,16 +1920,44 @@ class HippoRAG2Handler(BaseRouteHandler):
 
             entity_ids = list({r["entity_id"] for r in records if r.get("entity_id")})
 
+            # Resolve sentence IDs via Community→Entity→Sentence traversal
+            sentence_ids: List[str] = []
+            if include_sentences and community_ids:
+                sent_cypher = """
+                UNWIND $community_ids AS cid
+                MATCH (e:Entity)-[:BELONGS_TO]->(c:Community {id: cid})
+                WHERE e.group_id IN $group_ids
+                MATCH (e)<-[:MENTIONS]-(s:Sentence)
+                WHERE s.group_id IN $group_ids
+                  AND ($folder_id IS NULL
+                   OR EXISTS {
+                     MATCH (s)-[:IN_DOCUMENT]->(d:Document)-[:IN_FOLDER]->(f:Folder)
+                     WHERE d.group_id IN $group_ids
+                       AND f.id = $folder_id AND f.group_id IN $group_ids
+                   })
+                RETURN DISTINCT elementId(s) AS sentence_eid
+                """
+                async with self._async_neo4j._get_session() as session:
+                    sent_result = await session.run(
+                        sent_cypher,
+                        community_ids=community_ids,
+                        group_ids=self.group_ids,
+                        folder_id=self.folder_id,
+                    )
+                    sent_records = await sent_result.data()
+                sentence_ids = [r["sentence_eid"] for r in sent_records if r.get("sentence_eid")]
+
             logger.info(
                 "route7_community_seeds",
                 communities=len(matched),
                 entities=len(entity_ids),
+                sentences=len(sentence_ids),
             )
-            return entity_ids, matched
+            return entity_ids, matched, sentence_ids
 
         except Exception as e:
             logger.warning("route7_community_seeds_failed", error=str(e))
-            return [], []
+            return [], [], []
 
     # ======================================================================
     # Phase 2: Sentence Vector Search (copied from Route 5 pattern)
