@@ -11,7 +11,7 @@ Cheaper and simpler than Cosmos DB for this append-heavy, read-occasional patter
 import json
 import logging
 import time
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from azure.storage.blob import ContentSettings
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -31,7 +31,7 @@ _CONTAINER_NAME = "chat-history"
 
 class ChatHistoryItem(BaseModel):
     id: str
-    answers: List[List[str]]  # List of [question, response] pairs
+    answers: List[Any]  # List of [question, ChatAppResponse] pairs
 
 
 # ==================== Blob Helpers ====================
