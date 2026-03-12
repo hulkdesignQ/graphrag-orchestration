@@ -857,74 +857,110 @@ class LazyGraphRAGIndexingPipeline:
 
         logger.info(f"🔬 Running graph algorithms on full graph for group {group_id}")
 
-        # Step 7.5: Triple embeddings (CRITICAL — needed for Route 7 retrieval)
-        try:
-            triple_embed_stats = await self._precompute_triple_embeddings(group_id)
-            stats["triple_embeddings_stored"] = triple_embed_stats.get("stored", 0)
-            logger.info(f"✅ Step 7.5: Pre-computed {stats['triple_embeddings_stored']} triple embeddings")
-        except Exception as e:
-            logger.warning(f"⚠️  Triple embedding pre-computation failed: {e}")
-            stats["triple_embeddings_stored"] = 0
-            errors.append({"step": "triple_embeddings", "error": str(e)[:500]})
+        # ── Resume from checkpoint (skip already-completed steps) ──
+        checkpoint = self.neo4j_store.get_pipeline_checkpoint(group_id)
+        if checkpoint:
+            logger.info(f"📌 Resuming graph algorithms from checkpoint: {checkpoint}")
+
+        # Step 7.5: Triple embeddings (CRITICAL) — with retry
+        _te_max_retries = 3
+        _te_base_delay = 15
+        if not self.neo4j_store._step_done(checkpoint, "triple_embeddings"):
+            for _te_attempt in range(_te_max_retries):
+                try:
+                    triple_embed_stats = await self._precompute_triple_embeddings(group_id)
+                    stats["triple_embeddings_stored"] = triple_embed_stats.get("stored", 0)
+                    logger.info(f"✅ Step 7.5: Pre-computed {stats['triple_embeddings_stored']} triple embeddings")
+                    self.neo4j_store.set_pipeline_checkpoint(group_id, "triple_embeddings")
+                    break
+                except Exception as e:
+                    err_msg = str(e).lower()
+                    is_transient = any(k in err_msg for k in (
+                        "connection", "timeout", "timed out", "rate limit",
+                        "service unavailable", "reset by peer", "429",
+                    ))
+                    if is_transient and _te_attempt < _te_max_retries - 1:
+                        delay = _te_base_delay * (2 ** _te_attempt)
+                        logger.warning(
+                            f"⏳ Triple embedding transient failure (attempt {_te_attempt + 1}/{_te_max_retries}), "
+                            f"retrying in {delay}s: {e}"
+                        )
+                        await asyncio.sleep(delay)
+                        continue
+                    logger.warning(f"⚠️  Triple embedding failed after {_te_attempt + 1} attempt(s): {e}")
+                    stats["triple_embeddings_stored"] = 0
+                    errors.append({"step": "triple_embeddings", "error": str(e)[:500]})
+                    break
+        else:
+            logger.info("⏭️  Step 7.5: Triple embeddings already checkpointed, skipping")
 
         # Step 7.6: Entity synonymy edges (non-critical)
-        try:
-            synonymy_stats = await self._compute_entity_synonymy_edges(
-                group_id=group_id,
-                threshold=entity_synonymy_threshold,
-            )
-            stats["entity_synonymy_edges"] = synonymy_stats.get("edges_created", 0)
-            logger.info(
-                "✅ Step 7.6: %d entity synonymy edges at threshold %.2f",
-                stats["entity_synonymy_edges"], entity_synonymy_threshold,
-            )
-        except Exception as e:
-            logger.warning(f"⚠️  Entity synonymy computation failed: {e}")
-            stats["entity_synonymy_edges"] = 0
-            errors.append({"step": "synonymy_edges", "error": str(e)[:500]})
-
-        # Step 8: GDS algorithms with retry (CRITICAL — needed for communities)
-        gds_max_retries = 3
-        gds_base_delay = 15
-        gds_stats: Dict[str, int] = {}
-        for gds_attempt in range(gds_max_retries):
+        if not self.neo4j_store._step_done(checkpoint, "synonymy_edges"):
             try:
-                if knn_enabled:
-                    logger.info(
-                        f"🔬 Running GDS algorithms (KNN k={knn_top_k}, "
-                        f"cutoff={knn_similarity_cutoff}, Louvain, PageRank)..."
-                    )
-                    gds_stats = await self._run_gds_graph_algorithms(
-                        group_id=group_id,
-                        knn_top_k=knn_top_k,
-                        knn_similarity_cutoff=knn_similarity_cutoff,
-                        knn_config=knn_config,
-                    )
-                else:
-                    gds_stats = await self._run_gds_graph_algorithms(
-                        group_id=group_id, knn_top_k=0,
-                        knn_similarity_cutoff=1.0, knn_config=None,
-                    )
-                break
+                synonymy_stats = await self._compute_entity_synonymy_edges(
+                    group_id=group_id,
+                    threshold=entity_synonymy_threshold,
+                )
+                stats["entity_synonymy_edges"] = synonymy_stats.get("edges_created", 0)
+                logger.info(
+                    "✅ Step 7.6: %d entity synonymy edges at threshold %.2f",
+                    stats["entity_synonymy_edges"], entity_synonymy_threshold,
+                )
+                self.neo4j_store.set_pipeline_checkpoint(group_id, "synonymy_edges")
             except Exception as e:
-                err_msg = str(e).lower()
-                is_transient = any(k in err_msg for k in (
-                    "no data", "connection closed", "defunct connection",
-                    "service unavailable", "timed out", "reset by peer",
-                    "incomplete handshake",
-                ))
-                if is_transient and gds_attempt < gds_max_retries - 1:
-                    delay = gds_base_delay * (2 ** gds_attempt)
-                    logger.warning(
-                        f"⏳ GDS transient failure (attempt {gds_attempt + 1}/{gds_max_retries}), "
-                        f"retrying in {delay}s: {e}"
-                    )
-                    await asyncio.sleep(delay)
-                    continue
-                logger.warning(f"⚠️  GDS algorithms failed after {gds_attempt + 1} attempt(s): {e}")
-                errors.append({"step": "gds", "error": str(e)[:500]})
-                gds_stats = {}
-                break
+                logger.warning(f"⚠️  Entity synonymy computation failed: {e}")
+                stats["entity_synonymy_edges"] = 0
+                errors.append({"step": "synonymy_edges", "error": str(e)[:500]})
+        else:
+            logger.info("⏭️  Step 7.6: Synonymy edges already checkpointed, skipping")
+
+        # Step 8: GDS algorithms with retry (CRITICAL)
+        if not self.neo4j_store._step_done(checkpoint, "gds_complete"):
+            gds_max_retries = 3
+            gds_base_delay = 15
+            gds_stats: Dict[str, int] = {}
+            for gds_attempt in range(gds_max_retries):
+                try:
+                    if knn_enabled:
+                        logger.info(
+                            f"🔬 Running GDS algorithms (KNN k={knn_top_k}, "
+                            f"cutoff={knn_similarity_cutoff}, Louvain, PageRank)..."
+                        )
+                        gds_stats = await self._run_gds_graph_algorithms(
+                            group_id=group_id,
+                            knn_top_k=knn_top_k,
+                            knn_similarity_cutoff=knn_similarity_cutoff,
+                            knn_config=knn_config,
+                        )
+                    else:
+                        gds_stats = await self._run_gds_graph_algorithms(
+                            group_id=group_id, knn_top_k=0,
+                            knn_similarity_cutoff=1.0, knn_config=None,
+                        )
+                    self.neo4j_store.set_pipeline_checkpoint(group_id, "gds_complete")
+                    break
+                except Exception as e:
+                    err_msg = str(e).lower()
+                    is_transient = any(k in err_msg for k in (
+                        "no data", "connection closed", "defunct connection",
+                        "service unavailable", "timed out", "reset by peer",
+                        "incomplete handshake",
+                    ))
+                    if is_transient and gds_attempt < gds_max_retries - 1:
+                        delay = gds_base_delay * (2 ** gds_attempt)
+                        logger.warning(
+                            f"⏳ GDS transient failure (attempt {gds_attempt + 1}/{gds_max_retries}), "
+                            f"retrying in {delay}s: {e}"
+                        )
+                        await asyncio.sleep(delay)
+                        continue
+                    logger.warning(f"⚠️  GDS algorithms failed after {gds_attempt + 1} attempt(s): {e}")
+                    errors.append({"step": "gds", "error": str(e)[:500]})
+                    gds_stats = {}
+                    break
+        else:
+            logger.info("⏭️  Step 8: GDS algorithms already checkpointed, skipping")
+            gds_stats = {}
 
         stats["gds_knn_edges"] = gds_stats.get("knn_edges", 0)
         stats["gds_communities"] = gds_stats.get("communities", 0)
@@ -933,22 +969,26 @@ class LazyGraphRAGIndexingPipeline:
             logger.info(f"✅ GDS complete: {stats['gds_knn_edges']} KNN edges, {stats['gds_communities']} communities")
 
         # Step 9: Materialize Louvain communities (non-critical)
-        if stats.get("gds_communities", 0) > 0:
-            try:
-                logger.info("📦 Step 9: Materializing Louvain communities with LLM summaries...")
-                community_stats = await self._materialize_louvain_communities(
-                    group_id=group_id,
-                    min_community_size=2,
-                )
-                stats["communities_created"] = community_stats.get("communities_created", 0)
-                stats["summaries_generated"] = community_stats.get("summaries_generated", 0)
-                logger.info(
-                    "✅ Step 9 complete: %d communities, %d summaries",
-                    stats["communities_created"], stats["summaries_generated"],
-                )
-            except Exception as e:
-                logger.warning(f"⚠️  Community materialization failed: {e}")
-                errors.append({"step": "communities", "error": str(e)[:500]})
+        if not self.neo4j_store._step_done(checkpoint, "communities"):
+            if stats.get("gds_communities", 0) > 0:
+                try:
+                    logger.info("📦 Step 9: Materializing Louvain communities with LLM summaries...")
+                    community_stats = await self._materialize_louvain_communities(
+                        group_id=group_id,
+                        min_community_size=2,
+                    )
+                    stats["communities_created"] = community_stats.get("communities_created", 0)
+                    stats["summaries_generated"] = community_stats.get("summaries_generated", 0)
+                    logger.info(
+                        "✅ Step 9 complete: %d communities, %d summaries",
+                        stats["communities_created"], stats["summaries_generated"],
+                    )
+                    self.neo4j_store.set_pipeline_checkpoint(group_id, "communities")
+                except Exception as e:
+                    logger.warning(f"⚠️  Community materialization failed: {e}")
+                    errors.append({"step": "communities", "error": str(e)[:500]})
+        else:
+            logger.info("⏭️  Step 9: Communities already checkpointed, skipping")
 
         # ── Integrity validation ──
         try:

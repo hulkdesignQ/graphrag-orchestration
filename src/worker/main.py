@@ -234,24 +234,31 @@ class Worker:
         doc_sync = DocumentSyncService()
 
         try:
-            # ── File-level resume ──
-            resume_from = 0
+            # ── File-level resume (name-based) ──
+            files_done: set = set()
+            phase2_complete = False
             with _neo4j_session() as session:
                 rec = session.run(
                     "MATCH (f:Folder {id: $fid, group_id: $pid}) "
-                    "RETURN f.analysis_files_processed AS processed, f.analysis_status AS status",
+                    "RETURN f.analysis_files_done AS done, f.analysis_status AS status, "
+                    "       f.phase2_complete AS p2",
                     fid=folder_id, pid=partition_id,
                 ).single()
-                if rec and rec["status"] == "analyzing" and rec["processed"]:
-                    resume_from = int(rec["processed"])
-                    logger.info(f"index_folder_resume from={resume_from}/{file_count}")
+                if rec and rec["status"] == "analyzing":
+                    raw_done = rec["done"]
+                    if raw_done:
+                        import json as _json
+                        files_done = set(_json.loads(raw_done))
+                    phase2_complete = bool(rec["p2"])
+                    if files_done:
+                        logger.info(f"index_folder_resume done={len(files_done)}/{file_count}")
 
             # Set total count
             with _neo4j_session() as session:
                 session.run(
                     "MATCH (f:Folder {id: $fid, group_id: $pid}) "
                     "SET f.analysis_files_total = $total, f.analysis_files_processed = $processed",
-                    fid=folder_id, pid=partition_id, total=file_count, processed=resume_from,
+                    fid=folder_id, pid=partition_id, total=file_count, processed=len(files_done),
                 )
 
             # ── Parallel per-file extraction (steps 1-7 only) ──
@@ -260,51 +267,69 @@ class Worker:
             # extracted — running them per-doc is wasted work since each
             # subsequent doc deletes and rebuilds them.
             import asyncio as _aio
+            import json as _json
             _extract_sem = _aio.Semaphore(int(os.environ.get("INDEX_PARALLEL_DOCS", "3")))
-            _processed_count = resume_from
+            _progress_lock = _aio.Lock()
 
-            async def _extract_one(idx: int, blob: dict) -> None:
-                nonlocal _processed_count
-                async with _extract_sem:
-                    logger.info(f"index_file_start {idx+1}/{file_count}: {blob['name']}")
-                    await doc_sync.on_file_uploaded(
-                        group_id=neo4j_gid,
-                        filename=blob["name"],
-                        blob_url=blob["url"],
-                        user_id=partition_id,
-                        extraction_only=True,
-                    )
-                    _processed_count += 1
-                    with _neo4j_session() as session:
-                        session.run(
-                            "MATCH (f:Folder {id: $fid, group_id: $pid}) "
-                            "SET f.analysis_files_processed = $processed",
-                            fid=folder_id, pid=partition_id, processed=_processed_count,
+            pending_blobs = [b for b in blobs if b["name"] not in files_done]
+            if pending_blobs:
+                logger.info(f"index_folder_extract pending={len(pending_blobs)} skip={len(files_done)}")
+
+                async def _extract_one(blob: dict) -> None:
+                    async with _extract_sem:
+                        logger.info(f"index_file_start: {blob['name']}")
+                        await doc_sync.on_file_uploaded(
+                            group_id=neo4j_gid,
+                            filename=blob["name"],
+                            blob_url=blob["url"],
+                            user_id=partition_id,
+                            extraction_only=True,
                         )
-                    logger.info(f"index_file_done {idx+1}/{file_count}: {blob['name']}")
+                        async with _progress_lock:
+                            files_done.add(blob["name"])
+                            with _neo4j_session() as session:
+                                session.run(
+                                    "MATCH (f:Folder {id: $fid, group_id: $pid}) "
+                                    "SET f.analysis_files_processed = $processed, "
+                                    "    f.analysis_files_done = $done",
+                                    fid=folder_id, pid=partition_id,
+                                    processed=len(files_done),
+                                    done=_json.dumps(sorted(files_done)),
+                                )
+                        logger.info(f"index_file_done {len(files_done)}/{file_count}: {blob['name']}")
 
-            tasks = [
-                _extract_one(idx, blob)
-                for idx, blob in enumerate(blobs)
-                if idx >= resume_from
-            ]
-            await _aio.gather(*tasks)
+                tasks = [_extract_one(blob) for blob in pending_blobs]
+                await _aio.gather(*tasks)
+            else:
+                logger.info("index_folder_extract all files already done, skipping Phase 1")
 
             # ── Graph algorithms (steps 7.5-9) — run ONCE on full graph ──
-            logger.info(f"index_folder_graph_algorithms group={neo4j_gid} files={file_count}")
-            graph_stats = await doc_sync.pipeline.run_graph_algorithms_only(
-                group_id=neo4j_gid,
-            )
-
-            # ── Check for critical failures ──
-            graph_errors = graph_stats.get("errors", [])
-            graph_success = graph_stats.get("success", True)
-            if not graph_success:
-                failed_steps = ", ".join(e["step"] for e in graph_errors if e["step"] in ("triple_embeddings", "gds"))
-                error_details = "; ".join(f'{e["step"]}: {e["error"]}' for e in graph_errors)
-                raise RuntimeError(
-                    f"Graph algorithms failed on critical steps ({failed_steps}): {error_details}"
+            graph_stats = {}
+            graph_errors = []
+            if not phase2_complete:
+                logger.info(f"index_folder_graph_algorithms group={neo4j_gid} files={file_count}")
+                graph_stats = await doc_sync.pipeline.run_graph_algorithms_only(
+                    group_id=neo4j_gid,
                 )
+
+                # Mark phase 2 complete so resume skips it
+                with _neo4j_session() as session:
+                    session.run(
+                        "MATCH (f:Folder {id: $fid, group_id: $pid}) SET f.phase2_complete = true",
+                        fid=folder_id, pid=partition_id,
+                    )
+
+                # ── Check for critical failures ──
+                graph_errors = graph_stats.get("errors", [])
+                graph_success = graph_stats.get("success", True)
+                if not graph_success:
+                    failed_steps = ", ".join(e["step"] for e in graph_errors if e["step"] in ("triple_embeddings", "gds"))
+                    error_details = "; ".join(f'{e["step"]}: {e["error"]}' for e in graph_errors)
+                    raise RuntimeError(
+                        f"Graph algorithms failed on critical steps ({failed_steps}): {error_details}"
+                    )
+            else:
+                logger.info("index_folder_phase2_already_done, skipping graph algorithms")
 
             # ── Collect stats ──
             stats_query = """
@@ -357,6 +382,8 @@ class Worker:
                         fld.relationship_count = $relationship_count,
                         fld.analysis_files_total = null,
                         fld.analysis_files_processed = null,
+                        fld.analysis_files_done = null,
+                        fld.phase2_complete = null,
                         fld.analysis_error = null,
                         fld.updated_at = datetime()
                     """,
@@ -476,6 +503,16 @@ class Worker:
                     except LockAcquisitionError:
                         # Another worker is indexing this graph - NACK and retry later
                         logger.info(f"Graph {graph_id} locked, re-queuing job {job.id}")
+                        await queue.nack(job, requeue=True)
+                        continue
+                elif job.job_type == 'index_folder' and job.payload.get('neo4j_gid'):
+                    gid = job.payload['neo4j_gid']
+                    lock_key = f"lock:index_folder:{gid}"
+                    try:
+                        async with self.redis_service.lock(lock_key, ttl_seconds=600):
+                            job_result = await self.process_job(job.__dict__)
+                    except LockAcquisitionError:
+                        logger.info(f"Folder {gid} locked, re-queuing job {job.id}")
                         await queue.nack(job, requeue=True)
                         continue
                 else:
