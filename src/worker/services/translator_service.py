@@ -115,8 +115,13 @@ class TranslatorService:
 
         logger.info("translator_attempt", target_lang=target_lang, source_lang=source_lang,
                      text_len=len(text), has_resource_id=bool(self.resource_id))
-        url = f"{self.endpoint}/translate"
-        params: dict = {"api-version": _API_VERSION, "to": target_lang}
+        # Custom subdomain uses /translator/text/v3.0/ path; global uses /translate?api-version=
+        if ".cognitiveservices.azure.com" in self.endpoint:
+            url = f"{self.endpoint}/translator/text/v3.0/translate"
+            params: dict = {"to": target_lang}
+        else:
+            url = f"{self.endpoint}/translate"
+            params = {"api-version": _API_VERSION, "to": target_lang}
         if source_lang:
             params["from"] = source_lang
         token = await self._get_token()
@@ -126,7 +131,7 @@ class TranslatorService:
         }
         if self.resource_id:
             headers["Ocp-Apim-ResourceId"] = self.resource_id
-        else:
+        if ".cognitiveservices.azure.com" not in self.endpoint:
             headers["Ocp-Apim-Subscription-Region"] = self.region
         body = [{"Text": text}]
 
