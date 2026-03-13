@@ -2,6 +2,8 @@ import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 import os
+import faulthandler
+faulthandler.enable()  # print traceback on SIGSEGV/SIGFPE/SIGABRT
 
 from dotenv import load_dotenv
 load_dotenv()  # pick up .env for local development; no-op in containerized deployments

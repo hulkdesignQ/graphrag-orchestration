@@ -429,9 +429,10 @@ class HippoRAG2Handler(BaseRouteHandler):
         # ------------------------------------------------------------------
         # Step 0.5: Early community matching for guided instruction
         #
-        # When community_guided_instruction is enabled, resolve community
-        # summaries BEFORE embedding so we can steer both the query
-        # embedding (Voyage context-aware) and reranker instruction.
+        # When community_guided_instruction is enabled, fetch the actual
+        # sentence texts from matched communities (Community→Entity→Sentence)
+        # and use them to guide the reranker.  Concrete sentences give the
+        # reranker specific content to match against, unlike abstract summaries.
         # ------------------------------------------------------------------
         community_guided_query = query  # default: unchanged
         if community_guided_enabled and self.pipeline.community_matcher:
@@ -440,35 +441,47 @@ class HippoRAG2Handler(BaseRouteHandler):
                 _cm = self.pipeline.community_matcher
                 _matched_tuples = await _cm.match_communities(query, top_k=3)
                 if _matched_tuples:
-                    topic_fragments = []
-                    for cdict, _score in _matched_tuples:
-                        summary = cdict.get("summary", "").strip()
-                        if summary:
-                            # Extract the "covers topics" part (2nd+ sentences)
-                            sentences = summary.split(". ")
-                            detail = ". ".join(sentences[1:]).strip()
-                            if detail:
-                                topic_fragments.append(detail)
-                            else:
-                                topic_fragments.append(summary[:150])
-                        else:
-                            title = cdict.get("title", "")
-                            if title:
-                                topic_fragments.append(title)
-                    if topic_fragments:
-                        community_instruction = (
-                            "Focus on passages covering: "
-                            + " ".join(topic_fragments)
-                            + " "
-                        )
-                        community_guided_query = community_instruction + query
-                        logger.info(
-                            "step_0.5_community_guided_instruction",
-                            themes=len(topic_fragments),
-                            instruction_len=len(community_instruction),
-                            instruction_text=community_instruction[:500],
-                            elapsed_ms=int((time.perf_counter() - t0_cg) * 1000),
-                        )
+                    community_ids = [
+                        c.get("id") for c, _s in _matched_tuples if c.get("id")
+                    ]
+                    if community_ids and self._async_neo4j:
+                        # Fetch top sentence texts from matched communities
+                        sent_cypher = """
+                        UNWIND $community_ids AS cid
+                        MATCH (e:Entity)-[:BELONGS_TO]->(c:Community {id: cid})
+                        WHERE e.group_id IN $group_ids
+                        MATCH (e)<-[:MENTIONS]-(s:Sentence)
+                        WHERE s.group_id IN $group_ids
+                        RETURN DISTINCT s.text AS text, s.sent_index AS idx
+                        ORDER BY idx
+                        LIMIT 20
+                        """
+                        async with self._async_neo4j._get_session() as session:
+                            sent_result = await session.run(
+                                sent_cypher,
+                                community_ids=community_ids,
+                                group_ids=self.group_ids,
+                            )
+                            sent_records = await sent_result.data()
+                        sent_texts = [
+                            r["text"][:150] for r in sent_records
+                            if r.get("text")
+                        ]
+                        if sent_texts:
+                            community_instruction = (
+                                "Focus on passages covering: "
+                                + " | ".join(sent_texts)
+                                + " "
+                            )
+                            community_guided_query = community_instruction + query
+                            logger.info(
+                                "step_0.5_community_sentence_instruction",
+                                communities=len(community_ids),
+                                sentences=len(sent_texts),
+                                instruction_len=len(community_instruction),
+                                instruction_text=community_instruction[:500],
+                                elapsed_ms=int((time.perf_counter() - t0_cg) * 1000),
+                            )
             except Exception as e:
                 logger.warning("community_guided_instruction_failed", error=str(e))
 
@@ -632,6 +645,24 @@ class HippoRAG2Handler(BaseRouteHandler):
                         w_community = float(os.getenv("ROUTE7_W_COMMUNITY", "0.1"))
                         for eid in community_entity_ids:
                             entity_seeds[eid] = entity_seeds.get(eid, 0) + w_community
+
+        # Community entity filter: when community_passage_seeds is active,
+        # restrict entity seeds to those belonging to the matched community.
+        # This scopes PPR's walk to the community subgraph, preventing
+        # dense clusters from dominating over minority documents.
+        if community_passage_seeds_enabled and community_entity_ids:
+            community_entity_set = set(community_entity_ids)
+            pre_filter = len(entity_seeds)
+            entity_seeds = {
+                eid: score for eid, score in entity_seeds.items()
+                if eid in community_entity_set
+            }
+            logger.info(
+                "step_3_community_entity_filter",
+                before=pre_filter,
+                after=len(entity_seeds),
+                community_entities=len(community_entity_set),
+            )
 
         # P2: Keep only top-5 entity seeds (upstream alignment)
         # Concentrates PPR mass on the most relevant entities.
