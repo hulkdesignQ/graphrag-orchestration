@@ -796,12 +796,12 @@ class LazyGraphRAGIndexingPipeline:
         else:
             logger.info("pipeline_skip_gds (checkpoint >= gds_complete)")
 
-        # ── Step 9: Materialize Louvain communities ────────────────────────
+        # ── Step 9: Materialize communities ────────────────────────
         if not self.neo4j_store._step_done(checkpoint, "communities"):
             if stats.get("gds_communities", 0) > 0:
                 try:
                     logger.info("📦 Step 9: Materializing communities with LLM summaries...")
-                    community_stats = await self._materialize_louvain_communities(
+                    community_stats = await self._materialize_communities(
                         group_id=group_id,
                         min_community_size=2,
                     )
@@ -853,7 +853,7 @@ class LazyGraphRAGIndexingPipeline:
         Returns a dict with step stats plus:
           - ``errors``: list of ``{"step": ..., "error": ...}`` for failed steps
           - ``success``: True only if no critical step failed
-        Critical steps: triple_embeddings, gds (KNN/Louvain/PageRank).
+        Critical steps: triple_embeddings, gds (KNN/Leiden/PageRank).
         Non-critical: synonymy_edges, communities (degrade quality but not fatal).
         """
         import time
@@ -974,12 +974,12 @@ class LazyGraphRAGIndexingPipeline:
         if gds_stats:
             logger.info(f"✅ GDS complete: {stats['gds_knn_edges']} KNN edges, {stats['gds_communities']} communities")
 
-        # Step 9: Materialize Louvain communities (non-critical)
+        # Step 9: Materialize communities (non-critical)
         if not self.neo4j_store._step_done(checkpoint, "communities"):
             if stats.get("gds_communities", 0) > 0:
                 try:
                     logger.info("📦 Step 9: Materializing communities with LLM summaries...")
-                    community_stats = await self._materialize_louvain_communities(
+                    community_stats = await self._materialize_communities(
                         group_id=group_id,
                         min_community_size=2,
                     )
@@ -3403,7 +3403,7 @@ Output:
         knn_similarity_cutoff: float = 0.60,
         knn_config: Optional[str] = None,
     ) -> Dict[str, int]:
-        """Run KNN/Louvain/PageRank in-process using numpy + networkx.
+        """Run KNN/Leiden/PageRank in-process using numpy + networkx.
 
         This replaces the remote Aura GDS session for small graphs (< GDS_LOCAL_THRESHOLD
         entities), eliminating the 60-120s provisioning overhead. For 50-500 entities the
@@ -3411,14 +3411,15 @@ Output:
 
         The algorithms are mathematically equivalent to the GDS versions:
         - KNN: cosine similarity via numpy, same top-k + cutoff semantics
-        - Louvain: networkx community detection (resolution=1.0 matches GDS default)
+        - Leiden: leidenalg community detection (resolution=1.0 matches GDS default)
         - PageRank: networkx pagerank (damping=0.85, tol=1e-6 matches GDS defaults)
 
         Returns same stats dict as _run_gds_graph_algorithms for drop-in compatibility.
         """
         import numpy as np
         import networkx as nx
-        from networkx.algorithms.community import louvain_communities
+        import igraph as ig
+        import leidenalg
 
         stats = {"knn_edges": 0, "entity_edges": 0, "communities": 0, "pagerank_nodes": 0}
         algo_start = time.time()
@@ -3524,9 +3525,9 @@ Output:
             stats["knn_edges"] = await self.neo4j_store.arun_in_session(_write_knn_edges)
             logger.info(f"🔗 [local] KNN: {stats['knn_edges']} SEMANTICALLY_SIMILAR edges written")
 
-        # ── 4. Build networkx graph for Louvain + PageRank ─────────────────
+        # ── 4. Build networkx graph for Leiden + PageRank ─────────────────
         # Include KNN edges + existing relationships between entities
-        logger.info("🏘️ [local] Building graph for Louvain + PageRank...")
+        logger.info("🏘️ [local] Building graph for Leiden + PageRank...")
 
         def _fetch_relationships(session):
             result = session.run("""
@@ -3552,35 +3553,52 @@ Output:
         for e in knn_edge_batch:
             G.add_edge(e["eid1"], e["eid2"], weight=e["similarity"])
 
-        # ── 5. Louvain community detection ─────────────────────────────────
-        logger.info("🏘️ [local] Running Louvain community detection...")
-        communities_list = await asyncio.to_thread(
-            lambda: louvain_communities(G, resolution=1.0, seed=42)
-        )
+        # ── 5. Leiden community detection ──────────────────────────────────
+        logger.info("🏘️ [local] Running Leiden community detection...")
+
+        def _run_leiden():
+            # Convert networkx graph to igraph for leidenalg
+            node_list = list(G.nodes())
+            node_idx = {n: i for i, n in enumerate(node_list)}
+            ig_edges = [(node_idx[u], node_idx[v]) for u, v in G.edges()]
+            weights = [G[u][v].get("weight", 1.0) for u, v in G.edges()]
+            ig_graph = ig.Graph(n=len(node_list), edges=ig_edges, directed=False)
+            ig_graph.es["weight"] = weights
+            partition = leidenalg.find_partition(
+                ig_graph, leidenalg.RBConfigurationVertexPartition,
+                weights=weights, resolution_parameter=1.0, seed=42,
+            )
+            # Convert back: list of sets (same format as louvain_communities output)
+            return [
+                {node_list[idx] for idx in comm}
+                for comm in partition
+            ]
+
+        communities_list = await asyncio.to_thread(_run_leiden)
 
         # Assign community IDs (match GDS convention: integer IDs)
-        louvain_updates: List[Dict[str, Any]] = []
+        leiden_updates: List[Dict[str, Any]] = []
         community_ids_set: set = set()
         for comm_idx, comm_members in enumerate(communities_list):
             community_ids_set.add(comm_idx)
             for eid in comm_members:
-                louvain_updates.append({"eid": eid, "communityId": comm_idx})
+                leiden_updates.append({"eid": eid, "communityId": comm_idx})
 
-        if louvain_updates:
-            def _write_louvain(session):
+        if leiden_updates:
+            def _write_leiden(session):
                 BATCH = 500
-                for start in range(0, len(louvain_updates), BATCH):
-                    chunk = louvain_updates[start:start + BATCH]
+                for start in range(0, len(leiden_updates), BATCH):
+                    chunk = leiden_updates[start:start + BATCH]
                     session.run("""
                         UNWIND $updates AS u
                         MATCH (n) WHERE elementId(n) = u.eid AND n.group_id IN $group_ids
                         SET n.community_id = u.communityId
                     """, updates=chunk, group_ids=[group_id, settings.GLOBAL_GROUP_ID])
 
-            await self.neo4j_store.arun_in_session(_write_louvain)
+            await self.neo4j_store.arun_in_session(_write_leiden)
 
         stats["communities"] = len(community_ids_set)
-        logger.info(f"🏘️ [local] Louvain: {stats['communities']} communities detected")
+        logger.info(f"🏘️ [local] Leiden: {stats['communities']} communities detected")
 
         # ── 6. PageRank ────────────────────────────────────────────────────
         logger.info("📈 [local] Running PageRank...")
@@ -3640,7 +3658,7 @@ Output:
         1. **KNN** - Creates similarity edges:
            - Figure/KVP → Entity (SIMILAR_TO)
            - Entity ↔ Entity (SEMANTICALLY_SIMILAR)
-        2. **Louvain** - Detects communities and assigns community_id to nodes
+        2. **Leiden** - Detects communities and assigns community_id to nodes
         3. **PageRank** - Computes importance scores for all nodes
         
         Args:
@@ -3966,22 +3984,22 @@ Output:
 
             await self.neo4j_store.arun_in_session(_write_knn_edges)
             
-            # 4. Run Louvain community detection
-            logger.info(f"🏘️ Running GDS Louvain community detection...")
-            louvain_df = await _run_gds_algo(
-                "Louvain", gds.louvain.stream,
+            # 4. Run Leiden community detection
+            logger.info(f"🏘️ Running GDS Leiden community detection...")
+            leiden_df = await _run_gds_algo(
+                "Leiden", gds.leiden.stream,
                 G, includeIntermediateCommunities=False, concurrency=4
             )
             
             updates = []
             community_ids = set()
-            for _, row in louvain_df.iterrows():
+            for _, row in leiden_df.iterrows():
                 node_id = int(row["nodeId"])
                 community_id = int(row["communityId"])
                 updates.append({"nodeId": node_id, "communityId": community_id})
                 community_ids.add(community_id)
             
-            def _write_louvain(session):
+            def _write_leiden(session):
                 BATCH = 100
                 if updates:
                     for start in range(0, len(updates), BATCH):
@@ -3993,9 +4011,9 @@ Output:
                         """, updates=chunk, group_id=group_id)
 
                 stats["communities"] = len(community_ids)
-                logger.info(f"🏘️ GDS Louvain: {stats['communities']} communities")
+                logger.info(f"🏘️ GDS Leiden: {stats['communities']} communities")
 
-            await self.neo4j_store.arun_in_session(_write_louvain)
+            await self.neo4j_store.arun_in_session(_write_leiden)
             
             # 5. Run PageRank
             logger.info(f"📈 Running GDS PageRank...")
@@ -4039,7 +4057,7 @@ Output:
             # Track GDS usage (billed by memory-hours)
             session_duration = int(time.time() - session_start)
             algorithms_run = [a for a, v in [
-                ("knn", stats["knn_edges"]), ("louvain", stats["communities"]),
+                ("knn", stats["knn_edges"]), ("leiden", stats["communities"]),
                 ("pagerank", stats["pagerank_nodes"]),
             ] if v > 0]
             try:
@@ -4075,17 +4093,17 @@ Output:
         
         return stats
 
-    # ==================== Step 9: Louvain Community Materialization ====================
+    # ==================== Step 9: Community Materialization ====================
 
-    async def _materialize_louvain_communities(
+    async def _materialize_communities(
         self,
         *,
         group_id: str,
         min_community_size: int = 2,
     ) -> Dict[str, int]:
-        """Materialize GDS Louvain clusters into Community nodes with LLM summaries.
+        """Materialize Leiden clusters into Community nodes with LLM summaries.
 
-        Bridges GDS Louvain (structural clustering) with LazyGraphRAG (semantic
+        Bridges Leiden (structural clustering) with LazyGraphRAG (semantic
         summarization):
         1. Read community_id assignments from Step 8 (already on Entity nodes)
         2. Create :Community nodes and :BELONGS_TO edges via neo4j_store
@@ -4112,7 +4130,7 @@ Output:
             return stats
 
         # 9a) Group entities by community_id
-        logger.info("📋 Step 9a: Grouping entities by Louvain community_id...")
+        logger.info("📋 Step 9a: Grouping entities by Leiden community_id...")
         community_query = """
         MATCH (e:Entity {group_id: $group_id})
         WHERE e.community_id IS NOT NULL
@@ -4132,10 +4150,10 @@ Output:
         community_groups = [(record["cid"], record["members"]) for record in result]
 
         if not community_groups:
-            logger.info("⏭️  No Louvain communities with >= %d members found", min_community_size)
+            logger.info("⏭️  No Leiden communities with >= %d members found", min_community_size)
             return stats
 
-        logger.info("📋 Found %d Louvain communities (>= %d members)", len(community_groups), min_community_size)
+        logger.info("📋 Found %d Leiden communities (>= %d members)", len(community_groups), min_community_size)
 
         # 9b) Delete stale communities from prior runs, then create fresh ones
         logger.info("🧹 Step 9b: Cleaning stale Community nodes...")
@@ -4148,7 +4166,7 @@ Output:
         link_params = []
         for cid, members in community_groups:
             avg_pagerank = sum(m["pagerank"] for m in members) / len(members)
-            c_id = f"louvain_{group_id}_{cid}"
+            c_id = f"leiden_{group_id}_{cid}"
             community_params.append({
                 "id": c_id, "level": 0, "title": "", "summary": "",
                 "full_content": "", "rank": avg_pagerank,
@@ -4226,7 +4244,7 @@ Output:
             if result is None:
                 continue
             title, summary = result
-            community_id = f"louvain_{group_id}_{cid}"
+            community_id = f"leiden_{group_id}_{cid}"
             summaries_cache[community_id] = (title, summary)
             stats["summaries_generated"] += 1
 
@@ -4283,11 +4301,11 @@ Output:
         members: List[Dict],
         relationships: Optional[List[Dict]] = None,
     ) -> Optional[Tuple[str, str]]:
-        """Generate title + summary for one Louvain community via LLM.
+        """Generate title + summary for one Leiden community via LLM.
 
         Args:
             group_id: Tenant group identifier
-            community_id: Louvain community integer ID
+            community_id: Leiden community integer ID
             members: List of entity dicts with name, description, pagerank, etc.
             relationships: Pre-fetched intra-community relationships (avoids N+1 query).
                 If None, falls back to per-community Neo4j query.
@@ -5276,7 +5294,7 @@ SUMMARY: <summary>"""
                 if ent_total >= 10 and comm == 0:
                     warnings.append(
                         f"{ent_total} entities but 0 communities — "
-                        f"GDS/Louvain may have failed"
+                        f"GDS/Leiden may have failed"
                     )
 
         return {"counts": counts, "warnings": warnings}
