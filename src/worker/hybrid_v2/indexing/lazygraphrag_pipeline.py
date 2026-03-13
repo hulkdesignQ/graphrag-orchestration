@@ -740,7 +740,7 @@ class LazyGraphRAGIndexingPipeline:
             for gds_attempt in range(gds_max_retries):
                 try:
                     if knn_enabled:
-                        logger.info(f"🔬 Running GDS algorithms (KNN k={knn_top_k}, cutoff={knn_similarity_cutoff}, config={knn_config}, Louvain, PageRank)...")
+                        logger.info(f"🔬 Running GDS algorithms (KNN k={knn_top_k}, cutoff={knn_similarity_cutoff}, config={knn_config}, community detection, PageRank)...")
                         gds_stats = await self._run_gds_graph_algorithms(
                             group_id=group_id,
                             knn_top_k=knn_top_k,
@@ -748,7 +748,7 @@ class LazyGraphRAGIndexingPipeline:
                             knn_config=knn_config,
                         )
                     else:
-                        logger.info("🔬 KNN disabled - running Louvain and PageRank only...")
+                        logger.info("🔬 KNN disabled - running community detection and PageRank only...")
                         gds_stats = await self._run_gds_graph_algorithms(
                             group_id=group_id,
                             knn_top_k=0,
@@ -800,7 +800,7 @@ class LazyGraphRAGIndexingPipeline:
         if not self.neo4j_store._step_done(checkpoint, "communities"):
             if stats.get("gds_communities", 0) > 0:
                 try:
-                    logger.info("📦 Step 9: Materializing Louvain communities with LLM summaries...")
+                    logger.info("📦 Step 9: Materializing communities with LLM summaries...")
                     community_stats = await self._materialize_louvain_communities(
                         group_id=group_id,
                         min_community_size=2,
@@ -930,7 +930,7 @@ class LazyGraphRAGIndexingPipeline:
                     if knn_enabled:
                         logger.info(
                             f"🔬 Running GDS algorithms (KNN k={knn_top_k}, "
-                            f"cutoff={knn_similarity_cutoff}, Louvain, PageRank)..."
+                            f"cutoff={knn_similarity_cutoff}, community detection, PageRank)..."
                         )
                         gds_stats = await self._run_gds_graph_algorithms(
                             group_id=group_id,
@@ -978,7 +978,7 @@ class LazyGraphRAGIndexingPipeline:
         if not self.neo4j_store._step_done(checkpoint, "communities"):
             if stats.get("gds_communities", 0) > 0:
                 try:
-                    logger.info("📦 Step 9: Materializing Louvain communities with LLM summaries...")
+                    logger.info("📦 Step 9: Materializing communities with LLM summaries...")
                     community_stats = await self._materialize_louvain_communities(
                         group_id=group_id,
                         min_community_size=2,
@@ -3429,7 +3429,7 @@ Output:
             result = session.run("""
                 MATCH (n:Entity)
                 WHERE n.group_id IN $group_ids
-                  AND NOT n:Deprecated
+                  AND n.deprecated IS NOT true
                   AND n.entity_embedding IS NOT NULL
                 RETURN elementId(n) AS eid, n.entity_embedding AS emb
             """, group_ids=[group_id, settings.GLOBAL_GROUP_ID])
@@ -3532,7 +3532,7 @@ Output:
                 MATCH (n:Entity)-[r]->(m:Entity)
                 WHERE n.group_id IN $group_ids
                   AND m.group_id IN $group_ids
-                  AND NOT n:Deprecated AND NOT m:Deprecated
+                  AND n.deprecated IS NOT true AND m.deprecated IS NOT true
                   AND n.entity_embedding IS NOT NULL
                   AND m.entity_embedding IS NOT NULL
                 RETURN DISTINCT elementId(n) AS src, elementId(m) AS tgt
@@ -3660,7 +3660,7 @@ Output:
                 result = session.run("""
                     MATCH (n:Entity)
                     WHERE n.group_id IN $group_ids
-                      AND NOT n:Deprecated
+                      AND n.deprecated IS NOT true
                       AND n.entity_embedding IS NOT NULL
                     RETURN count(n) AS cnt
                 """, group_ids=[group_id, settings.GLOBAL_GROUP_ID])
@@ -3815,11 +3815,11 @@ Output:
                     // Project Entity nodes only - KVP/Figure/Chunk add noise to KNN & communities
                     MATCH (n:Entity)
                     WHERE n.group_id = "{escaped_group_id}"
-                      AND NOT n:Deprecated
+                      AND n.deprecated IS NOT true
                       AND n.entity_embedding IS NOT NULL
                     OPTIONAL MATCH (n)-[r]->(m:Entity)
                     WHERE m.group_id = "{escaped_group_id}"
-                      AND NOT m:Deprecated
+                      AND m.deprecated IS NOT true
                       AND m.entity_embedding IS NOT NULL
                     RETURN 
                       n AS source, r AS rel, m AS target,
