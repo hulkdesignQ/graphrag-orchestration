@@ -203,7 +203,7 @@ class HippoRAG2Handler(BaseRouteHandler):
             "max_tokens": None,
         },
         "community_search": {          # Community-dominant (abstract themes, exhaustive)
-            "ppr_passage_top_k": 20,   # broader retrieval for thematic coverage
+            "ppr_passage_top_k": 50,   # match default — don't bottleneck before reranker
             "prompt_variant": None,
             "max_tokens": None,
             "community_passage_seeds": True,   # inject Community→Entity→Sentence into passage seeds
@@ -342,30 +342,27 @@ class HippoRAG2Handler(BaseRouteHandler):
         # Community passage seeding: Community→Entity→Sentence IDs injected
         # into passage_seeds for PPR.  Activated by community_search preset
         # or env var.  Gives community-dominant queries thematic coverage.
-        community_passage_seeds_enabled = (
-            preset.get("community_passage_seeds", False)
-            or _ov("community_passage_seeds", "ROUTE7_COMMUNITY_PASSAGE_SEEDS", "0"
-                   ).strip().lower() in {"1", "true", "yes"}
-        )
+        community_passage_seeds_enabled = _ov(
+            "community_passage_seeds", "ROUTE7_COMMUNITY_PASSAGE_SEEDS",
+            "1" if preset.get("community_passage_seeds", False) else "0"
+        ).strip().lower() in {"1", "true", "yes"}
         community_sentence_weight = float(
             _ov("community_sentence_weight", "ROUTE7_COMMUNITY_SENTENCE_WEIGHT", "0.03")
         )
 
         # Community-guided instruction: use community summaries to steer
         # embedding and reranker queries for thematic precision.
-        community_guided_enabled = (
-            preset.get("community_guided_instruction", False)
-            or _ov("community_guided_instruction", "ROUTE7_COMMUNITY_GUIDED_INSTRUCTION", "0"
-                   ).strip().lower() in {"1", "true", "yes"}
-        )
+        community_guided_enabled = _ov(
+            "community_guided_instruction", "ROUTE7_COMMUNITY_GUIDED_INSTRUCTION",
+            "1" if preset.get("community_guided_instruction", False) else "0"
+        ).strip().lower() in {"1", "true", "yes"}
 
         # Dynamic relevance cutoff: use reranker relevance_score instead
         # of fixed top-K.  Keeps all passages above threshold, drops noise.
-        rerank_dynamic_cutoff = (
-            preset.get("rerank_dynamic_cutoff", False)
-            or _ov("rerank_dynamic_cutoff", "ROUTE7_RERANK_DYNAMIC_CUTOFF", "0"
-                   ).strip().lower() in {"1", "true", "yes"}
-        )
+        rerank_dynamic_cutoff = _ov(
+            "rerank_dynamic_cutoff", "ROUTE7_RERANK_DYNAMIC_CUTOFF",
+            "1" if preset.get("rerank_dynamic_cutoff", False) else "0"
+        ).strip().lower() in {"1", "true", "yes"}
         rerank_relevance_threshold = float(
             _ov("rerank_relevance_threshold", "ROUTE7_RERANK_RELEVANCE_THRESHOLD", "0.15")
         )
@@ -443,24 +440,33 @@ class HippoRAG2Handler(BaseRouteHandler):
                 _cm = self.pipeline.community_matcher
                 _matched_tuples = await _cm.match_communities(query, top_k=3)
                 if _matched_tuples:
-                    themes = []
+                    topic_fragments = []
                     for cdict, _score in _matched_tuples:
-                        title = cdict.get("title", "")
-                        summary = cdict.get("summary", "")
-                        if title:
-                            snippet = f"{title}: {summary[:120]}" if summary else title
-                            themes.append(snippet)
-                    if themes:
+                        summary = cdict.get("summary", "").strip()
+                        if summary:
+                            # Extract the "covers topics" part (2nd+ sentences)
+                            sentences = summary.split(". ")
+                            detail = ". ".join(sentences[1:]).strip()
+                            if detail:
+                                topic_fragments.append(detail)
+                            else:
+                                topic_fragments.append(summary[:150])
+                        else:
+                            title = cdict.get("title", "")
+                            if title:
+                                topic_fragments.append(title)
+                    if topic_fragments:
                         community_instruction = (
-                            "Prioritize passages related to: "
-                            + "; ".join(themes)
-                            + ". "
+                            "Focus on passages covering: "
+                            + " ".join(topic_fragments)
+                            + " "
                         )
                         community_guided_query = community_instruction + query
                         logger.info(
                             "step_0.5_community_guided_instruction",
-                            themes=len(themes),
+                            themes=len(topic_fragments),
                             instruction_len=len(community_instruction),
+                            instruction_text=community_instruction[:500],
                             elapsed_ms=int((time.perf_counter() - t0_cg) * 1000),
                         )
             except Exception as e:
@@ -758,9 +764,9 @@ class HippoRAG2Handler(BaseRouteHandler):
             if len(candidate_ids) >= 2:
                 try:
                     reranked_scored = await self._rerank_passages(
-                        query, candidate_ids, top_k=rerank_top_k,
-                        relevance_threshold=0.0,
-                        dynamic_max=0,
+                        community_guided_query, candidate_ids, top_k=rerank_top_k,
+                        relevance_threshold=rerank_relevance_threshold if rerank_dynamic_cutoff else 0.0,
+                        dynamic_max=rerank_dynamic_max if rerank_dynamic_cutoff else 0,
                     )
                     if reranked_scored:
                         passage_scores = reranked_scored
@@ -2251,6 +2257,12 @@ class HippoRAG2Handler(BaseRouteHandler):
         except Exception:
             pass
 
+        # Log ALL scores from Voyage (before threshold filter) for diagnosis
+        all_scores_desc = sorted(
+            [(valid_ids[rr.index], round(rr.relevance_score, 4)) for rr in rr_result.results],
+            key=lambda x: -x[1],
+        )
+
         min_score = round(scored[-1][1], 4) if scored else 0
         logger.info(
             "route7_rerank_complete",
@@ -2261,6 +2273,7 @@ class HippoRAG2Handler(BaseRouteHandler):
             min_score=min_score,
             threshold=relevance_threshold,
             dynamic=relevance_threshold > 0,
+            all_scores=[s for _, s in all_scores_desc],
         )
 
         return scored
