@@ -5,6 +5,9 @@ import os
 import faulthandler
 faulthandler.enable()  # print traceback on SIGSEGV/SIGFPE/SIGABRT
 
+# Suppress "None of PyTorch, TensorFlow..." warning from transformers (used by wtpsplit)
+os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
+
 from dotenv import load_dotenv
 load_dotenv()  # pick up .env for local development; no-op in containerized deployments
 

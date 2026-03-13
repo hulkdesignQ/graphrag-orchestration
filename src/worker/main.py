@@ -16,6 +16,9 @@ import signal
 import sys
 import logging
 import threading
+
+# Suppress "None of PyTorch, TensorFlow..." warning from transformers (used by wtpsplit)
+os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
 from datetime import datetime
 from typing import Optional
 
