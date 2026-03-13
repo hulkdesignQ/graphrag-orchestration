@@ -409,11 +409,12 @@ class LazyGraphRAGIndexingPipeline:
                     extra={"group_id": group_id, "checkpoint": checkpoint},
                 )
 
-        # Pre-load wtpsplit model in background thread while DI extraction runs.
-        # Previously this was synchronous (blocking 1-5s). Now it overlaps with
-        # _prepare_documents() so the model is ready by the time we need it.
+        # Pre-load wtpsplit model synchronously BEFORE DI extraction so its
+        # ~816 MB allocation happens while memory is still plentiful.
+        # Must NOT run concurrently with DI — on a 1 Gi container the combined
+        # peak would OOM and crash the process.
         from src.worker.services.sentence_extraction_service import _get_sat
-        sat_task = asyncio.ensure_future(asyncio.to_thread(_get_sat))
+        _get_sat()
 
         # ── Steps 1-3: DI extraction → sentences ──────────────────────────
         if not self.neo4j_store._step_done(checkpoint, "sentences"):
@@ -461,9 +462,6 @@ class LazyGraphRAGIndexingPipeline:
                     self.neo4j_store.delete_document_chunks(group_id, doc["id"])
 
             logger.info("⏱️ Step 2 (doc upsert): %.2fs", time.perf_counter() - t_step)
-
-            # Ensure wtpsplit model is loaded before sentence splitting.
-            await sat_task
 
             # 3) Direct sentence indexing: DI units → spaCy → Sentence nodes.
             #    Bypasses the old TextChunk pipeline.
