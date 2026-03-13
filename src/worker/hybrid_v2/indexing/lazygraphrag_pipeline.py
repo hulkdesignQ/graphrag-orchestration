@@ -1599,13 +1599,28 @@ class LazyGraphRAGIndexingPipeline:
 
         sections_created = await self.neo4j_store.arun_in_session(_write)
 
-        # IN_SECTION edges for Sentences are already created by
-        # upsert_sentences_batch (direct section_path matching).
+        # Backfill IN_SECTION edges: upsert_sentences_batch (Step 3) runs
+        # before Section nodes exist (Step 4), so it can't create them.
+        # Create them now that both Sentence and Section nodes are committed.
+        in_section_result = await self.neo4j_store.arun_query(
+            """
+            MATCH (sent:Sentence {group_id: $group_id})
+            WHERE sent.section_path IS NOT NULL AND sent.section_path <> ''
+            AND NOT (sent)-[:IN_SECTION]->(:Section)
+            MATCH (sec:Section {group_id: $group_id})
+            WHERE sec.doc_id = sent.document_id AND sec.section_path = sent.section_path
+            MERGE (sent)-[:IN_SECTION]->(sec)
+            RETURN count(*) AS created
+            """,
+            group_id=group_id,
+        )
+        in_section_edges = in_section_result[0]["created"] if in_section_result else 0
+
         logger.info(
             "section_graph_from_docs_built",
-            extra={"group_id": group_id, "sections_created": sections_created},
+            extra={"group_id": group_id, "sections_created": sections_created, "in_section_edges": in_section_edges},
         )
-        return {"sections_created": sections_created, "in_section_edges": 0}
+        return {"sections_created": sections_created, "in_section_edges": in_section_edges}
 
     async def _assign_sentence_hierarchical_ids(self, group_id: str) -> Dict[str, Any]:
         """Post-processing: assign hierarchical_id to Sentence nodes.

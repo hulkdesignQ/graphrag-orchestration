@@ -591,9 +591,9 @@ class Neo4jStoreV3:
         if entity_data:
             sample = entity_data[0]
             has_v2 = sample['entity_embedding'] is not None and len(sample['entity_embedding']) > 0 if sample['entity_embedding'] else False
-            logger.warning(f"   Sample entity_data: has entity_embedding={has_v2}")
+            logger.info(f"   Sample entity_data: has entity_embedding={has_v2}")
             if sample['entity_embedding']:
-                logger.warning(f"   entity_embedding dim: {len(sample['entity_embedding'])}")
+                logger.info(f"   entity_embedding dim: {len(sample['entity_embedding'])}")
         
         def _sync_upsert():
             # Warm up connection — dedup can idle for 8+ minutes, staling pooled connections
