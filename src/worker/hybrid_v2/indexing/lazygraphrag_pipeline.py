@@ -422,7 +422,7 @@ class LazyGraphRAGIndexingPipeline:
         if not self.neo4j_store._step_done(checkpoint, "sentences"):
             # 1) Normalize + (optional) extract with Document Intelligence.
             t_step = time.perf_counter()
-            expanded_docs = await self._prepare_documents(group_id, documents, ingestion)
+            expanded_docs = await self._prepare_documents(group_id, documents, ingestion, user_id=user_id)
             logger.info("⏱️ Step 1 (_prepare_documents): %.2fs", time.perf_counter() - t_step)
 
             # 2) Upsert Document nodes (batched) + clean stale children.
@@ -494,7 +494,7 @@ class LazyGraphRAGIndexingPipeline:
         else:
             logger.info("pipeline_skip_sentences (checkpoint >= sentences)")
             # We still need expanded_docs for later steps — re-prepare them
-            expanded_docs = await self._prepare_documents(group_id, documents, ingestion)
+            expanded_docs = await self._prepare_documents(group_id, documents, ingestion, user_id=user_id)
             chunk_to_doc_id = {}
             # Recover sentence count from Neo4j
             existing = self.neo4j_store.get_sentences_by_group(group_id)
@@ -1032,6 +1032,7 @@ class LazyGraphRAGIndexingPipeline:
         group_id: str,
         documents: List[Dict[str, Any]],
         ingestion: str,
+        user_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         # Assign stable IDs and normalize fields.
         normalized: List[Dict[str, Any]] = []
@@ -2065,6 +2066,37 @@ Return ONLY valid JSON (no markdown fences):
   ...
 ]}}"""
 
+    # ── Re-extraction prompts for hallucination fix ───────────────
+    _NER_FIX_PROMPT = """The following entities were extracted but do NOT appear in the source sentence.
+This is an error — entity names must come verbatim from the sentence text.
+
+Hallucinated entities: {bad_entities}
+
+Source sentence:
+[{sid}]: {sentence_text}
+
+Re-read the sentence carefully and extract the CORRECT named entities that actually appear in the text.
+Return ONLY valid JSON (no markdown fences):
+{{"named_entities": [...]}}"""
+
+    _TRIPLE_FIX_PROMPT = """Some entities in the extracted triples do NOT appear in their source sentence.
+This is an error — entity names must come verbatim from the sentence text.
+
+Bad triples (entities marked with ❌ are hallucinated):
+{bad_triples_desc}
+
+Source sentence:
+[{sid}]: {sentence_text}
+
+Named entities confirmed in this sentence: {good_entities}
+
+Re-extract triples for this sentence using ONLY entities that appear in the text.
+Return ONLY valid JSON (no markdown fences):
+{{"triples": [
+  {{"sid": "{sid}", "s": "<subject>", "p": "<predicate>", "o": "<object>"}},
+  ...
+]}}"""
+
     @staticmethod
     def _leaf_section_title(section_path: str) -> str:
         """Extract the leaf section title from a ' > ' delimited path."""
@@ -2389,6 +2421,20 @@ Return ONLY valid JSON (no markdown fences):
 
         sem = asyncio.Semaphore(settings.OPENIE_LLM_CONCURRENCY)
 
+        import re as _re_local
+
+        def _normalize_for_match(text: str) -> str:
+            """Lowercase, strip punctuation/parens, collapse whitespace for substring matching."""
+            return _re_local.sub(r'\s+', ' ', _re_local.sub(r'[^a-z0-9 ]', ' ', text.lower())).strip()
+
+        def _entity_in_text(entity: str, text: str) -> bool:
+            """Check if entity appears (normalized substring) in the text."""
+            return _normalize_for_match(entity) in _normalize_for_match(text)
+
+        def _entity_in_any_sentence(entity: str, batch: List[Dict[str, Any]]) -> bool:
+            """Check if entity appears in ANY sentence in the batch."""
+            return any(_entity_in_text(entity, s['text']) for s in batch)
+
         def _strip_json_fences(text: str) -> str:
             """Remove markdown code fences from LLM JSON response."""
             text = text.strip()
@@ -2419,19 +2465,22 @@ Return ONLY valid JSON (no markdown fences):
                     return []
 
         async def _extract_batch_two_step(batch: List[Dict[str, Any]], context: str) -> List[Dict[str, str]]:
-            """Two-step NER→Triple extraction (upstream HippoRAG 2 alignment).
+            """Two-step NER→Triple extraction with hallucination guard.
 
             Step 1: NER — extract named entities from the sentence batch.
-            Step 2: Triple extraction — conditioned on the NER entity list.
-
-            Both steps share a single semaphore slot to avoid double-booking.
+            Checkpoint 1: Validate each NER entity appears in at least one sentence.
+                          Re-extract for sentences whose entities failed.
+            Step 2: Triple extraction — conditioned on the validated NER entity list.
+            Checkpoint 2: Validate each triple's subject/object appears in its source sentence.
+                          Re-extract triples for affected sentences.
             """
             sentence_block = context + "\n".join(
                 f"[{s['id']}]: {s['text']}" for s in batch
             )
+            sid_to_text = {s['id']: s['text'] for s in batch}
 
             async with sem:
-                # Step 1: NER (scope-dependent prompt)
+                # ── Step 1: NER ──────────────────────────────────────
                 ner_template = self._NER_PROMPT_NARROW if self._ner_scope == "narrow" else self._NER_PROMPT_BROAD
                 ner_prompt = ner_template.format(sentences=sentence_block)
                 try:
@@ -2446,25 +2495,144 @@ Return ONLY valid JSON (no markdown fences):
                     named_entities = []
 
                 if not named_entities:
-                    # Fallback to single-step if NER produces nothing
-                    # (release this slot, _extract_batch will re-acquire)
-                    pass
+                    pass  # will fall back to single-step below
                 else:
-                    # Step 2: NER-conditioned triple extraction (same semaphore slot)
-                    entities_str = json_mod.dumps(named_entities)
-                    triple_prompt = self._TRIPLE_PROMPT.format(
-                        named_entities=entities_str, sentences=sentence_block
-                    )
-                    try:
-                        triple_response = await self._achat_with_retry(
-                            [ChatMessage(role="user", content=triple_prompt)]
+                    # ── Checkpoint 1: Validate NER entities ──────────
+                    good_ner = []
+                    bad_ner = []
+                    for ent in named_entities:
+                        if _entity_in_any_sentence(ent, batch):
+                            good_ner.append(ent)
+                        else:
+                            bad_ner.append(ent)
+
+                    if bad_ner:
+                        logger.warning(
+                            "ner_hallucination_detected",
+                            extra={
+                                "group_id": group_id,
+                                "bad_entities": bad_ner[:10],
+                                "good_count": len(good_ner),
+                                "bad_count": len(bad_ner),
+                            },
                         )
-                        triple_text = _strip_json_fences(triple_response.message.content)
-                        parsed = json_mod.loads(triple_text)
-                        return parsed.get("triples", [])
-                    except Exception as e:
-                        logger.warning("Triple extraction step failed (triples lost): %s", e)
-                        return []
+                        # Find sentences that lost ALL their entities
+                        for s in batch:
+                            has_good = any(_entity_in_text(e, s['text']) for e in good_ner)
+                            if not has_good:
+                                fix_prompt = self._NER_FIX_PROMPT.format(
+                                    bad_entities=json_mod.dumps(bad_ner[:5]),
+                                    sid=s['id'],
+                                    sentence_text=s['text'],
+                                )
+                                try:
+                                    fix_resp = await self._achat_with_retry(
+                                        [ChatMessage(role="user", content=fix_prompt)]
+                                    )
+                                    fix_text = _strip_json_fences(fix_resp.message.content)
+                                    fix_parsed = json_mod.loads(fix_text)
+                                    for fe in fix_parsed.get("named_entities", []):
+                                        if _entity_in_text(fe, s['text']) and fe not in good_ner:
+                                            good_ner.append(fe)
+                                            logger.info("ner_entity_recovered: %s (sentence %s)", fe, s['id'])
+                                except Exception as e:
+                                    logger.warning("NER fix call failed for %s: %s", s['id'], e)
+
+                    named_entities = good_ner
+
+                    if not named_entities:
+                        logger.warning("All NER entities hallucinated, falling back to single-step")
+                        pass  # will fall back below
+                    else:
+                        # ── Step 2: Triple extraction ────────────────
+                        entities_str = json_mod.dumps(named_entities)
+                        triple_prompt = self._TRIPLE_PROMPT.format(
+                            named_entities=entities_str, sentences=sentence_block
+                        )
+                        try:
+                            triple_response = await self._achat_with_retry(
+                                [ChatMessage(role="user", content=triple_prompt)]
+                            )
+                            triple_text = _strip_json_fences(triple_response.message.content)
+                            parsed = json_mod.loads(triple_text)
+                            triples = parsed.get("triples", [])
+                        except Exception as e:
+                            logger.warning("Triple extraction step failed (triples lost): %s", e)
+                            return []
+
+                        # ── Checkpoint 2: Validate triple entities ───
+                        good_triples = []
+                        bad_by_sid: Dict[str, List[Dict]] = {}
+                        for t in triples:
+                            sid = (t.get("sid") or "").strip()
+                            subj = (t.get("s") or "").strip()
+                            obj = (t.get("o") or "").strip()
+                            stxt = sid_to_text.get(sid, "")
+
+                            if not stxt:
+                                good_triples.append(t)
+                                continue
+
+                            if _entity_in_text(subj, stxt) and _entity_in_text(obj, stxt):
+                                good_triples.append(t)
+                            else:
+                                bad_by_sid.setdefault(sid, []).append(t)
+
+                        if bad_by_sid:
+                            total_bad = sum(len(v) for v in bad_by_sid.values())
+                            logger.warning(
+                                "triple_hallucination_detected",
+                                extra={
+                                    "group_id": group_id,
+                                    "good_triples": len(good_triples),
+                                    "bad_triples": total_bad,
+                                    "affected_sids": list(bad_by_sid.keys())[:5],
+                                },
+                            )
+                            for sid, bad_ts in bad_by_sid.items():
+                                stxt = sid_to_text.get(sid, "")
+                                if not stxt:
+                                    continue
+                                bad_desc_parts = []
+                                for bt in bad_ts:
+                                    s_ok = "✅" if _entity_in_text(bt.get("s", ""), stxt) else "❌"
+                                    o_ok = "✅" if _entity_in_text(bt.get("o", ""), stxt) else "❌"
+                                    bad_desc_parts.append(
+                                        f'  ({s_ok} "{bt.get("s","")}", "{bt.get("p","")}", {o_ok} "{bt.get("o","")}")'
+                                    )
+                                sent_good_ents = [e for e in named_entities if _entity_in_text(e, stxt)]
+                                fix_prompt = self._TRIPLE_FIX_PROMPT.format(
+                                    bad_triples_desc="\n".join(bad_desc_parts),
+                                    sid=sid,
+                                    sentence_text=stxt,
+                                    good_entities=json_mod.dumps(sent_good_ents),
+                                )
+                                try:
+                                    fix_resp = await self._achat_with_retry(
+                                        [ChatMessage(role="user", content=fix_prompt)]
+                                    )
+                                    fix_text = _strip_json_fences(fix_resp.message.content)
+                                    fix_parsed = json_mod.loads(fix_text)
+                                    for ft in fix_parsed.get("triples", []):
+                                        ft_subj = (ft.get("s") or "").strip()
+                                        ft_obj = (ft.get("o") or "").strip()
+                                        ft_sid = (ft.get("sid") or sid).strip()
+                                        ft_stxt = sid_to_text.get(ft_sid, stxt)
+                                        if _entity_in_text(ft_subj, ft_stxt) and _entity_in_text(ft_obj, ft_stxt):
+                                            good_triples.append(ft)
+                                            logger.info(
+                                                "triple_recovered: (%s, %s, %s) for %s",
+                                                ft_subj, ft.get("p", ""), ft_obj, ft_sid,
+                                            )
+                                        else:
+                                            logger.warning(
+                                                "triple_fix_still_bad: (%s, %s, %s) for %s — dropping",
+                                                ft_subj, ft.get("p", ""), ft_obj, ft_sid,
+                                            )
+                                except Exception as e:
+                                    logger.warning("Triple fix call failed for %s: %s", sid, e)
+
+                        return good_triples
 
             # NER produced nothing — fall back to single-step (outside the sem block)
             if not named_entities:

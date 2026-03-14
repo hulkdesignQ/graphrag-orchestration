@@ -351,6 +351,15 @@ class HippoRAG2Handler(BaseRouteHandler):
             _ov("community_sentence_weight", "ROUTE7_COMMUNITY_SENTENCE_WEIGHT", "0.03")
         )
 
+        # Adaptive community selection: instead of a hard top-k, include all
+        # communities scoring >= ratio × best_score, up to max_k.
+        community_adaptive_ratio = float(
+            _ov("community_adaptive_ratio", "ROUTE7_COMMUNITY_ADAPTIVE_RATIO", "0.85")
+        )
+        community_max_k = int(
+            _ov("community_max_k", "ROUTE7_COMMUNITY_MAX_K", "10")
+        )
+
         # Community-guided instruction: use community summaries to steer
         # embedding and reranker queries for thematic precision.
         community_guided_enabled = _ov(
@@ -440,7 +449,10 @@ class HippoRAG2Handler(BaseRouteHandler):
             try:
                 t0_cg = time.perf_counter()
                 _cm = self.pipeline.community_matcher
-                _matched_tuples = await _cm.match_communities(query, top_k=3)
+                _matched_tuples = await _cm.match_communities(
+                    query, relative_threshold=community_adaptive_ratio,
+                    max_k=community_max_k,
+                )
                 if _matched_tuples:
                     community_ids = [
                         c.get("id") for c, _s in _matched_tuples if c.get("id")
@@ -635,6 +647,8 @@ class HippoRAG2Handler(BaseRouteHandler):
         if _need_community:
             _seed_tasks.append(("community", self._resolve_community_seeds(
                 query, include_sentences=community_passage_seeds_enabled,
+                adaptive_ratio=community_adaptive_ratio,
+                max_k=community_max_k,
             )))
 
         if _seed_tasks:
@@ -1569,8 +1583,8 @@ class HippoRAG2Handler(BaseRouteHandler):
         try:
             vc = make_voyage_client()
             rr_result = await rerank_with_retry(
-                vc, instructed_query, documents, rerank_model,
-                top_k=min(top_k, len(documents)),
+                vc, query=instructed_query, documents=documents,
+                model=rerank_model, top_k=min(top_k, len(documents)),
             )
 
             # Map results back to (Triple, rerank_score) tuples
@@ -1980,6 +1994,9 @@ class HippoRAG2Handler(BaseRouteHandler):
         self,
         query: str,
         include_sentences: bool = False,
+        *,
+        adaptive_ratio: float | None = None,
+        max_k: int | None = None,
     ) -> Tuple[List[str], List[Dict[str, Any]], List[str]]:
         """Resolve community seeds via community embedding matching.
 
@@ -1993,7 +2010,9 @@ class HippoRAG2Handler(BaseRouteHandler):
                 return [], [], []
 
             # Match communities (returns list of (community_dict, score) tuples)
-            matched_tuples = await community_matcher.match_communities(query, top_k=3)
+            matched_tuples = await community_matcher.match_communities(
+                query, relative_threshold=adaptive_ratio, max_k=max_k,
+            )
             if not matched_tuples:
                 return [], [], []
 
@@ -2247,14 +2266,16 @@ class HippoRAG2Handler(BaseRouteHandler):
         # Always request the same top_k from Voyage — dynamic cutoff only
         # filters the returned results by relevance_score, never changes
         # the number of candidates Voyage evaluates.
-        request_k = min(top_k, len(documents))
+        # When dynamic cutoff is active, score ALL candidates so the
+        # relevance threshold decides what survives (not a fixed top_k).
+        request_k = len(documents) if relevance_threshold > 0 else min(top_k, len(documents))
 
         # Call Voyage reranker
         vc = make_voyage_client()
 
         rr_result = await rerank_with_retry(
-            vc, query, documents, rerank_model,
-            top_k=request_k,
+            vc, query=query, documents=documents,
+            model=rerank_model, top_k=request_k,
         )
 
         # Apply dynamic relevance cutoff or fixed top-K
@@ -2418,14 +2439,14 @@ class HippoRAG2Handler(BaseRouteHandler):
         if not documents:
             return []
 
-        # Always request the same top_k — dynamic cutoff only filters results
-        request_k = min(top_k, len(documents))
+        # When dynamic cutoff is active, score ALL candidates
+        request_k = len(documents) if relevance_threshold > 0 else min(top_k, len(documents))
 
         vc = make_voyage_client()
 
         rr_result = await rerank_with_retry(
-            vc, query, documents, rerank_model,
-            top_k=request_k,
+            vc, query=query, documents=documents,
+            model=rerank_model, top_k=request_k,
         )
 
         # Apply dynamic relevance cutoff or return all
