@@ -300,17 +300,16 @@ else
     DEPLOY_METHOD="fallback"
     FALLBACK_FAILED=0
 
+    # Fallback: only update images + algorithm version.
+    # Secrets persist from the last successful Bicep provision — don't re-inject
+    # secretrefs here as they may not exist if Bicep never provisioned them.
+
     echo "Updating ${API_APP_NAME}..."
     az containerapp update \
         --name "$API_APP_NAME" \
         --resource-group "$AZURE_RESOURCE_GROUP" \
         --image "$API_IMAGE" \
         --revision-suffix "$REVISION_SUFFIX" \
-        --set-env-vars \
-            "VOYAGE_API_KEY=secretref:voyage-api-key" \
-            "NEO4J_PASSWORD=secretref:neo4j-password" \
-            "MISTRAL_API_KEY=secretref:mistral-api-key" \
-            "LLMWHISPERER_API_KEY=secretref:llmwhisperer-api-key" \
         --output none &
     API_DEPLOY_PID=$!
 
@@ -320,12 +319,7 @@ else
         --resource-group "$AZURE_RESOURCE_GROUP" \
         --image "$WORKER_IMAGE" \
         --revision-suffix "$REVISION_SUFFIX" \
-        --set-env-vars \
-            "DEFAULT_ALGORITHM_VERSION=$ALGO_VERSION" \
-            "VOYAGE_API_KEY=secretref:voyage-api-key" \
-            "NEO4J_PASSWORD=secretref:neo4j-password" \
-            "MISTRAL_API_KEY=secretref:mistral-api-key" \
-            "LLMWHISPERER_API_KEY=secretref:llmwhisperer-api-key" \
+        --set-env-vars "DEFAULT_ALGORITHM_VERSION=$ALGO_VERSION" \
         --output none &
     WORKER_DEPLOY_PID=$!
 
@@ -335,11 +329,6 @@ else
         --resource-group "$AZURE_RESOURCE_GROUP" \
         --image "$API_IMAGE" \
         --revision-suffix "$REVISION_SUFFIX" \
-        --set-env-vars \
-            "VOYAGE_API_KEY=secretref:voyage-api-key" \
-            "NEO4J_PASSWORD=secretref:neo4j-password" \
-            "MISTRAL_API_KEY=secretref:mistral-api-key" \
-            "LLMWHISPERER_API_KEY=secretref:llmwhisperer-api-key" \
         --output none &
     B2C_DEPLOY_PID=$!
 
