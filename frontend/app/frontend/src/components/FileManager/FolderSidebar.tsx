@@ -270,7 +270,7 @@ export const FolderSidebar = ({
                 <span className={styles.zoneChevron}>{isCollapsed ? "▸" : "▾"}</span>
                 <span className={styles.zoneIcon}>{icon}</span>
                 <span className={styles.zoneLabel}>{label}</span>
-                {fileCount > 0 && <span className={styles.zoneCount}>{fileCount}</span>}
+                <span className={styles.zoneCount}>{fileCount}</span>
             </div>
         );
     };
