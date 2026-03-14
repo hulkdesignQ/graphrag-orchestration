@@ -100,7 +100,7 @@ else
     fi
 fi
 
-REVISION_SUFFIX="d${AZURE_ENV_IMAGETAG}" # 'd' prefix = manual deploy (vs 'r' for CI/CD)
+REVISION_SUFFIX="d$(date -u +%s | tail -c 6)" # unique per run, 'd' prefix = manual deploy
 # Azure requires revision suffix ≤ 20 chars, alphanumeric + hyphens only
 REVISION_SUFFIX=$(echo "$REVISION_SUFFIX" | sed 's/[^a-zA-Z0-9-]/-/g' | cut -c1-20)
 
@@ -282,23 +282,33 @@ echo "   This ensures all config, secrets, and env vars are in sync."
 echo ""
 
 DEPLOY_METHOD=""
-if azd provision --no-prompt; then
+AZD_OUTPUT=$(mktemp /tmp/azd-output-XXXXXX)
+if azd provision --no-prompt 2>&1 | tee "$AZD_OUTPUT"; then
     DEPLOY_METHOD="bicep"
     echo ""
     echo "✅ azd provision succeeded — all config is in sync"
 else
-    echo ""
-    echo "⚠️  azd provision failed!"
-    echo ""
-    echo "   Bicep deployment failed. Falling back to direct container update."
-    echo "   WARNING: Config parameters defined in Bicep may NOT be updated."
-    echo "   If this is a config-sensitive deploy, fix Bicep issues and re-run."
-    echo ""
-    echo "   Continuing with image-only update in 5 seconds... (Ctrl+C to abort)"
-    sleep 5
+    # Check if the ONLY errors are harmless "RoleAssignmentExists" —
+    # these mean RBAC was already configured and all real resources deployed fine.
+    NON_ROLE_ERRORS=$(grep -i "error" "$AZD_OUTPUT" | grep -iv "RoleAssignmentExists" | grep -iv "role assignment.*already exists" | grep -iv "safe to ignore" || true)
 
-    DEPLOY_METHOD="fallback"
-    FALLBACK_FAILED=0
+    if [ -z "$NON_ROLE_ERRORS" ]; then
+        DEPLOY_METHOD="bicep"
+        echo ""
+        echo "✅ azd provision succeeded — role assignments already exist (safe to ignore)"
+    else
+        echo ""
+        echo "⚠️  azd provision failed!"
+        echo ""
+        echo "   Bicep deployment failed. Falling back to direct container update."
+        echo "   WARNING: Config parameters defined in Bicep may NOT be updated."
+        echo "   If this is a config-sensitive deploy, fix Bicep issues and re-run."
+        echo ""
+        echo "   Continuing with image-only update in 5 seconds... (Ctrl+C to abort)"
+        sleep 5
+
+        DEPLOY_METHOD="fallback"
+        FALLBACK_FAILED=0
 
     # Fallback: only update images + algorithm version.
     # Secrets persist from the last successful Bicep provision — don't re-inject
@@ -342,7 +352,9 @@ else
     fi
 
     echo "✅ All container apps updated via direct deploy (config may be stale)"
+    fi
 fi
+rm -f "$AZD_OUTPUT"
 echo ""
 
 # ── Health Check ─────────────────────────────────────────────────────────
