@@ -1970,7 +1970,7 @@ class LazyGraphRAGIndexingPipeline:
                                 source_id=e1.id,
                                 target_id=e2.id,
                                 type="RELATED_TO",
-                                description=s["text"][:200],
+                                description="co-occurs",
                                 weight=1.0,
                             )
                         )
@@ -2007,16 +2007,22 @@ class LazyGraphRAGIndexingPipeline:
     # ────────────────────────────────────────────────────────────────────
 
     # Single-step prompt (fallback when OPENIE_TWO_STEP=false)
-    _OPENIE_PROMPT = """Extract knowledge graph triples from the sentences below.
+    _OPENIE_PROMPT = """Your task is to construct an RDF knowledge graph from the sentences below.
 
-Rules:
-1. Process EACH sentence [ID] independently — extract 2-5 triples per sentence.
-2. Predicates MUST be short verb phrases (1-5 words). Examples: "warrants for", "is not transferable", "holds risk until", "disclaims", "shall indemnify".
-3. Do NOT use the full sentence as a predicate.
-4. Subjects and objects are named entities, key concepts, legal terms, dates, time periods, durations, or amounts.
-5. Include abstract concepts as entities when present: warranties, liabilities, rights, obligations, limitations, conditions.
-6. Extract ALL factual relationships from each sentence, not just the most obvious one.
-7. Entity names MUST come from the sentence text — do NOT invent or hallucinate names not present in the source.
+Requirements:
+- Each triple should contain at least one named entity (proper noun, organization, person, location, date, amount).
+- Predicates MUST be short verb phrases (1-5 words). Do NOT use the full sentence as a predicate.
+- Clearly resolve pronouns to their specific names to maintain clarity.
+
+Example:
+Passage: "Radio City is India's first private FM radio station and was started on 3 July 2001. It plays Hindi, English and regional songs."
+Output: {{"triples": [
+  {{"sid": "s1", "s": "Radio City", "p": "located in", "o": "India"}},
+  {{"sid": "s1", "s": "Radio City", "p": "is", "o": "private FM radio station"}},
+  {{"sid": "s1", "s": "Radio City", "p": "started on", "o": "3 July 2001"}},
+  {{"sid": "s2", "s": "Radio City", "p": "plays songs in", "o": "Hindi"}},
+  {{"sid": "s2", "s": "Radio City", "p": "plays songs in", "o": "English"}}
+]}}
 
 {sentences}
 
