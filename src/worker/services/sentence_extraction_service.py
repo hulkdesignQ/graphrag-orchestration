@@ -1104,30 +1104,69 @@ def extract_sentences_from_di_units(
             continue
 
         # ─── Source G: Signature block (tagged by section-aware path) ──
+        # Use LLM fragment connector to produce coherent sentences from
+        # disconnected signature fragments (names, roles, dates).
         if role == "signature":
-            sig_text = unit_text.strip()
-            if sig_text:
-                text_key = sig_text.strip().lower()
-                if text_key not in seen_texts:
-                    sent_id = f"{doc_id}_sent_{global_idx}"
-                    seen_texts[text_key] = sent_id
-                    section_key = "[Signature Block]"
-                    idx_in_section = section_counters.get(section_key, 0)
-                    section_counters[section_key] = idx_in_section + 1
-                    all_sentences.append({
-                        "id": sent_id,
-                        "text": sig_text,
-                        "document_id": doc_id,
-                        "source": "signature_block",
-                        "index_in_doc": global_idx,
-                        "section_path": "[Signature Block]",
-                        "page": page,
-                        "confidence": 1.0,
-                        "tokens": len(sig_text.split()),
-                        "parent_text": "",
-                        "index_in_section": idx_in_section,
-                    })
-                    global_idx += 1
+            sig_block = meta.get("signature_block") or {}
+            raw_lines = sig_block.get("raw_lines") or []
+            if not raw_lines:
+                raw_lines = [l.strip() for l in unit_text.strip().split("\n") if l.strip()]
+            if raw_lines:
+                for sig_text in _synthesize_signature_sentences({"raw_lines": raw_lines}):
+                    text_key = sig_text.strip().lower()
+                    if text_key not in seen_texts:
+                        sent_id = f"{doc_id}_sent_{global_idx}"
+                        seen_texts[text_key] = sent_id
+                        section_key = "[Signature Block]"
+                        idx_in_section = section_counters.get(section_key, 0)
+                        section_counters[section_key] = idx_in_section + 1
+                        all_sentences.append({
+                            "id": sent_id,
+                            "text": sig_text,
+                            "document_id": doc_id,
+                            "source": "signature_block",
+                            "index_in_doc": global_idx,
+                            "section_path": "[Signature Block]",
+                            "page": page,
+                            "confidence": 1.0,
+                            "tokens": len(sig_text.split()),
+                            "parent_text": "",
+                            "index_in_section": idx_in_section,
+                        })
+                        global_idx += 1
+            continue
+
+        # ─── Source H: Contact/address block ──────────────────────
+        # Use LLM fragment connector to produce coherent sentences from
+        # concatenated address fields (name, street, city, phone).
+        if role == "contact_block":
+            cb_data = meta.get("contact_block") or {}
+            raw_lines = cb_data.get("raw_lines") or []
+            if not raw_lines:
+                raw_lines = [l.strip() for l in unit_text.strip().split("\n") if l.strip()]
+            if raw_lines:
+                for cb_text in _synthesize_signature_sentences({"raw_lines": raw_lines}):
+                    text_key = cb_text.strip().lower()
+                    if text_key not in seen_texts:
+                        sent_id = f"{doc_id}_sent_{global_idx}"
+                        seen_texts[text_key] = sent_id
+                        section_key = section_path or "[Contact Block]"
+                        idx_in_section = section_counters.get(section_key, 0)
+                        section_counters[section_key] = idx_in_section + 1
+                        all_sentences.append({
+                            "id": sent_id,
+                            "text": cb_text,
+                            "document_id": doc_id,
+                            "source": "contact_block",
+                            "index_in_doc": global_idx,
+                            "section_path": section_path or "[Contact Block]",
+                            "page": page,
+                            "confidence": 1.0,
+                            "tokens": len(cb_text.split()),
+                            "parent_text": "",
+                            "index_in_section": idx_in_section,
+                        })
+                        global_idx += 1
             continue
 
         # Skip non-content DI roles (remaining headers/footers, page numbers, etc.)

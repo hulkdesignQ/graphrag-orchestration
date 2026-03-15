@@ -1119,6 +1119,70 @@ class DocumentIntelligenceService:
                 return set()
         return set(candidates)
 
+    # Patterns for contact/address block detection
+    _CONTACT_STREET_RE = re.compile(
+        r'Street|St\.|Avenue|Ave\.|Boulevard|Blvd|Drive|Dr\.|Road|Rd\.|Lane|Ln\.',
+        re.IGNORECASE,
+    )
+    _CONTACT_CITY_STATE_ZIP_RE = re.compile(
+        r'City,?\s*State,?\s*Zip|,\s*[A-Z]{2}\s+\d{5}',
+        re.IGNORECASE,
+    )
+    _CONTACT_PHONE_RE = re.compile(
+        r'(?:Phone|Tel|Fax|Emergency)\s*(?:Number|#|:|\()|'
+        r'\(\s*\d{3}\s*\)\s*\d{3}[\-\s]\d{4}',
+        re.IGNORECASE,
+    )
+
+    @classmethod
+    def _is_contact_block_paragraph(cls, text: str) -> bool:
+        """Return True if text looks like a concatenated contact/address block.
+
+        Azure DI sometimes merges separate address lines (name, street, city,
+        phone) into one paragraph.  Each line is a label-value pair that makes
+        sense alone, but the concatenation is garbled.
+
+        Requires a strong address signal (``Street_``, ``City, State, Zip_``)
+        plus at least one other address indicator.  This avoids false positives
+        on normal prose that merely mentions an address.
+        """
+        # Strong signals: form-field labels with underscores (Street_, City, State, Zip_)
+        has_field_label = bool(re.search(r'Street_|City,?\s*State,?\s*Zip_', text, re.IGNORECASE))
+        if not has_field_label:
+            return False
+        score = 1  # already matched a field label
+        if cls._CONTACT_PHONE_RE.search(text):
+            score += 1
+        if re.search(r'\b\d{5}(?:-\d{4})?\b', text):  # ZIP code
+            score += 1
+        return score >= 2
+
+    def _detect_contact_block_paragraph_indices(
+        self,
+        paragraphs,  # List[DocumentParagraph]
+        exclude: Set[int] = frozenset(),
+    ) -> Set[int]:
+        """Identify contact/address block paragraph indices.
+
+        Scans all paragraphs for concatenated address blocks (street + city/zip
+        + phone patterns).  Skips paragraphs already claimed by letterhead or
+        signature detection.
+        """
+        indices: Set[int] = set()
+        for i, para in enumerate(paragraphs):
+            if i in exclude:
+                continue
+            role = getattr(para, "role", None) or ""
+            if role in ("pageHeader", "pageFooter", "pageNumber",
+                        "title", "sectionHeading"):
+                continue
+            content = (getattr(para, "content", "") or "").strip()
+            if not content:
+                continue
+            if self._is_contact_block_paragraph(content):
+                indices.add(i)
+        return indices
+
     def _detect_signature_block_paragraphs(self, result: AnalyzeResult) -> Set[int]:
         """Detect paragraph indices within signature block windows.
 
@@ -1612,6 +1676,9 @@ class DocumentIntelligenceService:
         if result.paragraphs:
             sig_block_indices = self._detect_signature_block_paragraphs(result)
             letterhead_indices = self._detect_letterhead_paragraph_indices(result.paragraphs)
+            contact_block_indices = self._detect_contact_block_paragraph_indices(
+                result.paragraphs, exclude=letterhead_indices | sig_block_indices,
+            )
             in_sig_block = False
 
             for i, para in enumerate(result.paragraphs):
@@ -1628,6 +1695,10 @@ class DocumentIntelligenceService:
 
                 # Skip letterhead — handled as dedicated sentence node
                 if i in letterhead_indices:
+                    continue
+
+                # Skip contact blocks — handled as dedicated DI unit
+                if i in contact_block_indices:
                     continue
 
                 is_sig = i in sig_block_indices
@@ -1892,6 +1963,9 @@ class DocumentIntelligenceService:
         # paragraph→role map so we can propagate roles to emitted DI units.
         letterhead_para_indices = self._detect_letterhead_paragraph_indices(paragraphs)
         sig_block_para_indices = self._detect_signature_block_paragraphs(result)
+        contact_block_para_indices = self._detect_contact_block_paragraph_indices(
+            paragraphs, exclude=letterhead_para_indices | sig_block_para_indices,
+        )
         para_role_map: Dict[int, str] = {}
         for i, para in enumerate(paragraphs):
             role = getattr(para, "role", None) or ""
@@ -1958,7 +2032,7 @@ class DocumentIntelligenceService:
                 elif kind == "paragraphs":
                     # Exclude letterhead and signature block paragraphs —
                     # they get their own dedicated DI units.
-                    if idx not in letterhead_para_indices and idx not in sig_block_para_indices:
+                    if idx not in letterhead_para_indices and idx not in sig_block_para_indices and idx not in contact_block_para_indices:
                         para_indices.append(idx)
                 elif kind == "tables":
                     table_indices.append(idx)
@@ -2178,9 +2252,10 @@ class DocumentIntelligenceService:
                 parsed = self._parse_di_element_ref(el)
                 if parsed and parsed[0] == "paragraphs":
                     visited_para_indices.add(parsed[1])
-        # Also exclude letterhead and signature block paragraphs (they get their own DI units below)
+        # Also exclude letterhead, signature block, and contact block paragraphs (they get their own DI units below)
         visited_para_indices.update(letterhead_para_indices)
         visited_para_indices.update(sig_block_para_indices)
+        visited_para_indices.update(contact_block_para_indices)
         for i, para in enumerate(paragraphs):
             if i in visited_para_indices:
                 continue
@@ -2292,6 +2367,65 @@ class DocumentIntelligenceService:
                         "kvp_count": 0,
                         **({"page_number": sig_page} if sig_page is not None else {}),
                         **({"signature_block": signature_block} if signature_block else {}),
+                    },
+                ))
+
+        # Emit DI units for contact/address block paragraphs.
+        # Each contact block gets its own unit with role="contact_block" so
+        # the sentence extraction pipeline can route it through the LLM
+        # fragment connector instead of wtpsplit.
+        if contact_block_para_indices:
+            for ci in sorted(contact_block_para_indices):
+                para = paragraphs[ci] if ci < len(paragraphs) else None
+                if not para:
+                    continue
+                para_content = (getattr(para, "content", "") or "").strip()
+                if not para_content:
+                    continue
+                cb_page = None
+                regions = getattr(para, "bounding_regions", None) or []
+                if regions:
+                    cb_page = getattr(regions[0], "page_number", None)
+                # Get the lines from the page that overlap this paragraph's
+                # bounding region so we can pass them as raw_lines for the
+                # LLM connector (each line is a meaningful label-value pair).
+                raw_lines: List[str] = []
+                if regions and result.pages:
+                    poly = getattr(regions[0], "polygon", None) or []
+                    pg_num = getattr(regions[0], "page_number", None)
+                    if poly and pg_num:
+                        p_ys = [poly[j] for j in range(1, len(poly), 2)]
+                        p_ymin, p_ymax = min(p_ys), max(p_ys)
+                        for pg in result.pages:
+                            if pg.page_number != pg_num:
+                                continue
+                            for line in (pg.lines or []):
+                                lp = getattr(line, "polygon", None) or []
+                                if lp:
+                                    l_ys = [lp[j] for j in range(1, len(lp), 2)]
+                                    l_ymid = sum(l_ys) / len(l_ys)
+                                    if p_ymin - 0.1 <= l_ymid <= p_ymax + 0.1:
+                                        raw_lines.append(line.content or "")
+                if not raw_lines:
+                    raw_lines = [para_content]
+                docs.append(Document(
+                    text=para_content,
+                    metadata={
+                        "group_id": group_id,
+                        "source": "document-intelligence",
+                        "url": url,
+                        "chunk_type": "role",
+                        "section_path": [],
+                        "di_section_path": [],
+                        "di_section_part": "role",
+                        "role": "contact_block",
+                        "tables": [],
+                        "table_count": 0,
+                        "paragraph_count": 1,
+                        "key_value_pairs": [],
+                        "kvp_count": 0,
+                        **({"page_number": cb_page} if cb_page is not None else {}),
+                        "contact_block": {"raw_lines": raw_lines},
                     },
                 ))
 
