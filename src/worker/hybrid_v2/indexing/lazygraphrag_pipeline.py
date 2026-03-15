@@ -1994,6 +1994,44 @@ class LazyGraphRAGIndexingPipeline:
         # Co-occurrence edges: pass ALL through (even duplicates of OpenIE edges)
         merged_rels.extend(cooccurrence_rels)
 
+        # ── Step 4b: Orphan sentence concept tagging ────────────────────────
+        # Sentences with no entity mentions are invisible to PPR.  Ask the
+        # LLM to assign 1-2 concept labels (e.g., "cancellation deadline",
+        # "filing requirement") so every sentence has at least one MENTIONS
+        # edge and PPR can reach it.
+        covered_sids = set()
+        for ent in entities:
+            covered_sids.update(ent.text_unit_ids)
+        orphan_sentences = [s for s in content_sentences if s["id"] not in covered_sids]
+
+        if orphan_sentences and self.llm:
+            logger.info(
+                "orphan_sentence_tagger_start: %d orphans out of %d sentences",
+                len(orphan_sentences), len(content_sentences),
+            )
+            try:
+                new_ents, new_rels = await self._tag_orphan_sentences(
+                    orphan_sentences, entities_by_key, group_id,
+                )
+                if new_ents or new_rels:
+                    entities.extend(new_ents)
+                    merged_rels.extend(new_rels)
+                    # Embed new concept entities so they work in PPR graph
+                    if new_ents and self.voyage_service:
+                        try:
+                            new_texts = [e.name for e in new_ents]
+                            new_embs = await self.voyage_service.aembed_independent_texts(new_texts)
+                            for ent, emb in zip(new_ents, new_embs):
+                                ent.entity_embedding = emb
+                        except Exception as emb_err:
+                            logger.warning("orphan_tag_embedding_failed: %s", emb_err)
+                    logger.info(
+                        "orphan_sentence_tagger_complete: %d new entities, %d new relationships",
+                        len(new_ents), len(new_rels),
+                    )
+            except Exception as e:
+                logger.warning("orphan_sentence_tagger_failed: %s", e)
+
         logger.info(
             "sentence_entity_extraction_complete",
             extra={
@@ -2003,6 +2041,7 @@ class LazyGraphRAGIndexingPipeline:
                 "cooccurrence_relationships": len(cooccurrence_rels),
                 "merged_relationships": len(merged_rels),
                 "content_sentences": len(content_sentences),
+                "orphan_sentences_tagged": len(orphan_sentences),
             },
         )
         return entities, merged_rels
@@ -2336,6 +2375,109 @@ Return ONLY valid JSON (no markdown fences):
             triples.append({"sid": sid, "s": company, "p": "is", "o": "organization"})
 
         return triples
+
+    # ── Orphan sentence concept tagger ─────────────────────────────────
+
+    _ORPHAN_TAG_PROMPT = """Tag each sentence with 1-2 short concept labels that capture its key topic.
+Labels should be 1-4 words, lowercase. Examples: "cancellation deadline", "filing requirement",
+"insurance obligation", "fee structure", "risk of loss", "arbitration clause".
+
+Sentences:
+{sentences}
+
+Return JSON array. Each element: {{"sid": "<sentence_id>", "concepts": ["concept1", "concept2"]}}
+Only return the JSON array, no other text."""
+
+    async def _tag_orphan_sentences(
+        self,
+        orphan_sentences: List[Dict[str, Any]],
+        entities_by_key: Dict[str, "Entity"],
+        group_id: str,
+    ) -> Tuple[List["Entity"], List["Relationship"]]:
+        """Tag orphan sentences (no entity MENTIONS) with concept entities.
+
+        For each orphan sentence, asks the LLM for 1-2 concept labels.
+        Creates or reuses Entity nodes and adds text_unit_ids so MENTIONS
+        edges connect these sentences to the entity graph.
+        """
+        if not orphan_sentences:
+            return [], []
+
+        # Format sentences for the prompt
+        lines = []
+        for s in orphan_sentences:
+            lines.append(f'{s["id"]}: {s["text"][:300]}')
+        prompt_text = self._ORPHAN_TAG_PROMPT.format(sentences="\n".join(lines))
+
+        try:
+            resp = await self.llm.ainvoke(prompt_text)
+            raw = resp.content if hasattr(resp, "content") else str(resp)
+            # Extract JSON from response
+            import json as _json
+            start = raw.find("[")
+            end = raw.rfind("]") + 1
+            if start < 0 or end <= start:
+                logger.warning("orphan_tag_no_json: %s", raw[:200])
+                return [], []
+            tags = _json.loads(raw[start:end])
+        except Exception as e:
+            logger.warning("orphan_tag_llm_failed: %s", e)
+            return [], []
+
+        new_entities: List[Entity] = []
+        new_relationships: List[Relationship] = []
+
+        for item in tags:
+            sid = item.get("sid", "")
+            concepts = item.get("concepts", [])
+            if not sid or not concepts:
+                continue
+
+            for concept in concepts[:2]:  # max 2 per sentence
+                concept = concept.strip().lower()
+                if not concept or len(concept) > 60:
+                    continue
+
+                key = self._canonical_entity_key(concept)
+                if not key:
+                    continue
+
+                if key in entities_by_key:
+                    # Reuse existing entity — just add the sentence reference
+                    ent = entities_by_key[key]
+                    if sid not in ent.text_unit_ids:
+                        ent.text_unit_ids.append(sid)
+                else:
+                    # Create new concept entity
+                    ent = Entity(
+                        id=f"concept_{key}_{group_id}",
+                        name=concept,
+                        type="CONCEPT",
+                        description=f"Concept tag for orphan sentence coverage",
+                        text_unit_ids=[sid],
+                    )
+                    entities_by_key[key] = ent
+                    new_entities.append(ent)
+
+            # Create co-occurrence edges between concepts in the same sentence
+            sent_ents = [
+                entities_by_key[self._canonical_entity_key(c.strip().lower())]
+                for c in concepts[:2]
+                if self._canonical_entity_key(c.strip().lower()) in entities_by_key
+            ]
+            for i, e1 in enumerate(sent_ents):
+                for e2 in sent_ents[i + 1:]:
+                    new_relationships.append(
+                        Relationship(
+                            source_id=e1.id,
+                            target_id=e2.id,
+                            type="RELATED_TO",
+                            description="co-occurs",
+                            weight=1.0,
+                        )
+                    )
+
+        return new_entities, new_relationships
 
     # ── Main OpenIE extraction method ────────────────────────────────
 
