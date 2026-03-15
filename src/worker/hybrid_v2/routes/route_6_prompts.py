@@ -73,7 +73,7 @@ You are a document analysis assistant. Answer the query using the evidence below
 # Output: JSON array of key points with importance scores.
 
 COMMUNITY_EXTRACT_PROMPT = """\
-You are an analyst. Given the user query and source passages from community-grouped documents, extract ONLY the specific facts, terms, conditions, or data points that are directly relevant to answering the query.
+You are an analyst. Given the user query and source passages from community-grouped documents, extract ALL specific facts, terms, conditions, or data points that could be useful for answering the query — even if only indirectly relevant.
 
 **Query**: {query}
 
@@ -81,13 +81,14 @@ You are an analyst. Given the user query and source passages from community-grou
 {community_source_text}
 
 **Instructions**:
-1. Read ALL source passages across ALL communities. Extract specific facts relevant to the query.
+1. Read ALL source passages across ALL communities. Extract specific facts that relate to the query.
 2. Each key point must be a concrete, specific fact — not a vague theme description.
 3. Preserve exact terminology: names, amounts, dates, legal terms, conditions, section references.
-4. Score each point 0-100 for importance to answering the query. Be strict: only score ≥ 50 for facts that DIRECTLY and EXPLICITLY address the query criteria. Score < 30 for tangentially related facts.
+4. Score each point 0-100 for importance to answering the query. Score ≥ 70 for facts that DIRECTLY answer the query. Score 30-69 for facts that are indirectly relevant or provide supporting context. Score < 30 only for completely unrelated facts.
 5. If a community has no relevant facts for this query, skip it entirely.
 6. Include facts from EVERY document that contains relevant information — do not focus on just one.
-7. PRECISION: When the query asks for items "explicitly described as X" or "specifically named Y", only extract items where the source text EXPLICITLY uses that characterisation. Do not broaden the criteria.
+7. COMPLETENESS: Extract ALL obligations, requirements, mechanisms, and named items from the source text that fall within the query's scope. Missing a relevant item is worse than including a borderline one.
+8. PRECISION: When the query asks for items "explicitly described as X" or "specifically named Y", only extract items where the source text EXPLICITLY uses that characterisation. Do not broaden the criteria.
 
 Respond with ONLY a JSON object:
 {{"points": [

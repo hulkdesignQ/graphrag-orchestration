@@ -1034,7 +1034,7 @@ class ConceptSearchHandler(BaseRouteHandler):
 
             # Sort by score descending, filter low-importance
             points = sorted(points, key=lambda p: p.get("score", 0), reverse=True)
-            min_score = int(os.getenv("ROUTE6_EXTRACT_MIN_SCORE", "40"))
+            min_score = int(os.getenv("ROUTE6_EXTRACT_MIN_SCORE", "20"))
             points = [p for p in points if p.get("score", 0) >= min_score]
             if not points:
                 return self._format_raw_summaries(communities)
