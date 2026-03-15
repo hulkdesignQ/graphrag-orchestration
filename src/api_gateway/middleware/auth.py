@@ -16,6 +16,9 @@ Token Claims:
 import base64
 import json
 import logging
+import os
+import time
+import threading
 from typing import Any, Dict, List, Optional
 
 from fastapi import Depends, Header, HTTPException, Request, status
@@ -30,6 +33,32 @@ logger = logging.getLogger(__name__)
 
 # Security scheme for OpenAPI docs
 security = HTTPBearer()
+
+# ── JWKS cache for JWT signature verification ─────────────────────────
+# When AZURE_TENANT_ID is set, direct Bearer tokens are verified against
+# Azure AD's public keys. Easy Auth tokens (X-MS-TOKEN-AAD-ID-TOKEN)
+# remain unverified since the platform already validated them.
+_jwks_client: Optional[pyjwt.PyJWKClient] = None
+_jwks_lock = threading.Lock()
+_JWKS_CACHE_TTL = 3600  # Refresh JWKS every hour
+
+
+def _get_jwks_client() -> Optional[pyjwt.PyJWKClient]:
+    """Lazy-init the JWKS client from Azure AD's OIDC discovery endpoint."""
+    global _jwks_client
+    tenant_id = os.getenv("AZURE_TENANT_ID")
+    if not tenant_id:
+        return None
+    with _jwks_lock:
+        if _jwks_client is None:
+            jwks_uri = (
+                f"https://login.microsoftonline.com/{tenant_id}"
+                f"/discovery/v2.0/keys"
+            )
+            _jwks_client = pyjwt.PyJWKClient(
+                jwks_uri, cache_jwk_set=True, lifespan=_JWKS_CACHE_TTL
+            )
+    return _jwks_client
 
 
 class JWTAuthMiddleware(BaseHTTPMiddleware):
@@ -106,7 +135,7 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
                     request.headers.get("x-ms-token-aad-id-token")
                     or request.headers.get("X-MS-TOKEN-AAD-ID-TOKEN")
                 )
-                claims = self._decode_token(token, skip_exp=is_easyauth)
+                claims = self._decode_token(token, skip_exp=is_easyauth, is_easyauth=is_easyauth)
                 
                 # Extract roles from token (Entra ID appRoles)
                 roles = claims.get("roles", [])
@@ -271,7 +300,7 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
         
         return None
     
-    def _decode_token(self, token: str, skip_exp: bool = False) -> dict:
+    def _decode_token(self, token: str, skip_exp: bool = False, is_easyauth: bool = False) -> dict:
         """
         Decode and validate JWT token.
         
@@ -279,12 +308,39 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
             token: Raw JWT string
             skip_exp: If True, skip expiration check (safe for EasyAuth
                       tokens where the platform already validated the session).
+            is_easyauth: If True, the token came from Easy Auth headers
+                         (platform-validated) so signature check is skipped.
         
         For Easy Auth, Azure App Service already validates the token,
         so we can safely decode without re-verification of signature or exp.
-        For direct Bearer tokens (API/Swagger), exp is still checked.
+        For direct Bearer tokens, signature is verified against Azure AD
+        JWKS when AZURE_TENANT_ID is configured (defense-in-depth).
         """
         try:
+            # Direct Bearer tokens: verify signature when JWKS is available
+            if not is_easyauth:
+                jwks = _get_jwks_client()
+                if jwks is not None:
+                    try:
+                        signing_key = jwks.get_signing_key_from_jwt(token)
+                        audience = os.getenv("AZURE_CLIENT_ID")
+                        claims = pyjwt.decode(
+                            token,
+                            signing_key.key,
+                            algorithms=["RS256"],
+                            options={"verify_exp": not skip_exp},
+                            audience=audience if audience else None,
+                        )
+                        return claims
+                    except Exception as e:
+                        logger.warning("jwt_signature_verification_failed", error=str(e))
+                        raise HTTPException(
+                            status_code=status.HTTP_401_UNAUTHORIZED,
+                            detail="Token signature verification failed",
+                            headers={"WWW-Authenticate": "Bearer"},
+                        )
+
+            # Easy Auth tokens or JWKS unavailable: decode without signature check
             claims = pyjwt.decode(
                 token,
                 options={"verify_signature": False, "verify_exp": not skip_exp},

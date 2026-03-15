@@ -2187,11 +2187,17 @@ class HippoRAG2Handler(BaseRouteHandler):
         folder_id = folder_id if folder_id is not None else self.folder_id
 
         cypher = """CYPHER 25
-        CALL {
+        CALL () {
             MATCH (sent:Sentence)
-            SEARCH sent IN (VECTOR INDEX sentence_embedding FOR $embedding LIMIT $top_k)
+            SEARCH sent IN (VECTOR INDEX sentence_embedding FOR $embedding WHERE sent.group_id = $group_id LIMIT $top_k)
             SCORE AS score
-            WHERE score >= $threshold AND sent.group_id IN $group_ids
+            WHERE score >= $threshold
+            RETURN sent, score
+            UNION ALL
+            MATCH (sent:Sentence)
+            SEARCH sent IN (VECTOR INDEX sentence_embedding FOR $embedding WHERE sent.group_id = $global_group_id LIMIT $top_k)
+            SCORE AS score
+            WHERE score >= $threshold
             RETURN sent, score
         }
 

@@ -2322,13 +2322,13 @@ Sub-questions:"""
         
         try:
             # Query for entities with highest degree (most relationships)
-            # Optionally filter by keywords if provided
+            # Always filter by group_id for tenant isolation
             if keywords:
-                keyword_filter = " OR ".join([f"toLower(e.name) CONTAINS '{kw}'" for kw in keywords])
-                query = f"""
-                MATCH (e)
-                WHERE (e:Entity)
-                  AND ({keyword_filter})
+                # Use parameterized keyword list to avoid Cypher injection
+                query = """
+                MATCH (e:Entity)
+                WHERE e.group_id IN $group_ids
+                  AND any(kw IN $keywords WHERE toLower(e.name) CONTAINS kw)
                 WITH e
                 MATCH (e)-[r]-()
                 WITH e, count(r) as degree
@@ -2337,10 +2337,9 @@ Sub-questions:"""
                 RETURN e.name as name, degree
                 """
             else:
-                # No keywords - just get top entities by degree
                 query = """
-                MATCH (e)
-                WHERE e:Entity
+                MATCH (e:Entity)
+                WHERE e.group_id IN $group_ids
                 WITH e
                 MATCH (e)-[r]-()
                 WITH e, count(r) as degree
@@ -2349,7 +2348,14 @@ Sub-questions:"""
                 RETURN e.name as name, degree
                 """
             
-            results = await self._async_neo4j.execute_read(query, {"top_k": top_k})
+            results = await self._async_neo4j.execute_read(
+                query,
+                {
+                    "top_k": top_k,
+                    "group_ids": self.group_ids,
+                    "keywords": [kw.lower() for kw in keywords] if keywords else [],
+                },
+            )
             hub_entities = [r["name"] for r in results if r.get("name")]
             
             logger.info("neo4j_hub_extraction_complete",

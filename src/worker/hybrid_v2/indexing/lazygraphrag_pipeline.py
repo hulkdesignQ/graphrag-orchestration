@@ -1592,11 +1592,12 @@ class LazyGraphRAGIndexingPipeline:
                 session.run(
                     """
                     UNWIND $edges AS e
-                    MATCH (child:Section {id: e.child_id})
-                    MATCH (parent:Section {id: e.parent_id})
+                    MATCH (child:Section {id: e.child_id, group_id: $group_id})
+                    MATCH (parent:Section {id: e.parent_id, group_id: $group_id})
                     MERGE (child)-[:SUBSECTION_OF]->(parent)
                     """,
                     edges=subsection_edges,
+                    group_id=group_id,
                 )
 
             return sections_created
@@ -3591,11 +3592,14 @@ Output:
                 BATCH = 500
                 for start in range(0, len(leiden_updates), BATCH):
                     chunk = leiden_updates[start:start + BATCH]
+                    # Only write community_id to the tenant's own entities —
+                    # skip __global__ entities to avoid cross-tenant overwrites
+                    # when multiple groups include shared entities.
                     session.run("""
                         UNWIND $updates AS u
-                        MATCH (n) WHERE elementId(n) = u.eid AND n.group_id IN $group_ids
+                        MATCH (n) WHERE elementId(n) = u.eid AND n.group_id = $group_id
                         SET n.community_id = u.communityId
-                    """, updates=chunk, group_ids=[group_id, settings.GLOBAL_GROUP_ID])
+                    """, updates=chunk, group_id=group_id)
 
             await self.neo4j_store.arun_in_session(_write_leiden)
 
@@ -3618,11 +3622,13 @@ Output:
                 BATCH = 500
                 for start in range(0, len(pr_updates), BATCH):
                     chunk = pr_updates[start:start + BATCH]
+                    # Only write pagerank to the tenant's own entities —
+                    # skip __global__ entities to avoid cross-tenant overwrites.
                     session.run("""
                         UNWIND $updates AS u
-                        MATCH (n) WHERE elementId(n) = u.eid AND n.group_id IN $group_ids
+                        MATCH (n) WHERE elementId(n) = u.eid AND n.group_id = $group_id
                         SET n.pagerank = u.score
-                    """, updates=chunk, group_ids=[group_id, settings.GLOBAL_GROUP_ID])
+                    """, updates=chunk, group_id=group_id)
 
             await self.neo4j_store.arun_in_session(_write_pagerank)
 

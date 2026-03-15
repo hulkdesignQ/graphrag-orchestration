@@ -1350,6 +1350,11 @@ async def get_indexing_status(request: Request, job_id: str):
     if not job:
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
     
+    # Verify the caller owns this job (tenant isolation)
+    caller_group_id = getattr(request.state, "group_id", None)
+    if caller_group_id and job.get("group_id") != caller_group_id:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+    
     return IndexingStatusResponse(
         status=job["status"],
         group_id=job["group_id"],
@@ -1382,10 +1387,15 @@ async def get_job_result(request: Request, job_id: str):
     redis_service = await get_redis_service()
     result = await redis_service.results.get(job_id)
     
+    caller_group_id = getattr(request.state, "group_id", None)
+    
     if not result:
         # Check if job exists but hasn't completed
         job = await _indexing_jobs.get(job_id)
         if job:
+            # Verify the caller owns this job (tenant isolation)
+            if caller_group_id and job.get("group_id") != caller_group_id:
+                raise HTTPException(status_code=404, detail=f"Job {job_id} result not found or expired")
             return JobResultResponse(
                 job_id=job_id,
                 status=job["status"],
@@ -1393,6 +1403,13 @@ async def get_job_result(request: Request, job_id: str):
                 error=job.get("error"),
             )
         raise HTTPException(status_code=404, detail=f"Job {job_id} result not found or expired")
+    
+    # Verify the caller owns this job (tenant isolation) — cross-check
+    # the result against the job store since Redis results may not carry group_id.
+    if caller_group_id:
+        job = await _indexing_jobs.get(job_id)
+        if job and job.get("group_id") != caller_group_id:
+            raise HTTPException(status_code=404, detail=f"Job {job_id} result not found or expired")
     
     return JobResultResponse(
         job_id=job_id,
