@@ -454,8 +454,9 @@ def apply_merge_map(
     if not merge_map:
         return entities, relationships
 
-    # Merge entities
+    # Merge entities — accumulate text_unit_ids across variants
     seen_canonical: Set[str] = set()
+    canonical_index: Dict[str, int] = {}  # canonical_lower → index in merged_entities
     merged_entities: List[Dict[str, Any]] = []
 
     for ent in entities:
@@ -464,10 +465,17 @@ def apply_merge_map(
         canonical_lower = canonical.lower()
 
         if canonical_lower in seen_canonical:
-            # Skip duplicate
+            # Merge text_unit_ids from variant into canonical entity
+            idx = canonical_index[canonical_lower]
+            existing_ids = set(merged_entities[idx].get("text_unit_ids") or [])
+            variant_ids = ent.get("text_unit_ids") or []
+            if variant_ids:
+                existing_ids.update(variant_ids)
+                merged_entities[idx]["text_unit_ids"] = list(existing_ids)
             continue
 
         seen_canonical.add(canonical_lower)
+        canonical_index[canonical_lower] = len(merged_entities)
 
         # Update entity with canonical name
         merged_ent = dict(ent)

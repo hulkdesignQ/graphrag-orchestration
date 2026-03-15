@@ -233,7 +233,7 @@ class LazyGraphRAGIndexingPipeline:
         # Default true: two-step scores 56/57 after entity embedding bleed fix (commit 72fde278)
         self._openie_two_step = os.getenv("OPENIE_TWO_STEP", "true").strip().lower() in {"1", "true", "yes"}
         # NER scope: "narrow" (upstream HippoRAG 2 style) or "broad" (adds abstract concepts — causes hub entities)
-        self._ner_scope = os.getenv("OPENIE_NER_SCOPE", "narrow").strip().lower()
+        self._ner_scope = os.getenv("OPENIE_NER_SCOPE", "broad").strip().lower()
 
     async def _achat_with_retry(self, messages, *, timeout: Optional[int] = None) -> Any:
         """Call self.llm.achat() with retry + timeout.
