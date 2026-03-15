@@ -333,8 +333,8 @@ class LazyGraphRAGIndexingPipeline:
             del_stats = self.neo4j_store.delete_entities_only(group_id)
             stats["reextract_deleted"] = del_stats
 
-            # Fetch existing sentences for entity extraction
-            existing_sentences = self.neo4j_store.get_sentences_by_group(group_id)
+            # Fetch existing sentences for entity extraction (own group only)
+            existing_sentences = self.neo4j_store.get_sentences_by_group(group_id, group_ids=[group_id])
             if not existing_sentences:
                 stats["skipped"].append("no_sentences_for_reextraction")
                 stats["elapsed_s"] = round(time.time() - start_time, 2)
@@ -497,7 +497,7 @@ class LazyGraphRAGIndexingPipeline:
             expanded_docs = await self._prepare_documents(group_id, documents, ingestion, user_id=user_id)
             chunk_to_doc_id = {}
             # Recover sentence count from Neo4j
-            existing = self.neo4j_store.get_sentences_by_group(group_id)
+            existing = self.neo4j_store.get_sentences_by_group(group_id, group_ids=[group_id])
             stats["sentences"] = len(existing)
             stats["sentences_embedded"] = len(existing)
 
@@ -1895,7 +1895,12 @@ class LazyGraphRAGIndexingPipeline:
             return [], []
 
         # ── Step 1: Fetch sentences from Neo4j ──────────────────────────────
-        raw_sentences = self.neo4j_store.get_sentences_by_group(group_id)
+        # CRITICAL: Only fetch sentences from this group_id, NOT __global__.
+        # build_group_ids() includes __global__ for query-time fallback, but
+        # entity extraction must only use the target group's sentences —
+        # otherwise MENTIONS edges reference sentence IDs from __global__
+        # that don't exist under this group_id, creating orphan entities.
+        raw_sentences = self.neo4j_store.get_sentences_by_group(group_id, group_ids=[group_id])
         if not raw_sentences:
             logger.warning("no Sentence nodes found for entity extraction, returning empty")
             return [], []
@@ -2362,7 +2367,7 @@ Return ONLY valid JSON (no markdown fences):
         from llama_index.core.llms import ChatMessage
 
         if content_sentences is None:
-            raw_sentences = self.neo4j_store.get_sentences_by_group(group_id)
+            raw_sentences = self.neo4j_store.get_sentences_by_group(group_id, group_ids=[group_id])
             content_sentences = [
                 s for s in raw_sentences if self._classify_sentence(s) == "content"
             ]
