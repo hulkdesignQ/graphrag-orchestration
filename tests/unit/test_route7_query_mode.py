@@ -67,7 +67,7 @@ class TestQueryModePresets:
         """community_search preset enables community passage seeding."""
         Handler = _get_handler_class()
         preset = Handler.QUERY_MODE_PRESETS["community_search"]
-        assert preset["ppr_passage_top_k"] == 50
+        assert preset["ppr_passage_top_k"] == 100
         assert preset["community_passage_seeds"] is True
         assert preset["prompt_variant"] is None
 
@@ -174,6 +174,6 @@ class TestBackwardCompatibility:
         expected = ["self", "query", "response_type", "knn_config",
                     "prompt_variant", "synthesis_model", "include_context",
                     "weight_profile", "language", "query_mode", "folder_id",
-                    "config_overrides"]
+                    "config_overrides", "user_id"]
         actual = list(sig.parameters.keys())
         assert actual == expected
