@@ -760,9 +760,9 @@ class ConceptSearchHandler(BaseRouteHandler):
         "---Question---\n"
         "{query}\n\n"
         "Respond with ONLY a JSON object:\n"
-        "{{\"reason\": \"brief reasoning for your rating\", \"rating\": <0-10>}}\n"
-        "0 = completely irrelevant, 10 = perfectly relevant.\n"
-        "Rate generously — even partial or indirect relevance should score ≥ 3."
+        "{{\"reason\": \"brief reasoning for your rating\", \"rating\": <0-5>}}\n"
+        "0 = completely irrelevant, 5 = perfectly relevant.\n"
+        "Rate generously — even partial or indirect relevance should score ≥ 1."
     )
 
     async def _rate_communities_with_llm(
@@ -825,18 +825,21 @@ class ConceptSearchHandler(BaseRouteHandler):
         ratings = await asyncio.gather(*[_rate_one(c) for c in communities])
 
         # Filter below threshold; keep communities where LLM failed (rating == -1)
-        filtered_communities = []
-        filtered_scores = []
+        rated_triples = []
         for community, score, rating in zip(communities, scores, ratings):
             if rating == -1 or rating >= threshold:
-                filtered_communities.append(community)
-                filtered_scores.append(score)
+                rated_triples.append((community, score, rating))
+
+        # Sort by LLM rating descending (upstream alignment: highest-rated first)
+        rated_triples.sort(key=lambda t: t[2], reverse=True)
+        filtered_communities = [t[0] for t in rated_triples]
+        filtered_scores = [t[1] for t in rated_triples]
 
         logger.info(
             "route6_dynamic_community_ratings",
             ratings=list(zip(
-                [c.get("title", "?") for c in communities],
-                ratings,
+                [c.get("title", "?") for c in filtered_communities],
+                [t[2] for t in rated_triples],
             )),
             threshold=threshold,
             kept=len(filtered_communities),
