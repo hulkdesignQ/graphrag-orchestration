@@ -66,6 +66,7 @@ def _make_mock_pipeline():
     # Mock community matcher
     pipeline.community_matcher = MagicMock()
     pipeline.community_matcher.match_communities = AsyncMock(return_value=[])
+    pipeline.community_matcher.get_all_communities = AsyncMock(return_value=[])
     return pipeline
 
 
@@ -419,8 +420,12 @@ class TestStreamingSynthesis:
         handler._retrieve_sentence_evidence = AsyncMock(return_value=[])
         handler._retrieve_section_headings = AsyncMock(return_value=[])
         handler._retrieve_entity_document_map = AsyncMock(return_value={})
+        community = _make_community("c1", "Test", "Test summary")
+        handler.pipeline.community_matcher.get_all_communities = AsyncMock(
+            return_value=[community]
+        )
         handler.pipeline.community_matcher.match_communities = AsyncMock(
-            return_value=[(_make_community("c1", "Test", "Test summary"), 0.9)]
+            return_value=[(community, 0.9)]
         )
 
         # Mock streaming synthesis
