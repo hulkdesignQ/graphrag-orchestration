@@ -184,7 +184,17 @@ class CommunityMatcher:
             group_id=self.group_id,
         )
         return True
-    
+
+    async def get_all_communities(self) -> List[Dict[str, Any]]:
+        """Return all loaded communities (no filtering).
+
+        Used by Route 6 when the corpus is small enough to LLM-rate every
+        community instead of pre-filtering by embedding similarity.
+        """
+        if not self._loaded:
+            await self.load_communities()
+        return list(self._communities)
+
     async def match_communities(
         self,
         query: str,

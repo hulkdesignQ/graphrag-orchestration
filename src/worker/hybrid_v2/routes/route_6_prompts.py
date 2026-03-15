@@ -23,7 +23,7 @@ Design rationale documented in:
 # CONCEPT SYNTHESIS PROMPT
 # ─────────────────────────────────────────────────────────────────
 # Input variables: {query}, {community_summaries}, {section_headings},
-#                  {sentence_evidence}, {entity_coverage}
+#                  {sentence_evidence}
 # Expected output: final synthesized response
 
 CONCEPT_SYNTHESIS_PROMPT = """\
@@ -40,9 +40,6 @@ You are a document analysis assistant. Answer the query using the evidence below
 **Document Evidence** (passages from source documents, labelled [Document > Section Header]):
 {sentence_evidence}
 
-**Entity-Document Coverage** (which entities appear in which documents — exact graph data):
-{entity_coverage}
-
 **Rules**:
 1. Use all three sources. Thematic context helps you organize; document evidence provides facts. Document structure is a reference list of section headings — do NOT treat each heading as a separate finding. Thematic context entries are topic clusters, NOT separate documents — never present a community theme as if it were a distinct document.
 2. Include facts from document evidence even if they are not mentioned in thematic context.
@@ -52,15 +49,14 @@ You are a document analysis assistant. Answer the query using the evidence below
 6. Response length — choose based on query type:
    - R6-VIII: For queries asking for ALL, EVERY, COMPLETE LIST, or ENUMERATE: list EVERY item found across ALL documents without truncation. Completeness is mandatory — do not summarize or drop items.
    - For narrative/summary queries: 3-5 focused paragraphs, prioritizing the most important findings.
-   - PRECISION OVER PADDING: When the query qualifies items with criteria such as "explicitly described as X", "specifically named", "required Y" — only include items where the source evidence EXPLICITLY uses that characterisation. Do not broaden the criteria to include tangentially related items. Omitting a marginal item is always better than including one that doesn't strictly match. For entity/party listing queries, include only entities that are primary contract parties or named organisations — not every entity mentioned in the text (e.g. omit arbitration bodies, generic references, or inferred names).
+   - PRECISION OVER PADDING: When the query qualifies items with criteria such as "explicitly described as X", "specifically named", "required Y" — only include items where the source evidence EXPLICITLY uses that characterisation. Do not broaden the criteria to include tangentially related items. Omitting a marginal item is always better than including one that doesn't strictly match. For entity/party listing queries, include ALL entities explicitly named in the document evidence — contract parties, referenced organisations, and named bodies (e.g. arbitration administrators, industry associations, job site names).
 7. Cross-document comparison (R6-IX) — for queries asking which document has the latest/earliest/largest/smallest value, or which entity appears most/least:
    a. Extract the relevant value explicitly from EACH document represented in the evidence.
    b. List: "[Document name]: [value found]" for every document.
    c. Then state which is largest/latest/most based only on the extracted values.
    d. If no evidence exists for a document, write "[Document name]: no evidence found" — never guess.
-8. Entity counting (R6-XI) — for queries asking which entity appears in more/most/fewer documents: use the Entity-Document Coverage table above as the authoritative source. The coverage table is exact graph data — do not count from passage evidence. For "list all parties/organisations" queries, use the Entity-Document Coverage table as a starting point but supplement with entities clearly named as contract parties in the document evidence. Omit entities that are not genuine parties or organisations (e.g. arbitration bodies, individual persons who are not named parties, generic references).
-9. Do not mention methodology, sources, or how the evidence was retrieved.
-10. REFUSE for specific lookups where the exact data point is absent:
+8. Do not mention methodology, sources, or how the evidence was retrieved.
+9. REFUSE for specific lookups where the exact data point is absent:
    - Question asks about a specific term, clause, or concept by name (e.g. "mold damage", "force majeure") but that exact term does NOT appear anywhere in the document evidence → say: "The requested information was not found in the available documents." Do NOT infer that an unnamed concept falls under a broader or related category.
    - If no evidence at all is available, say: "The requested information was not found in the available documents."
 

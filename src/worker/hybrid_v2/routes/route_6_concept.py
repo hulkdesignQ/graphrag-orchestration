@@ -785,7 +785,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         Returns:
             Filtered (communities, scores) tuple.
         """
-        threshold = int(os.getenv("ROUTE6_DYNAMIC_COMMUNITY_THRESHOLD", "3"))
+        threshold = int(os.getenv("ROUTE6_DYNAMIC_COMMUNITY_THRESHOLD", "1"))
         max_concurrent = int(os.getenv("ROUTE6_DYNAMIC_COMMUNITY_CONCURRENCY", "12"))
         semaphore = asyncio.Semaphore(max_concurrent)
 
