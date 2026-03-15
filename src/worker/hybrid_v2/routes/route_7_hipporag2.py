@@ -1961,6 +1961,26 @@ class HippoRAG2Handler(BaseRouteHandler):
         if scores:
             chunks_list.sort(key=lambda c: c.get("_ppr_score", 0.0), reverse=True)
 
+        # Text-based dedup: when group_ids spans multiple groups with
+        # overlapping content (e.g. own group + __global__ sharing the
+        # same PDFs), PPR returns duplicate passages.  Keep the highest-
+        # scored copy of each unique text to maximise evidence diversity.
+        seen_texts: set[str] = set()
+        deduped: list[dict] = []
+        for chunk in chunks_list:
+            txt_key = chunk.get("text", "").strip()[:200]
+            if txt_key not in seen_texts:
+                seen_texts.add(txt_key)
+                deduped.append(chunk)
+        if len(deduped) < len(chunks_list):
+            logger.info(
+                "route7_fetch_text_dedup",
+                before=len(chunks_list),
+                after=len(deduped),
+                removed=len(chunks_list) - len(deduped),
+            )
+        chunks_list = deduped
+
         return chunks_list
 
     # ======================================================================

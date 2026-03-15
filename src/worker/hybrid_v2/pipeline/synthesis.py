@@ -2487,6 +2487,7 @@ Response:"""
             document_guidance = """
 IMPORTANT for Per-Document Queries:
 - The Evidence Context contains chunks grouped by "=== DOCUMENT: <title> ===" headers.
+- You MUST cover EVERY unique document present in the Evidence Context. Do NOT stop early.
 - Count UNIQUE top-level documents only - do NOT create separate summaries for:
   * Document sections (e.g., "Section 2: Arbitration" belongs to parent document)
   * Exhibits, Appendices, Schedules (e.g., "Exhibit A" belongs to parent contract)

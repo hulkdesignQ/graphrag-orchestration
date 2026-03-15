@@ -73,7 +73,7 @@ Key regressions:
 ## TODO List
 
 ### Remaining Work
-1. **Stabilize community structure** — The Louvain algorithm is non-deterministic. Consider seeding or using deterministic community detection to prevent score fluctuations across reindexes.
+1. **Stabilize community structure** — Leiden community detection produced different boundaries (11→12 communities) after reindex. Investigate why the new sentence set causes a different partition and whether resolution tuning can help.
 2. **Q-G6 further improvement (6/9→9/9)** — AAA (American Arbitration Association) still missing in some runs. Investigate retrieval gap vs synthesis gap.
 3. **Q-G8 (3/9)** — Stacked retrieval + synthesis gap. Insurance/indemnity/hold harmless clauses span multiple documents. Consider query decomposition or wider community selection.
 4. **Q-G2 (6/9)** — WI Code SPS 383.21(2)5 and County of Washburn retrieval. Holding tank contract content may need entity extraction improvement.

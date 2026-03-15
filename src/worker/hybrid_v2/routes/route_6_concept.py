@@ -1020,7 +1020,9 @@ class ConceptSearchHandler(BaseRouteHandler):
             source_text_chars=sum(len(t) for _, t in community_texts),
         )
 
-        # MAP phase: extract key points from each community in parallel
+        # MAP phase: per-community parallel extraction.
+        # Each community gets its own LLM call for focused attention.
+        # All calls run concurrently — wall-clock time ≈ slowest single call.
         max_concurrent = int(os.getenv("ROUTE6_EXTRACT_CONCURRENCY", "12"))
         semaphore = asyncio.Semaphore(max_concurrent)
 
@@ -1039,7 +1041,6 @@ class ConceptSearchHandler(BaseRouteHandler):
                         text = re.sub(r'\n?```\s*$', '', text)
                     parsed = json.loads(text)
                     points = parsed.get("points", [])
-                    # Ensure community tag is set
                     for p in points:
                         if not p.get("community"):
                             p["community"] = title
@@ -1051,9 +1052,8 @@ class ConceptSearchHandler(BaseRouteHandler):
                     logger.warning("route6_extract_one_failed", community=title, error=str(e))
                     return []
 
-        results = await asyncio.gather(
-            *[_extract_one(c, txt) for c, txt in community_texts]
-        )
+        tasks = [_extract_one(c, txt) for c, txt in community_texts]
+        results = await asyncio.gather(*tasks)
 
         # REDUCE phase: aggregate all points, deduplicate, sort, filter
         all_points: List[Dict[str, Any]] = []
@@ -1080,6 +1080,10 @@ class ConceptSearchHandler(BaseRouteHandler):
         if not points:
             return self._format_raw_summaries(communities)
 
+        # Cap key points to keep synthesis prompt tractable (reduces latency)
+        max_points = int(os.getenv("ROUTE6_MAX_EXTRACT_POINTS", "25"))
+        points = points[:max_points]
+
         formatted = []
         for p in points:
             desc = p.get("description", "")
@@ -1093,6 +1097,7 @@ class ConceptSearchHandler(BaseRouteHandler):
             total_raw=len(all_points),
             after_dedup=len(unique_points),
             after_filter=len(points),
+            max_points=max_points,
             top_score=points[0].get("score", 0) if points else 0,
         )
         return "\n".join(formatted)
