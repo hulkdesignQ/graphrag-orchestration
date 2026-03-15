@@ -232,8 +232,8 @@ class LazyGraphRAGIndexingPipeline:
         # Two-step NER→Triple extraction (upstream HippoRAG 2 alignment)
         # Default true: two-step scores 56/57 after entity embedding bleed fix (commit 72fde278)
         self._openie_two_step = os.getenv("OPENIE_TWO_STEP", "true").strip().lower() in {"1", "true", "yes"}
-        # NER scope: "broad" (includes abstract concepts) or "narrow" (proper nouns only, HippoRAG 2 style)
-        self._ner_scope = os.getenv("OPENIE_NER_SCOPE", "broad").strip().lower()
+        # NER scope: "narrow" (upstream HippoRAG 2 style) or "broad" (adds abstract concepts — causes hub entities)
+        self._ner_scope = os.getenv("OPENIE_NER_SCOPE", "narrow").strip().lower()
 
     async def _achat_with_retry(self, messages, *, timeout: Optional[int] = None) -> Any:
         """Call self.llm.achat() with retry + timeout.
@@ -2028,9 +2028,16 @@ Return ONLY valid JSON (no markdown fences):
 
     # ── Two-step prompts (upstream HippoRAG 2 alignment) ────────────
     # Step 1: NER — "broad" includes abstract concepts, "narrow" matches upstream HippoRAG 2
+    # ── NER prompts (aligned with upstream HippoRAG 2) ─────────────────
+    # Upstream uses a minimal system prompt + one-shot example.
+    # "broad" adds legal-domain types; "narrow" matches upstream exactly.
     _NER_PROMPT_BROAD = """Your task is to extract named entities from the given sentences.
-Extract: proper nouns, organizations, people, dates, time periods, deadlines, durations (e.g., "10 business days", "90-day period"), amounts, legal terms, AND abstract concepts (warranties, liabilities, rights, obligations, limitations, conditions, terms).
+Extract: proper nouns, organizations, people, locations, dates, time periods, durations, monetary amounts, legal terms.
 Respond with a JSON list of entities.
+
+Example:
+Sentences: "Radio City is India's first private FM radio station and was started on 3 July 2001. It plays Hindi, English and regional songs."
+Output: {{"named_entities": ["Radio City", "India", "3 July 2001", "Hindi", "English"]}}
 
 {sentences}
 
@@ -2038,24 +2045,37 @@ Return ONLY valid JSON (no markdown fences):
 {{"named_entities": [...]}}"""
 
     _NER_PROMPT_NARROW = """Your task is to extract named entities from the given sentences.
-Extract: proper nouns, organizations, people, locations, dates, time periods, deadlines, durations (e.g., "10 business days", "90-day period"), amounts, legal terms.
 Respond with a JSON list of entities.
+
+Example:
+Sentences: "Radio City is India's first private FM radio station and was started on 3 July 2001. It plays Hindi, English and regional songs."
+Output: {{"named_entities": ["Radio City", "India", "3 July 2001", "Hindi", "English"]}}
 
 {sentences}
 
 Return ONLY valid JSON (no markdown fences):
 {{"named_entities": [...]}}"""
 
-    # Step 2: NER-conditioned triple extraction — upstream constraint + our proven rules
-    _TRIPLE_PROMPT = """Construct an RDF knowledge graph from the sentences below using the provided named entities.
+    # ── Triple extraction prompt (aligned with upstream HippoRAG 2) ──
+    # Upstream: no per-sentence count constraint, short predicates via example.
+    _TRIPLE_PROMPT = """Your task is to construct an RDF knowledge graph from the sentences below using the provided named entities.
 
-Rules:
-1. Process EACH sentence [ID] independently — extract 2-5 triples per sentence.
-2. Each triple MUST contain at least one, preferably two, of the named entities.
-3. Predicates MUST be short verb phrases (1-5 words). Examples: "warrants for", "is not transferable", "holds risk until", "disclaims", "shall indemnify".
-4. Do NOT use the full sentence as a predicate.
-5. Clearly resolve pronouns to their specific names to maintain clarity.
-6. Extract ALL factual relationships from each sentence, not just the most obvious one.
+Requirements:
+- Each triple should contain at least one, preferably two, of the named entities.
+- Clearly resolve pronouns to their specific names to maintain clarity.
+
+Example:
+Named entities: ["Radio City", "India", "3 July 2001", "Hindi", "English", "May 2008", "PlanetRadiocity.com"]
+Passage: "Radio City is India's first private FM radio station and was started on 3 July 2001. It plays Hindi, English and regional songs. Radio City forayed into New Media in May 2008 with the launch of PlanetRadiocity.com."
+Output: {{"triples": [
+  {{"sid": "s1", "s": "Radio City", "p": "located in", "o": "India"}},
+  {{"sid": "s1", "s": "Radio City", "p": "is", "o": "private FM radio station"}},
+  {{"sid": "s1", "s": "Radio City", "p": "started on", "o": "3 July 2001"}},
+  {{"sid": "s2", "s": "Radio City", "p": "plays songs in", "o": "Hindi"}},
+  {{"sid": "s2", "s": "Radio City", "p": "plays songs in", "o": "English"}},
+  {{"sid": "s3", "s": "Radio City", "p": "launched", "o": "PlanetRadiocity.com"}},
+  {{"sid": "s3", "s": "PlanetRadiocity.com", "p": "launched in", "o": "May 2008"}}
+]}}
 
 Named entities: {named_entities}
 
@@ -2477,6 +2497,44 @@ Return ONLY valid JSON (no markdown fences):
             results = await asyncio.gather(*[extract_fn(b, ctx) for b, ctx in batches])
             for batch_triples in results:
                 all_raw_triples.extend(batch_triples)
+
+        # ── Filter invalid triples (upstream HippoRAG 2 alignment) ───
+        # Reject triples missing required fields, deduplicate, and reject
+        # triples where the predicate is suspiciously long (full-sentence
+        # copy-paste instead of a short verb phrase).
+        _MAX_PREDICATE_WORDS = 8
+        seen_triples: set = set()
+        valid_triples: list = []
+        filtered_long_pred = 0
+        filtered_dupe = 0
+        for t in all_raw_triples:
+            if isinstance(t, dict):
+                s, p, o = t.get("s", ""), t.get("p", ""), t.get("o", "")
+                sid = t.get("sid", "")
+            elif isinstance(t, (list, tuple)) and len(t) >= 3:
+                s, p, o = str(t[0]), str(t[1]), str(t[2])
+                sid = ""
+            else:
+                continue
+            if not s or not p or not o:
+                continue
+            # Reject predicates that are full sentences (> N words)
+            if len(p.split()) > _MAX_PREDICATE_WORDS:
+                filtered_long_pred += 1
+                continue
+            key = (s.lower().strip(), p.lower().strip(), o.lower().strip())
+            if key in seen_triples:
+                filtered_dupe += 1
+                continue
+            seen_triples.add(key)
+            valid_triples.append(t)
+        if filtered_long_pred or filtered_dupe:
+            logger.info(
+                "triple_filter_applied",
+                extra={"before": len(all_raw_triples), "after": len(valid_triples),
+                       "long_predicate": filtered_long_pred, "duplicate": filtered_dupe},
+            )
+        all_raw_triples = valid_triples
 
         if not all_raw_triples:
             return [], []
