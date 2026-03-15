@@ -2029,6 +2029,18 @@ class LazyGraphRAGIndexingPipeline:
                         "orphan_sentence_tagger_complete: %d new entities, %d new relationships",
                         len(new_ents), len(new_rels),
                     )
+                # Verify: recount orphans after tagging
+                covered_after = set()
+                for ent in entities:
+                    covered_after.update(ent.text_unit_ids)
+                still_orphan_count = sum(1 for s in content_sentences if s["id"] not in covered_after)
+                logger.info(
+                    "orphan_post_tag_check: %d still orphan after tagger (was %d)",
+                    still_orphan_count, len(orphan_sentences),
+                )
+                if still_orphan_count > 0:
+                    missed = [s["text"][:80] for s in content_sentences if s["id"] not in covered_after]
+                    logger.warning("orphan_still_missed: %s", missed[:5])
             except Exception as e:
                 logger.warning("orphan_sentence_tagger_failed: %s", e)
 
@@ -2410,8 +2422,11 @@ Only return the JSON array, no other text."""
         prompt_text = self._ORPHAN_TAG_PROMPT.format(sentences="\n".join(lines))
 
         try:
-            resp = await self.llm.ainvoke(prompt_text)
-            raw = resp.content if hasattr(resp, "content") else str(resp)
+            from llama_index.core.llms import ChatMessage
+            resp = await self._achat_with_retry(
+                [ChatMessage(role="user", content=prompt_text)]
+            )
+            raw = resp.message.content if hasattr(resp, "message") else str(resp)
             # Extract JSON from response
             import json as _json
             start = raw.find("[")
@@ -2427,12 +2442,14 @@ Only return the JSON array, no other text."""
         new_entities: List[Entity] = []
         new_relationships: List[Relationship] = []
 
+        tagged_sids: set = set()
         for item in tags:
             sid = item.get("sid", "")
             concepts = item.get("concepts", [])
             if not sid or not concepts:
                 continue
 
+            tagged_sids.add(sid)
             for concept in concepts[:2]:  # max 2 per sentence
                 concept = concept.strip().lower()
                 if not concept or len(concept) > 60:
@@ -2443,12 +2460,10 @@ Only return the JSON array, no other text."""
                     continue
 
                 if key in entities_by_key:
-                    # Reuse existing entity — just add the sentence reference
                     ent = entities_by_key[key]
                     if sid not in ent.text_unit_ids:
                         ent.text_unit_ids.append(sid)
                 else:
-                    # Create new concept entity
                     ent = Entity(
                         id=f"concept_{key}_{group_id}",
                         name=concept,
@@ -2476,6 +2491,56 @@ Only return the JSON array, no other text."""
                             weight=1.0,
                         )
                     )
+
+        # Deterministic fallback: tag any sentence the LLM missed.
+        # Extract the first significant noun-phrase-like tokens from the text.
+        still_orphan = [s for s in orphan_sentences if s["id"] not in tagged_sids]
+        if still_orphan:
+            logger.info(
+                "orphan_tag_fallback: %d sentences missed by LLM, using keyword extraction",
+                len(still_orphan),
+            )
+            import re as _re
+            _stop = {
+                "the", "a", "an", "of", "and", "or", "in", "to", "for", "by",
+                "is", "are", "was", "were", "be", "this", "that", "its", "it",
+                "on", "at", "as", "with", "from", "shall", "will", "may", "not",
+                "no", "all", "any", "each", "such", "their", "they", "he", "she",
+                "his", "her", "has", "have", "had", "been", "being", "if", "than",
+                "but", "which", "who", "whom", "whose", "when", "where", "both",
+                "into", "upon", "after", "before", "between", "under", "over",
+                "other", "same", "more", "s", "hereto", "herein", "thereof",
+                "pursuant", "thereto", "hereunder",
+            }
+            for s in still_orphan:
+                text = s["text"]
+                sid = s["id"]
+                # Extract 2-3 word concepts from the sentence text
+                words = [
+                    w.lower() for w in _re.findall(r"[A-Za-z]+(?:'[A-Za-z]+)?", text)
+                    if len(w) > 2 and w.lower() not in _stop
+                ]
+                # Take first 2 meaningful words as a concept label
+                concept = " ".join(words[:3]) if words else "miscellaneous clause"
+                key = self._canonical_entity_key(concept)
+                if not key:
+                    key = "misc_clause"
+                    concept = "miscellaneous clause"
+
+                if key in entities_by_key:
+                    ent = entities_by_key[key]
+                    if sid not in ent.text_unit_ids:
+                        ent.text_unit_ids.append(sid)
+                else:
+                    ent = Entity(
+                        id=f"concept_{key}_{group_id}",
+                        name=concept,
+                        type="CONCEPT",
+                        description="Keyword-based concept tag (LLM fallback)",
+                        text_unit_ids=[sid],
+                    )
+                    entities_by_key[key] = ent
+                    new_entities.append(ent)
 
         return new_entities, new_relationships
 
