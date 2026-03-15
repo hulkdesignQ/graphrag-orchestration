@@ -289,6 +289,9 @@ class HippoRAG2Handler(BaseRouteHandler):
         user_id: Optional[str] = None,
     ) -> RouteResult:
         """Execute Route 7: True HippoRAG 2 retrieval pipeline."""
+        # Resolve per-query folder scope (overrides pipeline default)
+        folder_id = self._resolve_folder_id(folder_id)
+
         enable_timings = os.getenv(
             "ROUTE7_RETURN_TIMINGS", "0"
         ).strip().lower() in {"1", "true", "yes"}
@@ -475,6 +478,11 @@ class HippoRAG2Handler(BaseRouteHandler):
                         WHERE e.group_id IN $group_ids
                         MATCH (e)<-[:MENTIONS]-(s:Sentence)
                         WHERE s.group_id IN $group_ids
+                        OPTIONAL MATCH (s)-[:IN_DOCUMENT]->(d:Document)
+                        WHERE d.group_id IN $group_ids
+                        WITH s, d
+                        WHERE $folder_id IS NULL OR d IS NULL
+                           OR EXISTS { MATCH (d)-[:IN_FOLDER]->(f:Folder) WHERE f.id = $folder_id AND f.group_id IN $group_ids }
                         RETURN DISTINCT s.text AS text, s.sent_index AS idx
                         ORDER BY idx
                         LIMIT 20
@@ -484,6 +492,7 @@ class HippoRAG2Handler(BaseRouteHandler):
                                 sent_cypher,
                                 community_ids=community_ids,
                                 group_ids=self.group_ids,
+                                folder_id=folder_id,
                             )
                             sent_records = await sent_result.data()
                         sent_texts = [
@@ -534,7 +543,7 @@ class HippoRAG2Handler(BaseRouteHandler):
 
         # 2b. DPR passage search (sentence-level Small-to-Big)
         dpr_task = asyncio.create_task(
-            self._dpr_passage_search(query_embedding, dpr_top_k, dpr_sentence_top_k)
+            self._dpr_passage_search(query_embedding, dpr_top_k, dpr_sentence_top_k, folder_id=folder_id)
         )
 
         # 2c. Optional sentence search for evidence augmentation (Phase 2)
@@ -542,7 +551,7 @@ class HippoRAG2Handler(BaseRouteHandler):
         if sentence_search_enabled:
             sentence_top_k = int(os.getenv("ROUTE7_SENTENCE_TOP_K", "30"))
             sentence_task = asyncio.create_task(
-                self._retrieve_sentence_evidence(query, top_k=sentence_top_k)
+                self._retrieve_sentence_evidence(query, top_k=sentence_top_k, folder_id=folder_id)
             )
 
         # 2d. Optional cross-encoder passage seeding (Priority 2A)
@@ -653,7 +662,7 @@ class HippoRAG2Handler(BaseRouteHandler):
 
         _seed_tasks: List[Tuple[str, Any]] = []
         if structural_seeds_enabled and self._async_neo4j:
-            _seed_tasks.append(("structural", self._resolve_structural_seeds(query)))
+            _seed_tasks.append(("structural", self._resolve_structural_seeds(query, folder_id=folder_id)))
         # Activate community seeds when either entity seeding OR passage seeding is enabled
         _need_community = (community_seeds_enabled or community_passage_seeds_enabled) and self.pipeline.community_matcher
         if _need_community:
@@ -661,6 +670,7 @@ class HippoRAG2Handler(BaseRouteHandler):
                 query, include_sentences=community_passage_seeds_enabled,
                 adaptive_ratio=community_adaptive_ratio,
                 max_k=community_max_k,
+                folder_id=folder_id,
             )))
 
         if _seed_tasks:
@@ -975,6 +985,7 @@ class HippoRAG2Handler(BaseRouteHandler):
                 top_sentence_ids,
                 ppr_scores_map=ppr_scores_map,
                 sentence_window_enabled=sentence_window_enabled,
+                folder_id=folder_id,
             ),
         ))
 
@@ -984,7 +995,7 @@ class HippoRAG2Handler(BaseRouteHandler):
             if detected_types:
                 _parallel_tasks.append((
                     "entity_doc_map",
-                    self._query_entity_doc_map(detected_types),
+                    self._query_entity_doc_map(detected_types, folder_id=folder_id),
                 ))
 
         _parallel_results = await asyncio.gather(
@@ -1422,6 +1433,7 @@ class HippoRAG2Handler(BaseRouteHandler):
     async def _query_entity_doc_map(
         self,
         entity_types: List[str],
+        folder_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Query ALL entities of given types with per-document granularity.
 
@@ -1475,7 +1487,7 @@ class HippoRAG2Handler(BaseRouteHandler):
                     group_ids=group_ids,
                     entity_types=entity_types,
                     role_rel_types=_STRUCTURED_ROLE_TYPES,
-                    folder_id=self.folder_id,
+                    folder_id=folder_id,
                 )
                 return [
                     {
@@ -1673,6 +1685,7 @@ class HippoRAG2Handler(BaseRouteHandler):
         query_embedding: List[float],
         top_k: int = 0,
         sentence_top_k: int = 0,
+        folder_id: Optional[str] = None,
     ) -> List[Tuple[str, float]]:
         """Dense Passage Retrieval via sentence-level vector search.
 
@@ -1689,7 +1702,7 @@ class HippoRAG2Handler(BaseRouteHandler):
             return []
 
         group_ids = self.group_ids
-        folder_id = self.folder_id
+        folder_id = folder_id if folder_id is not None else self.folder_id
         driver = self.neo4j_driver
 
         # When top_k=0, resolve actual corpus size so we seed all passages
@@ -1767,6 +1780,7 @@ class HippoRAG2Handler(BaseRouteHandler):
         ppr_scores_map: Optional[Dict[str, float]] = None,
         entity_names: Optional[List[str]] = None,
         sentence_window_enabled: Optional[bool] = None,
+        folder_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Fetch sentence text + metadata from Neo4j by sentence IDs.
 
@@ -1819,6 +1833,8 @@ class HippoRAG2Handler(BaseRouteHandler):
                next_sent.text AS next_text, next_sent.id AS next_id
         """
 
+        folder_id = folder_id if folder_id is not None else self.folder_id
+
         try:
             def _run():
                 with retry_session(driver, read_only=True) as session:
@@ -1826,7 +1842,7 @@ class HippoRAG2Handler(BaseRouteHandler):
                         cypher_sentences,
                         sentence_ids=sentence_ids,
                         group_ids=group_ids,
-                        folder_id=self.folder_id,
+                        folder_id=folder_id,
                     )
                     return [dict(r) for r in records]
             results = await asyncio.to_thread(_run)
@@ -1954,6 +1970,7 @@ class HippoRAG2Handler(BaseRouteHandler):
     async def _resolve_structural_seeds(
         self,
         query: str,
+        folder_id: Optional[str] = None,
     ) -> Tuple[List[str], List[str]]:
         """Resolve structural seeds via section embedding matching.
 
@@ -2012,11 +2029,12 @@ class HippoRAG2Handler(BaseRouteHandler):
                     logger.debug("route7_child_section_expansion_failed", error=str(e))
 
             # Resolve entities from expanded sections
+            folder_id = folder_id if folder_id is not None else self.folder_id
             section_entities = await resolve_section_entities(
                 async_neo4j=self._async_neo4j,
                 section_paths=expanded_sections,
                 group_id=self.group_id,
-                folder_id=self.folder_id,
+                folder_id=folder_id,
                 group_ids=self.group_ids,
             )
 
@@ -2044,6 +2062,7 @@ class HippoRAG2Handler(BaseRouteHandler):
         *,
         adaptive_ratio: float | None = None,
         max_k: int | None = None,
+        folder_id: Optional[str] = None,
     ) -> Tuple[List[str], List[Dict[str, Any]], List[str]]:
         """Resolve community seeds via community embedding matching.
 
@@ -2052,6 +2071,7 @@ class HippoRAG2Handler(BaseRouteHandler):
             sentence_ids is populated only when include_sentences=True.
         """
         try:
+            folder_id = folder_id if folder_id is not None else self.folder_id
             community_matcher = self.pipeline.community_matcher
             if not community_matcher or not self._async_neo4j:
                 return [], [], []
@@ -2092,7 +2112,7 @@ class HippoRAG2Handler(BaseRouteHandler):
                     cypher,
                     community_ids=community_ids,
                     group_ids=self.group_ids,
-                    folder_id=self.folder_id,
+                    folder_id=folder_id,
                 )
                 records = await result.data()
 
@@ -2120,7 +2140,7 @@ class HippoRAG2Handler(BaseRouteHandler):
                         sent_cypher,
                         community_ids=community_ids,
                         group_ids=self.group_ids,
-                        folder_id=self.folder_id,
+                        folder_id=folder_id,
                     )
                     sent_records = await sent_result.data()
                 sentence_ids = [r["sentence_eid"] for r in sent_records if r.get("sentence_eid")]
@@ -2145,6 +2165,7 @@ class HippoRAG2Handler(BaseRouteHandler):
         self,
         query: str,
         top_k: int = 30,
+        folder_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Retrieve sentence-level evidence via Voyage vector search.
 
@@ -2163,6 +2184,7 @@ class HippoRAG2Handler(BaseRouteHandler):
 
         threshold = float(os.getenv("ROUTE7_SENTENCE_THRESHOLD", "0.2"))
         group_ids = self.group_ids
+        folder_id = folder_id if folder_id is not None else self.folder_id
 
         cypher = """CYPHER 25
         CALL {
@@ -2206,7 +2228,7 @@ class HippoRAG2Handler(BaseRouteHandler):
                         group_ids=group_ids,
                         top_k=top_k,
                         threshold=threshold,
-                        folder_id=self.folder_id,
+                        folder_id=folder_id,
                     )
                     return [dict(r) for r in records]
 
