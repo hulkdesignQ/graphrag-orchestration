@@ -327,7 +327,7 @@ class HippoRAG2Handler(BaseRouteHandler):
             prompt_variant = preset["prompt_variant"]
         # Env var default for hipporag2_search (when no preset/caller override)
         if prompt_variant is None:
-            prompt_variant = os.getenv("ROUTE7_PROMPT_VARIANT", "v3_keypoints") or None
+            prompt_variant = os.getenv("ROUTE7_PROMPT_VARIANT", "v10_comprehensive") or None
 
         # Synthesis max_tokens cap (only local_search preset sets this)
         synthesis_max_tokens: Optional[int] = preset.get("max_tokens")

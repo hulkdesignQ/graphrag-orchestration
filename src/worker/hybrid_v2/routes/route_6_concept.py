@@ -835,6 +835,10 @@ class ConceptSearchHandler(BaseRouteHandler):
         filtered_communities = [t[0] for t in rated_triples]
         filtered_scores = [t[1] for t in rated_triples]
 
+        # Attach LLM rating to community dict for downstream use (extraction cutoff)
+        for community, _, rating in rated_triples:
+            community["_llm_rating"] = rating
+
         logger.info(
             "route6_dynamic_community_ratings",
             ratings=list(zip(
@@ -972,21 +976,34 @@ class ConceptSearchHandler(BaseRouteHandler):
         True MAP pattern (upstream-aligned):
         1. For each matched community, fetch actual source sentences
            via Community → Entity → MENTIONS → Sentence graph traversal.
-        2. Extract key points from EACH community INDIVIDUALLY in parallel.
+        2. Extract key points from top-rated communities INDIVIDUALLY in parallel.
            This gives each community focused LLM attention (prevents large
            combined contexts from causing detail loss).
-        3. Aggregate, deduplicate, sort, and filter all key points.
+        3. Lower-rated communities use raw summaries (no LLM call) to save latency.
+        4. Aggregate, deduplicate, sort, and filter all key points.
 
         Falls back to raw summaries if source fetch fails.
         """
-        # Fetch source sentences for each matched community
+        extract_top_k = int(os.getenv("ROUTE6_EXTRACT_TOP_K", "8"))
+        extract_min_rating = int(os.getenv("ROUTE6_EXTRACT_MIN_RATING", "2"))
+
+        # Fetch source sentences only for communities we'll extract from.
+        # Communities list is pre-sorted by LLM rating (highest first).
+        # Apply both a count cap (top_k) and a rating floor (min_rating).
+        extract_communities = [
+            c for c in communities[:extract_top_k]
+            if c.get("_llm_rating", 5) >= extract_min_rating
+        ]
+        extract_ids = {c.get("id") for c in extract_communities}
+        summary_communities = [c for c in communities if c.get("id") not in extract_ids]
+
         source_map = await self._fetch_community_source_sentences(
-            communities, folder_id=folder_id,
+            extract_communities, folder_id=folder_id,
         )
 
-        # Build per-community source text blocks
+        # Build per-community source text blocks for extraction
         community_texts: List[Tuple[Dict[str, Any], str]] = []
-        for i, c in enumerate(communities, 1):
+        for i, c in enumerate(extract_communities, 1):
             title = c.get("title", f"Theme {i}")
             cid = c.get("id", "")
             sentences = source_map.get(cid, [])
@@ -1010,17 +1027,18 @@ class ConceptSearchHandler(BaseRouteHandler):
                 if summary:
                     community_texts.append((c, f"--- Community: {title} ---\n  {summary}"))
 
-        if not community_texts:
+        if not community_texts and not summary_communities:
             return "(No thematic context available)"
 
         logger.info(
             "route6_extract_source_stats",
             total_communities=len(communities),
-            communities_with_source=len(community_texts),
+            extract_communities=len(community_texts),
+            summary_only_communities=len(summary_communities),
             source_text_chars=sum(len(t) for _, t in community_texts),
         )
 
-        # MAP phase: per-community parallel extraction.
+        # MAP phase: per-community parallel extraction for top-rated communities.
         # Each community gets its own LLM call for focused attention.
         # All calls run concurrently — wall-clock time ≈ slowest single call.
         max_concurrent = int(os.getenv("ROUTE6_EXTRACT_CONCURRENCY", "12"))
@@ -1052,8 +1070,11 @@ class ConceptSearchHandler(BaseRouteHandler):
                     logger.warning("route6_extract_one_failed", community=title, error=str(e))
                     return []
 
-        tasks = [_extract_one(c, txt) for c, txt in community_texts]
-        results = await asyncio.gather(*tasks)
+        if community_texts:
+            tasks = [_extract_one(c, txt) for c, txt in community_texts]
+            results = await asyncio.gather(*tasks)
+        else:
+            results = []
 
         # REDUCE phase: aggregate all points, deduplicate, sort, filter
         all_points: List[Dict[str, Any]] = []
@@ -1092,12 +1113,23 @@ class ConceptSearchHandler(BaseRouteHandler):
             tag = f" [{community}]" if community else ""
             formatted.append(f"- (importance: {score}) {desc}{tag}")
 
+        # Append raw summaries for communities that weren't extracted
+        if summary_communities:
+            formatted.append("")
+            formatted.append("--- Additional Thematic Context (lower relevance) ---")
+            for c in summary_communities:
+                title = c.get("title", "?")
+                summary = (c.get("summary") or "").strip()
+                if summary:
+                    formatted.append(f"- [{title}]: {summary[:200]}")
+
         logger.info(
             "route6_community_extract_done",
             total_raw=len(all_points),
             after_dedup=len(unique_points),
             after_filter=len(points),
             max_points=max_points,
+            summary_appended=len(summary_communities),
             top_score=points[0].get("score", 0) if points else 0,
         )
         return "\n".join(formatted)
