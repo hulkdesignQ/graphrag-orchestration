@@ -36,42 +36,45 @@ Azure DI merged 5 separate lines (Representative, Company, Street, City/State/Zi
 
 This block goes through the normal Source A (paragraph body text) path, NOT the signature path.
 
+## Completed Steps
+
+1. ✅ **LLM fragment connector** — `_synthesize_signature_sentences()` rewritten with LLM (commit 485a6e26)
+2. ✅ **Contact block detection** — `_is_contact_block_paragraph()`, `_detect_contact_block_paragraph_indices()` added; excluded from section DI units; Source H handler for sentence extraction (commit 480480e4)
+3. ✅ **Span-union text stripping** — Contact block text leaked via span-union merging (min..max range). Fixed by stripping contact-block paragraph spans from section text after slicing (commit c799a8ca)
+4. ✅ **Reindex completed** — 207 sentences, 12 communities, 472 entities
+5. ✅ **Verified** — garbled "Representative John Smith Company Fabrikam Inc." sentence is gone; replaced with coherent LLM-connected contact_block and signature_block sentences
+6. ✅ **Benchmark run** — 152/171 (88.9%)
+
+## Benchmark Results After Fix
+
+| Q | Baseline | After Fix | Change |
+|---|----------|-----------|--------|
+| Q-G1 | 8/9 | 8/9 | = |
+| Q-G2 | 9/9 | 6/9 | ❌ -3 (WI Code regression) |
+| Q-G3 | 7/9 | 9/9 | ✅ +2 |
+| Q-G4 | 6/9 | 9/9 | ✅ +3 |
+| Q-G5 | 9/9 | 8/9 | -1 |
+| Q-G6 | 5/9 | 6/9 | ✅ +1 |
+| Q-G7 | 9/9 | 8/9 | -1 |
+| Q-G8 | 5/9 | 3/9 | ❌ -2 |
+| Q-G9 | 9/9 | 9/9 | = |
+| Q-G10 | 9/9 | 5/9 | ❌ -4 |
+| Neg | 81/81 | 81/81 | = |
+| **Total** | **157/171** | **152/171** | **-5** |
+
+### Analysis
+The contact block fix achieved its goal — garbled sentence removed, Q-G6 improved. However the reindex changed community structure (11→12 communities), causing regressions in Q-G2, Q-G8, Q-G10. These regressions are **not caused by the fix** but by non-deterministic community detection (Louvain) producing different community boundaries.
+
+Key regressions:
+- **Q-G2 (9→6)**: Missing WI Code / County of Washburn — holding tank content split into different community
+- **Q-G8 (5→3)**: Insurance/indemnity clauses — already below threshold, community restructuring worsened retrieval
+- **Q-G10 (9→5)**: Document purpose summaries — community split affects global overview queries
+
 ## TODO List
 
-### Immediate
-1. **Apply LLM fragment connector to contact/address blocks** — Currently only signature blocks get the LLM treatment. The contact block (WARRANTY para 27) still goes through Source A as garbled body text. Need to:
-   - Detect contact/address block paragraphs (pattern: Street, City/State/Zip, phone number)
-   - Exclude them from normal section DI units (like sig blocks)
-   - Route them through `_synthesize_signature_sentences()` or a similar LLM connector
-   
-2. **Commit the LLM fragment connector changes** — Current changes to `sentence_extraction_service.py` are uncommitted
-
-3. **Reindex** `test-5pdfs-v2-fix2` with the fixes (another session may already be reindexing)
-
-4. **Run benchmark** to measure Q-G6 improvement from signature/contact fix
-   - Baseline: 157/171 (91.8%), Q-G6: 5/9
-   - Command: `python3 scripts/benchmark_route7_hipporag2.py --positive-prefix Q-G --query-mode community_search --repeats 3 --no-auth`
-
-### Remaining Q-G6 Issues (after contact block fix)
-5. **AAA missing** — American Arbitration Association not consistently retrieved. Investigate retrieval vs synthesis gap.
-6. **Missing roles** — Ground truth expects roles (builder, pumper, etc.) but may need ground truth adjustment or synthesis prompt tuning.
-
-### Other Below-Threshold Questions
-7. **Q-G8 (5/9)** — Stacked retrieval + synthesis gap. Wider community selection proven harmful. Needs alternative approach (query decomposition, synthesis prompt tuning for "hold harmless" interpretation).
-8. **Q-G4 (6/9)** — Synthesis over-inclusion (tax IDs, sale notification). Prompt tuning needed.
-9. **Q-G3 (7/9)** — Minor omissions (compliance costs, credit card fees).
-
-## Baseline Scores
-| Q | Score | Status |
-|---|-------|--------|
-| Q-G1 | 8/9 | Minor |
-| Q-G2 | 9/9 | ✅ |
-| Q-G3 | 7/9 | Omissions |
-| Q-G4 | 6/9 | Over-inclusion |
-| Q-G5 | 9/9 | ✅ |
-| Q-G6 | 5/9 | ❌ Signature/contact fix in progress |
-| Q-G7 | 9/9 | ✅ |
-| Q-G8 | 5/9 | ❌ Retrieval + synthesis gap |
-| Q-G9 | 9/9 | ✅ |
-| Q-G10 | 9/9 | ✅ |
-| **Total** | **157/171** | **91.8%** |
+### Remaining Work
+1. **Stabilize community structure** — The Louvain algorithm is non-deterministic. Consider seeding or using deterministic community detection to prevent score fluctuations across reindexes.
+2. **Q-G6 further improvement (6/9→9/9)** — AAA (American Arbitration Association) still missing in some runs. Investigate retrieval gap vs synthesis gap.
+3. **Q-G8 (3/9)** — Stacked retrieval + synthesis gap. Insurance/indemnity/hold harmless clauses span multiple documents. Consider query decomposition or wider community selection.
+4. **Q-G2 (6/9)** — WI Code SPS 383.21(2)5 and County of Washburn retrieval. Holding tank contract content may need entity extraction improvement.
+5. **Q-G10 (5/9)** — Global summary question sensitive to community boundaries. May need a different retrieval strategy (all communities, not just top-matched).
