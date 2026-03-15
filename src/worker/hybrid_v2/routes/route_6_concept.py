@@ -896,6 +896,11 @@ class ConceptSearchHandler(BaseRouteHandler):
             " WHERE f.id = $folder_id AND f.group_id IN $group_ids }\n"
         )
 
+        # Two-phase fetch: (1) entity-linked sentences, (2) co-document orphans.
+        # Phase 2 catches sentences that lack entity links but belong to the
+        # same documents as entity-linked ones — topically relevant but orphaned
+        # by incomplete entity extraction during indexing.
+
         cypher = f"""
         UNWIND $community_ids AS c_id
         MATCH (c:Community {{id: c_id}})
@@ -964,11 +969,13 @@ class ConceptSearchHandler(BaseRouteHandler):
     ) -> str:
         """Extract query-relevant key points from community SOURCE TEXT.
 
-        Aligned with Microsoft's LazyGraphRAG MAP phase:
+        True MAP pattern (upstream-aligned):
         1. For each matched community, fetch actual source sentences
            via Community → Entity → MENTIONS → Sentence graph traversal.
-        2. Pass source sentences (not abstract summaries) to the LLM.
-        3. Extract query-relevant claims with importance scores.
+        2. Extract key points from EACH community INDIVIDUALLY in parallel.
+           This gives each community focused LLM attention (prevents large
+           combined contexts from causing detail loss).
+        3. Aggregate, deduplicate, sort, and filter all key points.
 
         Falls back to raw summaries if source fetch fails.
         """
@@ -978,14 +985,13 @@ class ConceptSearchHandler(BaseRouteHandler):
         )
 
         # Build per-community source text blocks
-        community_blocks = []
+        community_texts: List[Tuple[Dict[str, Any], str]] = []
         for i, c in enumerate(communities, 1):
             title = c.get("title", f"Theme {i}")
             cid = c.get("id", "")
             sentences = source_map.get(cid, [])
 
             if sentences:
-                # Format source sentences grouped by document
                 by_doc: Dict[str, List[str]] = defaultdict(list)
                 for s in sentences:
                     doc = s.get("document_title") or "Unknown"
@@ -998,68 +1004,98 @@ class ConceptSearchHandler(BaseRouteHandler):
                     joined = " ".join(texts)
                     doc_sections.append(f"  [{doc_title}]: {joined}")
                 source_text = "\n".join(doc_sections)
-                community_blocks.append(
-                    f"--- Community {i}: {title} ---\n{source_text}"
-                )
+                community_texts.append((c, f"--- Community: {title} ---\n{source_text}"))
             else:
-                # Fallback: use the abstract summary if no source text
                 summary = (c.get("summary") or "").strip()
                 if summary:
-                    community_blocks.append(
-                        f"--- Community {i}: {title} ---\n  {summary}"
-                    )
+                    community_texts.append((c, f"--- Community: {title} ---\n  {summary}"))
 
-        if not community_blocks:
+        if not community_texts:
             return "(No thematic context available)"
 
-        source_text_block = "\n\n".join(community_blocks)
-        prompt = COMMUNITY_EXTRACT_PROMPT.format(
-            query=query,
-            community_source_text=source_text_block,
+        logger.info(
+            "route6_extract_source_stats",
+            total_communities=len(communities),
+            communities_with_source=len(community_texts),
+            source_text_chars=sum(len(t) for _, t in community_texts),
         )
 
-        try:
-            resp = await acomplete_with_retry(self.llm, prompt)
-            text = resp.text.strip()
-            # Strip markdown code fences (LLMs often wrap JSON in ```json...```)
-            if text.startswith("```"):
-                text = re.sub(r'^```(?:json)?\s*\n?', '', text)
-                text = re.sub(r'\n?```\s*$', '', text)
-            parsed = json.loads(text)
-            points = parsed.get("points", [])
-            if not points:
-                logger.info("route6_community_extract_no_points")
-                # Fallback: format raw summaries
-                return self._format_raw_summaries(communities)
+        # MAP phase: extract key points from each community in parallel
+        max_concurrent = int(os.getenv("ROUTE6_EXTRACT_CONCURRENCY", "12"))
+        semaphore = asyncio.Semaphore(max_concurrent)
 
-            # Sort by score descending, filter low-importance
-            points = sorted(points, key=lambda p: p.get("score", 0), reverse=True)
-            min_score = int(os.getenv("ROUTE6_EXTRACT_MIN_SCORE", "20"))
-            points = [p for p in points if p.get("score", 0) >= min_score]
-            if not points:
-                return self._format_raw_summaries(communities)
-
-            formatted = []
-            for p in points:
-                desc = p.get("description", "")
-                score = p.get("score", 0)
-                community = p.get("community", "")
-                tag = f" [{community}]" if community else ""
-                formatted.append(f"- (importance: {score}) {desc}{tag}")
-
-            logger.info(
-                "route6_community_extract_done",
-                total_points=len(points),
-                top_score=points[0].get("score", 0) if points else 0,
+        async def _extract_one(community: Dict[str, Any], source_block: str) -> List[Dict[str, Any]]:
+            title = community.get("title", "?")
+            prompt = COMMUNITY_EXTRACT_PROMPT.format(
+                query=query,
+                community_source_text=source_block,
             )
-            return "\n".join(formatted)
+            async with semaphore:
+                try:
+                    resp = await acomplete_with_retry(self.llm, prompt)
+                    text = resp.text.strip()
+                    if text.startswith("```"):
+                        text = re.sub(r'^```(?:json)?\s*\n?', '', text)
+                        text = re.sub(r'\n?```\s*$', '', text)
+                    parsed = json.loads(text)
+                    points = parsed.get("points", [])
+                    # Ensure community tag is set
+                    for p in points:
+                        if not p.get("community"):
+                            p["community"] = title
+                    return points
+                except (json.JSONDecodeError, ValueError):
+                    logger.warning("route6_extract_one_parse_error", community=title)
+                    return []
+                except Exception as e:
+                    logger.warning("route6_extract_one_failed", community=title, error=str(e))
+                    return []
 
-        except (json.JSONDecodeError, ValueError) as e:
-            logger.warning("route6_community_extract_parse_error", error=str(e))
+        results = await asyncio.gather(
+            *[_extract_one(c, txt) for c, txt in community_texts]
+        )
+
+        # REDUCE phase: aggregate all points, deduplicate, sort, filter
+        all_points: List[Dict[str, Any]] = []
+        for pts in results:
+            all_points.extend(pts)
+
+        if not all_points:
+            logger.info("route6_community_extract_no_points")
             return self._format_raw_summaries(communities)
-        except Exception as e:
-            logger.warning("route6_community_extract_failed", error=str(e))
+
+        # Deduplicate by description similarity (exact match on first 60 chars)
+        seen_descs: set = set()
+        unique_points = []
+        for p in all_points:
+            key = (p.get("description", "")[:60]).lower().strip()
+            if key not in seen_descs:
+                seen_descs.add(key)
+                unique_points.append(p)
+
+        # Sort by score descending, filter low-importance
+        unique_points.sort(key=lambda p: p.get("score", 0), reverse=True)
+        min_score = int(os.getenv("ROUTE6_EXTRACT_MIN_SCORE", "20"))
+        points = [p for p in unique_points if p.get("score", 0) >= min_score]
+        if not points:
             return self._format_raw_summaries(communities)
+
+        formatted = []
+        for p in points:
+            desc = p.get("description", "")
+            score = p.get("score", 0)
+            community = p.get("community", "")
+            tag = f" [{community}]" if community else ""
+            formatted.append(f"- (importance: {score}) {desc}{tag}")
+
+        logger.info(
+            "route6_community_extract_done",
+            total_raw=len(all_points),
+            after_dedup=len(unique_points),
+            after_filter=len(points),
+            top_score=points[0].get("score", 0) if points else 0,
+        )
+        return "\n".join(formatted)
 
     @staticmethod
     def _format_raw_summaries(communities: List[Dict[str, Any]]) -> str:
