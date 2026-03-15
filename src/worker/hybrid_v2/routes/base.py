@@ -1039,7 +1039,7 @@ class BaseRouteHandler:
     # Citation Helpers
     # =========================================================================
 
-    def _build_citations(
+    async def _build_citations(
         self,
         chunks: List[Tuple[Dict[str, Any], float]],
         max_preview_len: int = 200,
@@ -1078,10 +1078,10 @@ class BaseRouteHandler:
                 text_preview=preview,
             ))
         
-        self._enrich_citations_with_geometry(citations)
+        await self._enrich_citations_with_geometry(citations)
         return citations
 
-    def _enrich_citations_with_geometry(self, citations: List[Citation]) -> None:
+    async def _enrich_citations_with_geometry(self, citations: List[Citation]) -> None:
         """Enrich citations with polygon geometry from Neo4j chunk metadata.
 
         After citations are built (typically 5-15 items), fetches the metadata
@@ -1105,17 +1105,21 @@ class BaseRouteHandler:
         if not sentence_ids_to_enrich:
             return
 
-        # Batch fetch metadata from Sentence nodes
-        query = (
+        # Batch fetch metadata from Sentence nodes (blocking — run off event loop)
+        cypher = (
             "UNWIND $ids AS tid "
             "MATCH (s:Sentence {id: tid}) "
             "WHERE s.group_id IN $group_ids "
             "RETURN s.id AS id, s.metadata AS metadata"
         )
-        metadata_map: Dict[str, Dict[str, Any]] = {}
-        try:
-            with retry_session(self.neo4j_driver, read_only=True) as session:
-                result = session.run(query, ids=sentence_ids_to_enrich, group_ids=self.group_ids)
+        driver = self.neo4j_driver
+        group_ids = self.group_ids
+        ids_to_enrich = sentence_ids_to_enrich
+
+        def _run_sync():
+            metadata_map: Dict[str, Dict[str, Any]] = {}
+            with retry_session(driver, read_only=True) as session:
+                result = session.run(cypher, ids=ids_to_enrich, group_ids=group_ids)
                 for record in result:
                     raw = record["metadata"]
                     meta: Dict[str, Any] = {}
@@ -1128,6 +1132,11 @@ class BaseRouteHandler:
                         meta = raw
                     if meta:
                         metadata_map[record["id"]] = meta
+            return metadata_map
+
+        try:
+            loop = asyncio.get_running_loop()
+            metadata_map = await loop.run_in_executor(self._executor, _run_sync)
         except Exception as e:
             logger.warning("citation_geometry_enrichment_failed", error=str(e))
             return

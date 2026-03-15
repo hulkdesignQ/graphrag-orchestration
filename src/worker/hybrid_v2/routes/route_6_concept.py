@@ -111,9 +111,9 @@ class ConceptSearchHandler(BaseRouteHandler):
         Returns:
             RouteResult with response, citations, and metadata.
         """
-        # Resolve per-query folder scope (overrides pipeline default)
+        # Resolve per-query folder scope (local variable — never mutate self.folder_id
+        # to avoid cross-request leakage when the handler is shared across concurrent requests)
         folder_id = self._resolve_folder_id(folder_id)
-        self.folder_id = folder_id
 
         enable_timings = os.getenv("ROUTE6_RETURN_TIMINGS", "0").strip().lower() in {
             "1", "true", "yes",
@@ -141,10 +141,10 @@ class ConceptSearchHandler(BaseRouteHandler):
         t0 = time.perf_counter()
 
         sentence_search_task = asyncio.create_task(
-            self._retrieve_sentence_evidence(query, top_k=sentence_top_k)
+            self._retrieve_sentence_evidence(query, top_k=sentence_top_k, folder_id=folder_id)
         )
         section_search_task = asyncio.create_task(
-            self._retrieve_section_headings(query, top_k=section_top_k)
+            self._retrieve_section_headings(query, top_k=section_top_k, folder_id=folder_id)
         )
 
         # Upstream alignment: when the corpus is small (≤ rate_all_threshold),
@@ -203,6 +203,7 @@ class ConceptSearchHandler(BaseRouteHandler):
             try:
                 children = await self._fetch_community_children(
                     community_data, parent_scores=community_scores,
+                    folder_id=folder_id,
                 )
                 if children:
                     # Dedup: skip children already in community_data
@@ -277,6 +278,7 @@ class ConceptSearchHandler(BaseRouteHandler):
                     seed_count=exp_seeds,
                     top_k=exp_top_k,
                     min_overlap=exp_min_overlap,
+                    folder_id=folder_id,
                 )
                 if expanded:
                     expansion_count = len(expanded)
@@ -398,7 +400,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         t0 = time.perf_counter()
         response_text = await self._synthesize(
             query, community_data, section_headings, sentence_evidence,
-            language=language,
+            language=language, folder_id=folder_id,
         )
         timings_ms["step_3_synthesis_ms"] = int(
             (time.perf_counter() - t0) * 1000
@@ -419,7 +421,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         citations = self._build_citations(
             community_data, community_scores, sentence_evidence,
         )
-        self._enrich_citations_with_geometry(citations)
+        await self._enrich_citations_with_geometry(citations)
 
         # ================================================================
         # Assemble metadata
@@ -498,6 +500,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         section_headings: List[Dict[str, Any]],
         sentence_evidence: List[Dict[str, Any]],
         language: Optional[str] = None,
+        folder_id: Optional[str] = None,
     ) -> str:
         """Synthesize community summaries + section headings + sentence evidence in one LLM call.
 
@@ -509,6 +512,7 @@ class ConceptSearchHandler(BaseRouteHandler):
             communities: Matched community dicts with title/summary.
             section_headings: Matched section dicts with title/summary/path_key.
             sentence_evidence: Denoised + reranked sentence dicts.
+            folder_id: Folder scope for community source fetch (passed through).
 
         Returns:
             Synthesized response text.
@@ -516,7 +520,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         # Build the synthesis prompt (shared with _stream_synthesize)
         prompt = await self._build_synthesis_prompt(
             query, communities, section_headings, sentence_evidence,
-            language,
+            language=language, folder_id=folder_id,
         )
 
         try:
@@ -544,6 +548,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         section_headings: List[Dict[str, Any]],
         sentence_evidence: List[Dict[str, Any]],
         language: Optional[str] = None,
+        folder_id: Optional[str] = None,
     ) -> AsyncGenerator[str, None]:
         """Streaming variant of _synthesize(). Yields token chunks.
 
@@ -554,7 +559,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         # Build prompt identically to _synthesize()
         prompt = await self._build_synthesis_prompt(
             query, communities, section_headings, sentence_evidence,
-            language,
+            language=language, folder_id=folder_id,
         )
 
         try:
@@ -575,6 +580,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         response_type: str = "summary",
         language: Optional[str] = None,
         folder_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> AsyncGenerator[str, None]:
         """Streaming variant of execute(). Yields synthesis chunks.
 
@@ -584,9 +590,8 @@ class ConceptSearchHandler(BaseRouteHandler):
 
         Gated by ROUTE6_STREAM_SYNTHESIS env var — caller should check before invoking.
         """
-        # Resolve per-query folder scope (overrides pipeline default)
+        # Resolve per-query folder scope (local variable — never mutate self.folder_id)
         folder_id = self._resolve_folder_id(folder_id)
-        self.folder_id = folder_id
 
         community_top_k = int(os.getenv("ROUTE6_COMMUNITY_TOP_K", "8"))
         rate_all_threshold = int(os.getenv("ROUTE6_RATE_ALL_THRESHOLD", "20"))
@@ -595,10 +600,10 @@ class ConceptSearchHandler(BaseRouteHandler):
 
         # Step 1: Parallel retrieval (same as execute)
         sentence_search_task = asyncio.create_task(
-            self._retrieve_sentence_evidence(query, top_k=sentence_top_k)
+            self._retrieve_sentence_evidence(query, top_k=sentence_top_k, folder_id=folder_id)
         )
         section_search_task = asyncio.create_task(
-            self._retrieve_section_headings(query, top_k=section_top_k)
+            self._retrieve_section_headings(query, top_k=section_top_k, folder_id=folder_id)
         )
 
         # Upstream alignment: rate ALL when corpus is small
@@ -622,8 +627,8 @@ class ConceptSearchHandler(BaseRouteHandler):
                 community_data, community_scores = await self._rate_communities_with_llm(
                     query, community_data, community_scores,
                 )
-            except Exception:
-                pass  # fallback to embedding-only
+            except Exception as e:
+                logger.warning("route6_stream_dynamic_community_failed", error=str(e))
 
         # Feature 2: Community Children (if enabled)
         community_children_enabled = os.getenv(
@@ -633,6 +638,7 @@ class ConceptSearchHandler(BaseRouteHandler):
             try:
                 children = await self._fetch_community_children(
                     community_data, parent_scores=community_scores,
+                    folder_id=folder_id,
                 )
                 if children:
                     existing_ids = {c.get("id") for c in community_data}
@@ -641,17 +647,19 @@ class ConceptSearchHandler(BaseRouteHandler):
                             community_data.append(child)
                             community_scores.append(child_score)
                             existing_ids.add(child.get("id"))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("route6_stream_community_children_failed", error=str(e))
 
         # Await parallel tasks
         try:
             sentence_evidence = await sentence_search_task
-        except Exception:
+        except Exception as e:
+            logger.warning("route6_stream_sentence_search_failed", error=str(e))
             sentence_evidence = []
         try:
             section_headings = await section_search_task
-        except Exception:
+        except Exception as e:
+            logger.warning("route6_stream_section_search_failed", error=str(e))
             section_headings = []
 
         # Step 1b: Entity expansion (same as execute)
@@ -672,9 +680,10 @@ class ConceptSearchHandler(BaseRouteHandler):
                     seed_count=exp_seeds,
                     top_k=exp_top_k,
                     min_overlap=exp_min_overlap,
+                    folder_id=folder_id,
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("route6_stream_entity_expansion_failed", error=str(e))
 
         # Step 2: Denoise + Diversity + Rerank (same as execute)
         if sentence_evidence:
@@ -716,7 +725,8 @@ class ConceptSearchHandler(BaseRouteHandler):
                     sentence_evidence = await self._rerank_sentences(
                         query, sentence_evidence, top_k=rerank_top_k,
                     )
-                except Exception:
+                except Exception as e:
+                    logger.warning("route6_stream_rerank_failed", error=str(e))
                     sentence_evidence = sentence_evidence[:rerank_top_k]
 
         # Negative detection (same as execute)
@@ -727,7 +737,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         # Step 3: Stream synthesis
         async for chunk in self._stream_synthesize(
             query, community_data, section_headings, sentence_evidence,
-            language=language,
+            language=language, folder_id=folder_id,
         ):
             yield chunk
 
@@ -848,6 +858,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         self,
         communities: List[Dict[str, Any]],
         max_per_community: int = 50,
+        folder_id: Optional[str] = None,
     ) -> Dict[str, List[Dict[str, Any]]]:
         """Fetch source sentences for matched communities via graph traversal.
 
@@ -859,6 +870,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         Args:
             communities: Matched community dicts (must have 'id' field).
             max_per_community: Max sentences per community (dedup'd).
+            folder_id: Folder scope filter (None = all folders).
 
         Returns:
             Dict mapping community_id → list of sentence dicts with
@@ -873,7 +885,6 @@ class ConceptSearchHandler(BaseRouteHandler):
             return {}
 
         group_ids = self.group_ids
-        folder_id = self.folder_id
 
         folder_filter_clause = (
             "WITH s, doc, c_id\n"
@@ -946,6 +957,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         self,
         query: str,
         communities: List[Dict[str, Any]],
+        folder_id: Optional[str] = None,
     ) -> str:
         """Extract query-relevant key points from community SOURCE TEXT.
 
@@ -958,7 +970,9 @@ class ConceptSearchHandler(BaseRouteHandler):
         Falls back to raw summaries if source fetch fails.
         """
         # Fetch source sentences for each matched community
-        source_map = await self._fetch_community_source_sentences(communities)
+        source_map = await self._fetch_community_source_sentences(
+            communities, folder_id=folder_id,
+        )
 
         # Build per-community source text blocks
         community_blocks = []
@@ -1063,6 +1077,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         self,
         parent_communities: List[Dict[str, Any]],
         parent_scores: Optional[List[float]] = None,
+        folder_id: Optional[str] = None,
     ) -> List[Tuple[Dict[str, Any], float]]:
         """Fetch child communities via PARENT_COMMUNITY edges in Neo4j.
 
@@ -1071,6 +1086,7 @@ class ConceptSearchHandler(BaseRouteHandler):
 
         Args:
             parent_communities: Matched parent community dicts.
+            folder_id: Folder scope filter (None = all folders).
 
         Returns:
             List of (child_community_dict, synthetic_score) tuples.
@@ -1145,7 +1161,6 @@ class ConceptSearchHandler(BaseRouteHandler):
 
         # Folder-scope filter: prune children whose entities have no content
         # in the target folder (same pattern as CommunityMatcher._filter_communities_by_folder).
-        folder_id = self.folder_id
         if folder_id is not None and children:
             child_ids = [c.get("id") for c, _ in children if c.get("id")]
             folder_cypher = """
@@ -1205,6 +1220,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         section_headings: List[Dict[str, Any]],
         sentence_evidence: List[Dict[str, Any]],
         language: Optional[str] = None,
+        folder_id: Optional[str] = None,
     ) -> str:
         """Build the full synthesis prompt. Shared by _synthesize and _stream_synthesize."""
         # Format community summaries
@@ -1213,7 +1229,9 @@ class ConceptSearchHandler(BaseRouteHandler):
         ).strip().lower() in {"1", "true", "yes"}
 
         if community_extract and communities:
-            summaries_text = await self._extract_community_key_points(query, communities)
+            summaries_text = await self._extract_community_key_points(
+                query, communities, folder_id=folder_id,
+            )
         elif communities:
             summary_lines = []
             for i, c in enumerate(communities, 1):
@@ -1274,7 +1292,14 @@ class ConceptSearchHandler(BaseRouteHandler):
             other_tokens = sum(len(_tiktoken_enc.encode(t)) for _, t in sections)
             total = summaries_tokens + other_tokens
             if total > max_tokens:
-                budget = max_tokens - summaries_tokens
+                # If community summaries alone exceed the budget, truncate them
+                # to 70% of budget so evidence always gets at least 30%.
+                if summaries_tokens > max_tokens:
+                    summary_cap = int(max_tokens * 0.7)
+                    summary_tokens_list = _tiktoken_enc.encode(summaries_text)
+                    summaries_text = _tiktoken_enc.decode(summary_tokens_list[:summary_cap])
+                    summaries_tokens = summary_cap
+                budget = max(max_tokens - summaries_tokens, 0)
                 truncated = {}
                 for name, text in sections:
                     tokens = _tiktoken_enc.encode(text)
@@ -1303,6 +1328,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         self,
         query: str,
         top_k: int = 20,
+        folder_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Retrieve sentence-level evidence via Voyage vector search.
 
@@ -1312,6 +1338,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         Args:
             query: User query to embed and search.
             top_k: Max sentences to retrieve.
+            folder_id: Folder scope filter (None = all folders).
 
         Returns:
             List of sentence dicts with text, metadata, and score.
@@ -1325,9 +1352,12 @@ class ConceptSearchHandler(BaseRouteHandler):
             logger.warning("route6_sentence_search_no_neo4j_driver")
             return []
 
-        # 1. Embed query with Voyage
+        # 1. Embed query with Voyage (sync HTTP call — run off event loop)
         try:
-            query_embedding = voyage_service.embed_query(query)
+            loop = asyncio.get_running_loop()
+            query_embedding = await loop.run_in_executor(
+                self._executor, voyage_service.embed_query, query,
+            )
         except Exception as e:
             logger.warning("route6_sentence_embed_failed", error=str(e))
             return []
@@ -1352,8 +1382,17 @@ class ConceptSearchHandler(BaseRouteHandler):
         # sentence_embedding index has group_id as a filterable property
         # (WITH [s.group_id]), so use UNION ALL for in-index filtering
         # across tenant + __global__ groups.
-        cypher = f"""CYPHER 25
-        CALL () {{
+        # Skip duplicate UNION branch when group_id == global_group_id.
+        if self.group_id == settings.GLOBAL_GROUP_ID:
+            search_clause = """CYPHER 25
+        MATCH (sent:Sentence)
+        SEARCH sent IN (VECTOR INDEX sentence_embedding FOR $embedding WHERE sent.group_id = $group_id LIMIT $top_k)
+        SCORE AS score
+        WHERE score >= $threshold
+        """
+        else:
+            search_clause = """CYPHER 25
+        CALL () {
             MATCH (sent:Sentence)
             SEARCH sent IN (VECTOR INDEX sentence_embedding FOR $embedding WHERE sent.group_id = $group_id LIMIT $top_k)
             SCORE AS score
@@ -1365,7 +1404,10 @@ class ConceptSearchHandler(BaseRouteHandler):
             SCORE AS score
             WHERE score >= $threshold
             RETURN sent, score
-        }}
+        }
+        """
+
+        cypher = f"""{search_clause}
 
         // Get document + section context
         OPTIONAL MATCH (sent)-[:IN_DOCUMENT]->(doc:Document)
@@ -1394,7 +1436,6 @@ class ConceptSearchHandler(BaseRouteHandler):
         try:
             loop = asyncio.get_running_loop()
             driver = self.neo4j_driver
-            folder_id = self.folder_id
 
             def _run_search():
                 with retry_session(driver, read_only=True) as session:
@@ -1478,6 +1519,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         seed_count: int = 10,
         top_k: int = 20,
         min_overlap: int = 1,
+        folder_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Expand sentence pool via shared-entity graph traversal.
 
@@ -1495,6 +1537,7 @@ class ConceptSearchHandler(BaseRouteHandler):
             top_k: Max expanded sentences to return.
             min_overlap: Minimum number of distinct shared entities for a
                 sentence to qualify.
+            folder_id: Folder scope filter (None = all folders).
 
         Returns:
             List of evidence dicts matching the schema of
@@ -1522,7 +1565,6 @@ class ConceptSearchHandler(BaseRouteHandler):
         synthetic_score = min(seed_scores) * 0.8 if seed_scores else 0.3
 
         group_ids = self.group_ids
-        folder_id = self.folder_id
 
         # R6-1: folder scope filter (same pattern as sentence vector search)
         folder_filter_clause = (
@@ -1647,6 +1689,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         self,
         query: str,
         top_k: int = 10,
+        folder_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Retrieve section headings via structural embedding cosine similarity.
 
@@ -1658,6 +1701,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         Args:
             query: User query to embed and match against section headings.
             top_k: Max sections to retrieve.
+            folder_id: Folder scope filter (None = all folders).
 
         Returns:
             List of section dicts with title, summary, path_key, document_title, score.
@@ -1671,16 +1715,18 @@ class ConceptSearchHandler(BaseRouteHandler):
             logger.warning("route6_section_search_no_neo4j_driver")
             return []
 
-        # 1. Embed query with Voyage
+        # 1. Embed query with Voyage (sync HTTP call — run off event loop)
         try:
-            query_embedding = voyage_service.embed_query(query)
+            loop = asyncio.get_running_loop()
+            query_embedding = await loop.run_in_executor(
+                self._executor, voyage_service.embed_query, query,
+            )
         except Exception as e:
             logger.warning("route6_section_embed_failed", error=str(e))
             return []
 
         min_similarity = float(os.getenv("ROUTE6_SECTION_MIN_SIMILARITY", "0.25"))
         group_ids = self.group_ids
-        folder_id = self.folder_id
 
         # 2. Cosine similarity against Section.structural_embedding
         # Note: no vector index exists for Section.structural_embedding (architectural

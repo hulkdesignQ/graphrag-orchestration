@@ -1173,7 +1173,7 @@ class HippoRAG2Handler(BaseRouteHandler):
             self._narrow_citations_to_sentences(
                 citations, synthesis_result.get("response", ""), sentence_map
             )
-        self._enrich_citations_with_geometry(citations)
+        await self._enrich_citations_with_geometry(citations)
 
         # Diagnostic: log citation geometry state for debugging highlight issues
         for _ci, _cit in enumerate(citations):

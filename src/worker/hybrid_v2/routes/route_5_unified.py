@@ -547,7 +547,7 @@ class UnifiedSearchHandler(BaseRouteHandler):
                     )
                 )
 
-        self._enrich_citations_with_geometry(citations)
+        await self._enrich_citations_with_geometry(citations)
 
         # ------------------------------------------------------------------
         # Assemble metadata

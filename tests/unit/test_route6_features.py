@@ -58,6 +58,7 @@ def _make_mock_pipeline():
     pipeline.llm = AsyncMock()
     pipeline.neo4j_driver = MagicMock()
     pipeline.group_id = "test-group"
+    pipeline.group_ids = ["test-group", "__global__"]
     pipeline.folder_id = None
     pipeline.synthesizer = MagicMock()
     pipeline._executor = None
@@ -133,8 +134,9 @@ class TestTokenBudget:
         assert "Community summary" in call_args
 
     @pytest.mark.asyncio
-    async def test_token_budget_preserves_communities(self):
-        """Community summaries are never truncated even under tight budget."""
+    async def test_token_budget_caps_communities_when_exceeding(self):
+        """When community summaries exceed budget, they are capped at 70%
+        to guarantee at least 30% for evidence (BUG-2 fix)."""
         handler = _make_handler()
         handler.llm.acomplete = AsyncMock(
             return_value=MagicMock(text="Response")
@@ -152,8 +154,10 @@ class TestTokenBudget:
             )
 
         call_args = handler.llm.acomplete.call_args[0][0]
-        # Community summary must survive — it's the thematic backbone
-        assert "Important risk factor" in call_args
+        # Community summary is truncated but partially present
+        assert "Important risk" in call_args
+        # Full summary should NOT be present (it was truncated)
+        assert long_summary not in call_args
 
 
 # ============================================================================
@@ -164,8 +168,8 @@ class TestDynamicCommunitySelection:
     """Tests for ROUTE6_DYNAMIC_COMMUNITY env var."""
 
     @pytest.mark.asyncio
-    async def test_dynamic_community_off_by_default(self):
-        """With no env var, communities pass through unchanged."""
+    async def test_dynamic_community_on_by_default(self):
+        """With no env var, dynamic community selection is ON (default='1')."""
         handler = _make_handler()
         communities = [
             _make_community("c1", "Risk", "Risk summary"),
@@ -173,15 +177,11 @@ class TestDynamicCommunitySelection:
         ]
         scores = [0.9, 0.7]
 
-        # If dynamic community were on, _rate_communities_with_llm would be called
-        # Since it's off, we just verify the method is NOT called
-        handler._rate_communities_with_llm = AsyncMock()
-
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("ROUTE6_DYNAMIC_COMMUNITY", None)
-            # We can't easily call execute() (too many deps), so verify the env check logic
-            enabled = os.getenv("ROUTE6_DYNAMIC_COMMUNITY", "0").strip().lower() in {"1", "true", "yes"}
-            assert not enabled
+            # Production code defaults to "1" (enabled)
+            enabled = os.getenv("ROUTE6_DYNAMIC_COMMUNITY", "1").strip().lower() in {"1", "true", "yes"}
+            assert enabled
 
     @pytest.mark.asyncio
     async def test_dynamic_community_rates_communities(self):
@@ -419,7 +419,6 @@ class TestStreamingSynthesis:
         # _stream_synthesize is actually reached.
         handler._retrieve_sentence_evidence = AsyncMock(return_value=[])
         handler._retrieve_section_headings = AsyncMock(return_value=[])
-        handler._retrieve_entity_document_map = AsyncMock(return_value={})
         community = _make_community("c1", "Test", "Test summary")
         handler.pipeline.community_matcher.get_all_communities = AsyncMock(
             return_value=[community]
@@ -451,21 +450,32 @@ class TestBuildSynthesisPrompt:
 
     @pytest.mark.asyncio
     async def test_build_prompt_includes_all_sections(self):
-        """Prompt includes communities, sections, evidence, and entity coverage."""
+        """Prompt includes communities, sections, and evidence."""
         handler = _make_handler()
         communities = [_make_community("c1", "Risk", "Risk summary")]
         sections = [_make_section("Termination")]
         evidence = [_make_sentence("Important fact", sentence_id="s1")]
-        entity_map = {"Entity A": ["Doc 1", "Doc 2"]}
 
         prompt = await handler._build_synthesis_prompt(
-            "What are the risks?", communities, sections, evidence, entity_map,
+            "What are the risks?", communities, sections, evidence,
         )
 
         assert "Risk summary" in prompt
         assert "Termination" in prompt
         assert "Important fact" in prompt
-        assert "Entity A" in prompt
+
+    @pytest.mark.asyncio
+    async def test_build_prompt_language_param(self):
+        """Language parameter appends instruction to prompt."""
+        handler = _make_handler()
+        communities = [_make_community("c1", "Risk", "Risk summary")]
+        evidence = [_make_sentence("Evidence text", sentence_id="s1")]
+
+        prompt = await handler._build_synthesis_prompt(
+            "Query", communities, [], evidence, language="French",
+        )
+
+        assert "Respond entirely in French" in prompt
 
     @pytest.mark.asyncio
     async def test_build_prompt_applies_token_budget(self):

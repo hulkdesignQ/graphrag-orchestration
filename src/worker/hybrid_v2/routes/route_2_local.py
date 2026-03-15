@@ -301,7 +301,7 @@ class LocalSearchHandler(BaseRouteHandler):
                     citation_type=c.get("citation_type", "chunk"),
                 ))
 
-        self._enrich_citations_with_geometry(citations)
+        await self._enrich_citations_with_geometry(citations)
         return RouteResult(
             response=synthesis_result["response"],
             route_used=self.ROUTE_NAME,
