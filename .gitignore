@@ -287,3 +287,4 @@ dump.rdb
 /reindex_output.txt
 /last_test_group_id.txt
 /DEPLOYMENT_TEST_SUMMARY_*.txt
+hipporag_index/
