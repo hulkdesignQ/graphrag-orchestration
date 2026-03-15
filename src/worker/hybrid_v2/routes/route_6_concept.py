@@ -1102,7 +1102,7 @@ class ConceptSearchHandler(BaseRouteHandler):
             return self._format_raw_summaries(communities)
 
         # Cap key points to keep synthesis prompt tractable (reduces latency)
-        max_points = int(os.getenv("ROUTE6_MAX_EXTRACT_POINTS", "25"))
+        max_points = int(os.getenv("ROUTE6_MAX_EXTRACT_POINTS", "30"))
         points = points[:max_points]
 
         formatted = []

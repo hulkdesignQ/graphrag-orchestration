@@ -87,8 +87,8 @@ You are an analyst. Given the user query and source passages from community-grou
 4. Score each point 0-100 for importance to answering the query. Score ≥ 70 for facts that DIRECTLY answer the query. Score 30-69 for facts that are indirectly relevant or provide supporting context. Score < 30 only for completely unrelated facts.
 5. If a community has no relevant facts for this query, skip it entirely.
 6. Include facts from EVERY document that contains relevant information — do not focus on just one.
-7. COMPLETENESS: Extract ALL obligations, requirements, mechanisms, and named items from the source text that fall within the query's scope. Missing a relevant item is worse than including a borderline one.
-8. PRECISION: When the query asks for items "explicitly described as X" or "specifically named Y", only extract items where the source text EXPLICITLY uses that characterisation. Do not broaden the criteria.
+7. COMPLETENESS: Extract ALL obligations, requirements, mechanisms, and named items from the source text that fall within the query's scope. Missing a relevant item is worse than including a borderline one. Include items that substantively match the query's category even if the source text uses different wording (e.g., "prepare an inventory" qualifies as record-keeping; "submit reports to the County" qualifies as reporting).
+8. FOCUS: Only extract facts that substantively relate to the query's topic. Do not extract general contract terms, boilerplate provisions, or unrelated obligations just because they appear in the source text.
 
 Respond with ONLY a JSON object:
 {{"points": [
