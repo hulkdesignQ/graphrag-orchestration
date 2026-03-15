@@ -386,15 +386,6 @@ class EntityDeduplicationService:
                         result.rule_merges += 1
                 
                 if should_merge:
-                    # Guard: never merge entities with conflicting numbers
-                    if _has_conflicting_numbers(name_i, name_j):
-                        should_merge = False
-                        if reason.get("type") == "embedding_similarity":
-                            result.embedding_merges -= 1
-                        elif reason.get("type") in ("acronym_match", "abbreviation_match"):
-                            result.rule_merges -= 1
-
-                if should_merge:
                     union(name_i, name_j)
                     # Store reason for the pair
                     merge_reasons[(name_i, name_j)] = reason
