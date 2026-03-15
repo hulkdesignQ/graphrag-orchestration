@@ -2036,14 +2036,14 @@ Return ONLY valid JSON (no markdown fences):
     # Step 1: NER — "broad" includes abstract concepts, "narrow" matches upstream HippoRAG 2
     # ── NER prompts (aligned with upstream HippoRAG 2) ─────────────────
     # Upstream uses a minimal system prompt + one-shot example.
-    # "broad" adds legal-domain types; "narrow" matches upstream exactly.
+    # "broad" adds legal-domain types + abstract concepts; "narrow" matches upstream exactly.
     _NER_PROMPT_BROAD = """Your task is to extract named entities from the given sentences.
-Extract: proper nouns, organizations, people, locations, dates, time periods, durations, monetary amounts, legal terms.
+Extract: proper nouns, organizations, people, locations, dates, time periods, durations, monetary amounts, legal terms, and abstract concepts (e.g. warranties, liabilities, obligations, termination, delivery, damage, expenses, property, filing).
 Respond with a JSON list of entities.
 
 Example:
-Sentences: "Radio City is India's first private FM radio station and was started on 3 July 2001. It plays Hindi, English and regional songs."
-Output: {{"named_entities": ["Radio City", "India", "3 July 2001", "Hindi", "English"]}}
+Sentences: "The Builder warrants for one year that the home is free from defects. The warranty does not cover damage caused by the Owner."
+Output: {{"named_entities": ["Builder", "one year", "home", "defects", "warranty", "damage", "Owner"]}}
 
 {sentences}
 
