@@ -450,7 +450,7 @@ class CommunityMatcher:
             return await self.embedding_client.aget_text_embedding(text)
         elif hasattr(self.embedding_client, 'embed_query'):
             # VoyageEmbedService / LangChain style (sync)
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             return await loop.run_in_executor(
                 None, self.embedding_client.embed_query, text
             )
@@ -470,7 +470,7 @@ class CommunityMatcher:
 
         # VoyageEmbedService has embed_query_batch
         if hasattr(self.embedding_client, 'embed_query_batch'):
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             results = await loop.run_in_executor(
                 None, self.embedding_client.embed_query_batch, texts
             )

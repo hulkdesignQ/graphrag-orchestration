@@ -24,6 +24,7 @@ from .route_4_drift import DRIFTHandler
 from .route_5_unified import UnifiedSearchHandler
 from .route_6_concept import ConceptSearchHandler
 from .route_7_hipporag2 import HippoRAG2Handler
+from .route_8_hipporag2_community import HippoRAG2CommunityHandler
 
 __all__ = [
     # Base classes
@@ -37,4 +38,5 @@ __all__ = [
     "UnifiedSearchHandler",
     "ConceptSearchHandler",
     "HippoRAG2Handler",
+    "HippoRAG2CommunityHandler",
 ]

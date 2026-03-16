@@ -378,7 +378,7 @@ class VoyageEmbedService:
         # Log usage (fire-and-forget)
         if total_tokens_used > 0:
             try:
-                loop = asyncio.get_event_loop()
+                loop = asyncio.get_running_loop()
                 task = loop.create_task(get_usage_tracker().log_embedding_usage(
                     partition_id=user_id or group_id or "indexing",
                     model=self.model_name,
@@ -466,7 +466,7 @@ class VoyageEmbedService:
         # Track usage (Voyage API returns usage in result)
         if hasattr(result, 'usage') and result.usage:
             try:
-                loop = asyncio.get_event_loop()
+                loop = asyncio.get_running_loop()
                 task = loop.create_task(get_usage_tracker().log_embedding_usage(
                     partition_id=user_id or group_id or "unknown",
                     model=self.model_name,
@@ -509,7 +509,7 @@ class VoyageEmbedService:
         # Track usage
         if hasattr(result, 'usage') and result.usage:
             try:
-                loop = asyncio.get_event_loop()
+                loop = asyncio.get_running_loop()
                 task = loop.create_task(get_usage_tracker().log_embedding_usage(
                     partition_id=user_id or group_id or "unknown",
                     model=self.model_name,
@@ -580,7 +580,7 @@ class VoyageEmbedService:
         # Track usage
         if total_tokens_used > 0:
             try:
-                loop = asyncio.get_event_loop()
+                loop = asyncio.get_running_loop()
                 task = loop.create_task(get_usage_tracker().log_embedding_usage(
                     partition_id=user_id or group_id or "unknown",
                     model=self.model_name,
@@ -604,7 +604,7 @@ class VoyageEmbedService:
     ) -> List[List[float]]:
         """Async wrapper for embed_independent_texts()."""
         import asyncio
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             None,
             lambda: self.embed_independent_texts(texts, group_id, user_id)
@@ -640,7 +640,7 @@ class VoyageEmbedService:
         import asyncio
         
         # Run synchronous embedding in executor to avoid blocking
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         embeddings = await loop.run_in_executor(
             None,
             lambda: self.embed_documents(texts)

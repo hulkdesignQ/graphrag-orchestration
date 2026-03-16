@@ -54,7 +54,7 @@ from .pipeline.enhanced_graph_retriever import EnhancedGraphRetriever
 from .router.main import HybridRouter, QueryRoute, DeploymentProfile
 
 # Modular route handlers (Jan 2026 refactor)
-from .routes import LocalSearchHandler, GlobalSearchHandler, DRIFTHandler, UnifiedSearchHandler, ConceptSearchHandler, HippoRAG2Handler
+from .routes import LocalSearchHandler, GlobalSearchHandler, DRIFTHandler, UnifiedSearchHandler, ConceptSearchHandler, HippoRAG2Handler, HippoRAG2CommunityHandler
 
 # Import async Neo4j service for native async operations
 try:
@@ -302,6 +302,7 @@ class HybridPipeline:
             QueryRoute.UNIFIED_SEARCH: UnifiedSearchHandler(self),
             QueryRoute.CONCEPT_SEARCH: ConceptSearchHandler(self),
             QueryRoute.HIPPORAG2_SEARCH: HippoRAG2Handler(self),
+            QueryRoute.HIPPORAG2_COMMUNITY: HippoRAG2CommunityHandler(self),
         }
         
         logger.info("hybrid_pipeline_initialized",
@@ -525,6 +526,10 @@ class HybridPipeline:
             if route == QueryRoute.UNIFIED_SEARCH:
                 extra_kwargs["weight_profile"] = weight_profile
             if route == QueryRoute.HIPPORAG2_SEARCH:
+                extra_kwargs["query_mode"] = original_route.value
+                if config_overrides:
+                    extra_kwargs["config_overrides"] = config_overrides
+            if route == QueryRoute.HIPPORAG2_COMMUNITY:
                 extra_kwargs["query_mode"] = original_route.value
                 if config_overrides:
                     extra_kwargs["config_overrides"] = config_overrides
@@ -2433,6 +2438,10 @@ Sub-questions:"""
                     weight_profile or HybridRouter.get_weight_profile(route)
                 )
             if route == QueryRoute.HIPPORAG2_SEARCH:
+                extra_kwargs["query_mode"] = query_mode or route.value
+                if config_overrides:
+                    extra_kwargs["config_overrides"] = config_overrides
+            if route == QueryRoute.HIPPORAG2_COMMUNITY:
                 extra_kwargs["query_mode"] = query_mode or route.value
                 if config_overrides:
                     extra_kwargs["config_overrides"] = config_overrides

@@ -240,6 +240,7 @@ class RouteEnum(str, Enum):
     UNIFIED_SEARCH = "unified_search"   # Route 5: Unified hierarchical seed PPR
     CONCEPT_SEARCH = "concept_search"   # Route 6: Concept search (direct community synthesis)
     HIPPORAG2_SEARCH = "hipporag2_search"  # Route 7: True HippoRAG 2 architecture
+    HIPPORAG2_COMMUNITY = "hipporag2_community"  # Route 8: HippoRAG 2 + community seeding
 
 
 class HybridQueryRequest(BaseModel):
@@ -564,6 +565,7 @@ async def hybrid_query(
                 RouteEnum.UNIFIED_SEARCH: QueryRoute.UNIFIED_SEARCH,
                 RouteEnum.CONCEPT_SEARCH: QueryRoute.CONCEPT_SEARCH,
                 RouteEnum.HIPPORAG2_SEARCH: QueryRoute.HIPPORAG2_SEARCH,
+                RouteEnum.HIPPORAG2_COMMUNITY: QueryRoute.HIPPORAG2_COMMUNITY,
             }
             forced_route = route_map[body.force_route]
             result = await pipeline.force_route(
