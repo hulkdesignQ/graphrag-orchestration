@@ -1933,26 +1933,9 @@ class LazyGraphRAGIndexingPipeline:
             content_sentences=content_sentences,
         )
 
-        # ── Step 3b: Embed entities (name-only, for synonym detection) ────────
-        # CRITICAL: Use aembed_independent_texts() so each entity name is embedded
-        # as its own document. The default aget_text_embedding_batch() wraps all
-        # names as chunks of ONE document, causing contextual bleed that destroys
-        # pairwise similarity (e.g., cos drops from 0.93→0.54 with 252 entities).
-        if entities and self.voyage_service:
-            texts = [e.name for e in entities]
-            for attempt in range(3):
-                try:
-                    embs = await self.voyage_service.aembed_independent_texts(texts)
-                    for ent, emb in zip(entities, embs):
-                        ent.entity_embedding = emb
-                    logger.info(f"openie_entity_embeddings: {len(embs)} entities embedded (independent)")
-                    break
-                except Exception as e:
-                    if attempt < 2:
-                        logger.warning("openie_entity_embedding attempt %d failed, retrying: %s", attempt + 1, e)
-                        await asyncio.sleep(2 ** attempt)
-                    else:
-                        logger.error("openie_entity_embedding_failed after 3 attempts — entities committed without embeddings: %s", e)
+        # ── Step 3b: Embed entities — deferred until after Step 4b ─────────
+        # Embedding is done after the orphan tagger so we can embed ALL
+        # entities (OpenIE + concept) in a single Voyage API call.
 
         # Build a lookup of entities by canonical key for co-occurrence step
         entities_by_key: Dict[str, Entity] = {}
@@ -2016,15 +1999,6 @@ class LazyGraphRAGIndexingPipeline:
                 if new_ents or new_rels:
                     entities.extend(new_ents)
                     merged_rels.extend(new_rels)
-                    # Embed new concept entities so they work in PPR graph
-                    if new_ents and self.voyage_service:
-                        try:
-                            new_texts = [e.name for e in new_ents]
-                            new_embs = await self.voyage_service.aembed_independent_texts(new_texts)
-                            for ent, emb in zip(new_ents, new_embs):
-                                ent.entity_embedding = emb
-                        except Exception as emb_err:
-                            logger.warning("orphan_tag_embedding_failed: %s", emb_err)
                     logger.info(
                         "orphan_sentence_tagger_complete: %d new entities, %d new relationships",
                         len(new_ents), len(new_rels),
@@ -2056,6 +2030,12 @@ class LazyGraphRAGIndexingPipeline:
                 "orphan_sentences_tagged": len(orphan_sentences),
             },
         )
+
+        # ── Step 3b (deferred): Embed ALL entities in a single Voyage call ──
+        # Combined embedding of OpenIE + concept entities avoids two separate
+        # API round-trips and uses the same 3-attempt retry as the old Step 3b.
+        await self._embed_entities_with_retry(entities, "all_entities")
+
         return entities, merged_rels
 
     # ────────────────────────────────────────────────────────────────────
@@ -2388,6 +2368,47 @@ Return ONLY valid JSON (no markdown fences):
 
         return triples
 
+    # ── Shared embedding helper ────────────────────────────────────────
+
+    async def _embed_entities_with_retry(
+        self, entities: List["Entity"], label: str, max_retries: int = 3,
+    ) -> int:
+        """Embed entity names via Voyage with retry + exponential backoff.
+
+        Only embeds entities that don't already have an embedding.
+        Returns the number of entities successfully embedded.
+        """
+        if not self.voyage_service:
+            return 0
+        to_embed = [(i, e) for i, e in enumerate(entities) if not getattr(e, "entity_embedding", None)]
+        if not to_embed:
+            return 0
+        texts = [e.name for _, e in to_embed]
+        for attempt in range(max_retries):
+            try:
+                embs = await self.voyage_service.aembed_independent_texts(texts)
+                for (idx, ent), emb in zip(to_embed, embs):
+                    ent.entity_embedding = emb
+                logger.info(
+                    "entity_embedding_complete: %d/%d entities embedded (%s)",
+                    len(embs), len(entities), label,
+                )
+                return len(embs)
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    delay = 2 ** attempt
+                    logger.warning(
+                        "entity_embedding attempt %d/%d failed (%s), retrying in %ds: %s",
+                        attempt + 1, max_retries, label, delay, e,
+                    )
+                    await asyncio.sleep(delay)
+                else:
+                    logger.error(
+                        "entity_embedding_failed after %d attempts (%s) — entities committed without embeddings: %s",
+                        max_retries, label, e,
+                    )
+        return 0
+
     # ── Orphan sentence concept tagger ─────────────────────────────────
 
     _ORPHAN_TAG_PROMPT = """Tag each sentence with 1-2 short concept labels that capture its key topic.
@@ -2411,33 +2432,45 @@ Only return the JSON array, no other text."""
         For each orphan sentence, asks the LLM for 1-2 concept labels.
         Creates or reuses Entity nodes and adds text_unit_ids so MENTIONS
         edges connect these sentences to the entity graph.
+
+        Batches into groups of 50 to avoid token-limit overflow on large
+        corpora, and processes batches in parallel with asyncio.gather.
         """
         if not orphan_sentences:
             return [], []
 
-        # Format sentences for the prompt
-        lines = []
-        for s in orphan_sentences:
-            lines.append(f'{s["id"]}: {s["text"][:300]}')
-        prompt_text = self._ORPHAN_TAG_PROMPT.format(sentences="\n".join(lines))
+        _BATCH_SIZE = 50
 
-        try:
-            from llama_index.core.llms import ChatMessage
-            resp = await self._achat_with_retry(
-                [ChatMessage(role="user", content=prompt_text)]
-            )
-            raw = resp.message.content if hasattr(resp, "message") else str(resp)
-            # Extract JSON from response
-            import json as _json
-            start = raw.find("[")
-            end = raw.rfind("]") + 1
-            if start < 0 or end <= start:
-                logger.warning("orphan_tag_no_json: %s", raw[:200])
-                return [], []
-            tags = _json.loads(raw[start:end])
-        except Exception as e:
-            logger.warning("orphan_tag_llm_failed: %s", e)
-            return [], []
+        async def _tag_batch(batch: List[Dict[str, Any]]) -> list:
+            """Send one batch to LLM, return list of tag dicts."""
+            lines = [f'{s["id"]}: {s["text"][:300]}' for s in batch]
+            prompt_text = self._ORPHAN_TAG_PROMPT.format(sentences="\n".join(lines))
+            try:
+                from llama_index.core.llms import ChatMessage
+                resp = await self._achat_with_retry(
+                    [ChatMessage(role="user", content=prompt_text)]
+                )
+                raw = resp.message.content if hasattr(resp, "message") else str(resp)
+                import json as _json
+                start = raw.find("[")
+                end = raw.rfind("]") + 1
+                if start < 0 or end <= start:
+                    logger.warning("orphan_tag_no_json: %s", raw[:200])
+                    return []
+                return _json.loads(raw[start:end])
+            except Exception as e:
+                logger.warning("orphan_tag_llm_batch_failed: %s", e)
+                return []
+
+        # Split into batches and process in parallel
+        batches = [
+            orphan_sentences[i : i + _BATCH_SIZE]
+            for i in range(0, len(orphan_sentences), _BATCH_SIZE)
+        ]
+        batch_results = await asyncio.gather(*[_tag_batch(b) for b in batches])
+        tags: list = []
+        for result in batch_results:
+            tags.extend(result)
 
         new_entities: List[Entity] = []
         new_relationships: List[Relationship] = []
@@ -2468,7 +2501,7 @@ Only return the JSON array, no other text."""
                         id=f"concept_{key}_{group_id}",
                         name=concept,
                         type="CONCEPT",
-                        description=f"Concept tag for orphan sentence coverage",
+                        description="Concept tag for orphan sentence coverage",
                         text_unit_ids=[sid],
                     )
                     entities_by_key[key] = ent
