@@ -24,6 +24,7 @@ from src.core.roles import (
     PlanTier,
     PlanLimits,
     PLAN_DEFINITIONS,
+    LEGACY_TIER_MAP,
     UserProfile,
     resolve_user_profile,
 )
@@ -90,7 +91,7 @@ class UsageStatsResponse(BaseModel):
     queries_limit_day: int = 0
     queries_limit_month: int = 0
     documents_count: int = 0
-    documents_limit: int = 0
+    documents_limit: int = Field(default=0, description="Deprecated — storage cap is the effective limit")
     storage_used_gb: float = 0.0
     storage_limit_gb: float = 0.0
     personal_documents_count: int = 0
@@ -205,11 +206,9 @@ async def _fetch_profile(
     features = {
         "graphrag": limits.graphrag_enabled,
         "advanced_analytics": limits.advanced_analytics,
-        "custom_models": limits.custom_models,
         "api_access": limits.api_access,
-        "priority_support": limits.priority_support,
-        "sso": limits.sso_enabled,
-        "custom_branding": limits.custom_branding,
+        "centralized_billing": limits.centralized_billing,
+        "audit_logs": limits.audit_logs,
     }
 
     return UserProfileResponse(
@@ -375,7 +374,7 @@ async def _fetch_user_usage(
         queries_limit_day=limits.queries_per_day,
         queries_limit_month=limits.queries_per_month,
         documents_count=total_documents,
-        documents_limit=limits.max_documents,
+        documents_limit=0,  # deprecated — storage cap is the effective limit
         storage_used_gb=storage_used_gb,
         storage_limit_gb=limits.max_storage_gb,
         personal_documents_count=personal_documents_count,
@@ -412,18 +411,19 @@ async def get_available_plans(
 
     plans = {}
     for tier, limits in PLAN_DEFINITIONS.items():
+        if tier in LEGACY_TIER_MAP:
+            continue
         plans[tier.value] = {
-            "name": tier.value.title(),
+            "name": tier.value.replace("_", " ").title(),
             "queries_per_day": limits.queries_per_day,
             "queries_per_month": limits.queries_per_month,
-            "max_documents": limits.max_documents,
             "max_storage_gb": limits.max_storage_gb,
             "monthly_credits": limits.monthly_credits,
             "graphrag_enabled": limits.graphrag_enabled,
             "advanced_analytics": limits.advanced_analytics,
-            "custom_models": limits.custom_models,
             "api_access": limits.api_access,
-            "sso_enabled": limits.sso_enabled,
+            "centralized_billing": limits.centralized_billing,
+            "audit_logs": limits.audit_logs,
         }
 
     return PlanInfoResponse(
@@ -504,11 +504,9 @@ async def _fetch_dashboard_all(
     features = {
         "graphrag": profile_limits.graphrag_enabled,
         "advanced_analytics": profile_limits.advanced_analytics,
-        "custom_models": profile_limits.custom_models,
         "api_access": profile_limits.api_access,
-        "priority_support": profile_limits.priority_support,
-        "sso": profile_limits.sso_enabled,
-        "custom_branding": profile_limits.custom_branding,
+        "centralized_billing": profile_limits.centralized_billing,
+        "audit_logs": profile_limits.audit_logs,
     }
 
     profile_resp = UserProfileResponse(
@@ -616,7 +614,7 @@ async def _fetch_dashboard_all(
         queries_limit_day=limits.queries_per_day,
         queries_limit_month=limits.queries_per_month,
         documents_count=total_documents,
-        documents_limit=limits.max_documents,
+        documents_limit=0,  # deprecated — storage cap is the effective limit
         storage_used_gb=storage_used_gb,
         storage_limit_gb=limits.max_storage_gb,
         personal_documents_count=personal_documents_count,
@@ -633,18 +631,19 @@ async def _fetch_dashboard_all(
     # ── Phase 4: Plans (pure computation, no I/O — reuses plan_tier) ─────
     plans_dict = {}
     for tier, tier_limits in PLAN_DEFINITIONS.items():
+        if tier in LEGACY_TIER_MAP:
+            continue
         plans_dict[tier.value] = {
-            "name": tier.value.title(),
+            "name": tier.value.replace("_", " ").title(),
             "queries_per_day": tier_limits.queries_per_day,
             "queries_per_month": tier_limits.queries_per_month,
-            "max_documents": tier_limits.max_documents,
             "max_storage_gb": tier_limits.max_storage_gb,
             "monthly_credits": tier_limits.monthly_credits,
             "graphrag_enabled": tier_limits.graphrag_enabled,
             "advanced_analytics": tier_limits.advanced_analytics,
-            "custom_models": tier_limits.custom_models,
             "api_access": tier_limits.api_access,
-            "sso_enabled": tier_limits.sso_enabled,
+            "centralized_billing": tier_limits.centralized_billing,
+            "audit_logs": tier_limits.audit_logs,
         }
 
     plans_resp = PlanInfoResponse(
@@ -691,7 +690,7 @@ async def get_system_metrics(
     queries_month = 0
     total_documents = 0
     total_storage_gb = 0.0
-    plan_dist: Dict[str, int] = {"free": 0, "starter": 0, "professional": 0, "enterprise": 0}
+    plan_dist: Dict[str, int] = {t.value: 0 for t in PlanTier}
     queries_per_hour: List[Dict[str, Any]] = []
     top_users_list: List[Dict[str, Any]] = []
     error_rate = 0.0
@@ -731,7 +730,7 @@ async def get_system_metrics(
                 "user_id": uid,
                 "name": uid[:20],
                 "queries": count,
-                "plan": "enterprise",
+                "plan": "unknown",
                 "last_active": "",
             })
 
@@ -746,7 +745,7 @@ async def get_system_metrics(
                 plan = await enforcer.get_plan(uid)
                 plan_dist[plan.value] = plan_dist.get(plan.value, 0) + 1
         except Exception:
-            plan_dist["enterprise"] = total_users
+            plan_dist["free"] = total_users
 
         # Document count from doc_intel records
         try:

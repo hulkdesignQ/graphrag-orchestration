@@ -34,11 +34,16 @@ class AppRole(str, Enum):
 # ============================================================================
 
 class PlanTier(str, Enum):
-    """Payment plan tiers for both B2C and B2B customers."""
+    """Payment plan tiers — mirrors GitHub Copilot tier structure."""
     FREE = "free"
-    STARTER = "starter"
-    PROFESSIONAL = "professional"
-    ENTERPRISE = "enterprise"
+    PRO = "pro"                # Individual — $10/mo
+    PRO_PLUS = "pro_plus"      # Power individual — $39/mo
+    BUSINESS = "business"      # Team — $19/user/mo (same credits as Pro, adds governance)
+    ENTERPRISE = "enterprise"  # Org — $39/user/mo (highest caps, priority support)
+
+    # Legacy aliases for backward compatibility with cached Redis values
+    STARTER = "starter"              # → maps to PRO
+    PROFESSIONAL = "professional"    # → maps to PRO_PLUS
 
 
 class PlanLimits(BaseModel):
@@ -49,7 +54,7 @@ class PlanLimits(BaseModel):
     max_tokens_per_query: int = Field(default=4096, description="Max output tokens per query")
     
     # Credit limits (1 credit = $0.001 USD)
-    monthly_credits: Optional[int] = Field(default=None, description="Monthly credit allowance (None = unlimited)")
+    monthly_credits: Optional[int] = Field(default=None, description="Monthly credit allowance (None = skip enforcement for testing only)")
     
     # Document limits
     max_documents: int = Field(description="Max documents in knowledge base")
@@ -63,20 +68,24 @@ class PlanLimits(BaseModel):
     api_access: bool = Field(default=False, description="Programmatic API access")
     priority_support: bool = Field(default=False, description="Priority support queue")
     
-    # B2B specific
+    # B2B / governance features
     max_users: Optional[int] = Field(default=None, description="Max users per tenant (B2B only)")
+    centralized_billing: bool = Field(default=False, description="Org-wide centralized billing")
+    audit_logs: bool = Field(default=False, description="Access to audit logs and usage reports")
+    policy_controls: bool = Field(default=False, description="Org-wide policy management")
     sso_enabled: bool = Field(default=False, description="SSO integration (B2B only)")
     custom_branding: bool = Field(default=False, description="Custom branding (B2B only)")
     dedicated_resources: bool = Field(default=False, description="Dedicated compute (B2B only)")
 
 
 # Plan definitions — these will eventually move to a database/config service
+# Pricing mirrors GitHub Copilot tiers: Free / Pro $10 / Pro+ $39 / Business $19/user / Enterprise $39/user
 PLAN_DEFINITIONS: Dict[PlanTier, PlanLimits] = {
     PlanTier.FREE: PlanLimits(
         queries_per_day=100,
         queries_per_month=2000,
         max_tokens_per_query=2048,
-        monthly_credits=500,          # ~$0.50/month — ~5-25 queries
+        monthly_credits=500,          # ~$0.50/month — trial usage
         max_documents=10,
         max_document_size_mb=5,
         max_storage_gb=0.5,
@@ -86,11 +95,11 @@ PLAN_DEFINITIONS: Dict[PlanTier, PlanLimits] = {
         api_access=False,
         priority_support=False,
     ),
-    PlanTier.STARTER: PlanLimits(
-        queries_per_day=100,
-        queries_per_month=2000,
+    PlanTier.PRO: PlanLimits(
+        queries_per_day=200,
+        queries_per_month=5000,
         max_tokens_per_query=4096,
-        monthly_credits=5_000,        # ~$5/month — ~50-250 queries
+        monthly_credits=3_000,        # ~$3/month — ~200 queries — $10/mo price
         max_documents=50,
         max_document_size_mb=10,
         max_storage_gb=2.0,
@@ -100,41 +109,70 @@ PLAN_DEFINITIONS: Dict[PlanTier, PlanLimits] = {
         api_access=False,
         priority_support=False,
     ),
-    PlanTier.PROFESSIONAL: PlanLimits(
-        queries_per_day=500,
-        queries_per_month=10000,
+    PlanTier.PRO_PLUS: PlanLimits(
+        queries_per_day=1000,
+        queries_per_month=20000,
         max_tokens_per_query=8192,
-        monthly_credits=50_000,       # ~$50/month — ~500-2500 queries
+        monthly_credits=15_000,       # ~$15/month — ~1000 queries — $39/mo price
         max_documents=500,
         max_document_size_mb=50,
-        max_storage_gb=20.0,
+        max_storage_gb=10.0,
         graphrag_enabled=True,
         advanced_analytics=True,
         custom_models=True,
         api_access=True,
         priority_support=False,
-        max_users=10,
-        sso_enabled=False,
+    ),
+    PlanTier.BUSINESS: PlanLimits(
+        queries_per_day=200,
+        queries_per_month=5000,
+        max_tokens_per_query=4096,
+        monthly_credits=5_000,        # ~$5/month — ~330 queries — $19/user/mo for governance
+        max_documents=50,
+        max_document_size_mb=10,
+        max_storage_gb=4.0,
+        graphrag_enabled=True,
+        advanced_analytics=True,
+        custom_models=False,
+        api_access=True,
+        priority_support=False,
+        max_users=50,
+        centralized_billing=True,
+        audit_logs=True,
+        policy_controls=True,
     ),
     PlanTier.ENTERPRISE: PlanLimits(
-        queries_per_day=999999,
-        queries_per_month=999999,
+        queries_per_day=2000,
+        queries_per_month=50000,
         max_tokens_per_query=16384,
-        monthly_credits=None,         # Unlimited / custom agreement
+        monthly_credits=14_000,       # ~$14/month — ~930 queries — $39/user/mo (2.8× Business)
         max_documents=999999,
         max_document_size_mb=200,
-        max_storage_gb=500.0,
+        max_storage_gb=10.0,
         graphrag_enabled=True,
         advanced_analytics=True,
         custom_models=True,
         api_access=True,
         priority_support=True,
-        max_users=None,  # Unlimited
+        max_users=500,
+        centralized_billing=True,
+        audit_logs=True,
+        policy_controls=True,
         sso_enabled=True,
         custom_branding=True,
         dedicated_resources=True,
     ),
 }
+
+# Backward compatibility: map legacy tier names to new tiers
+LEGACY_TIER_MAP: Dict[PlanTier, PlanTier] = {
+    PlanTier.STARTER: PlanTier.PRO,
+    PlanTier.PROFESSIONAL: PlanTier.PRO_PLUS,
+}
+
+# Ensure legacy tiers resolve to the correct plan limits
+for _legacy, _current in LEGACY_TIER_MAP.items():
+    PLAN_DEFINITIONS[_legacy] = PLAN_DEFINITIONS[_current]
 
 
 # ============================================================================
@@ -181,6 +219,8 @@ def resolve_user_profile(
     is_admin = any(r.lower() == "admin" for r in roles)
     
     tier = plan_tier or PlanTier.FREE
+    # Resolve legacy tier names to current tiers
+    tier = LEGACY_TIER_MAP.get(tier, tier)
     limits = PLAN_DEFINITIONS.get(tier)
     
     return UserProfile(
