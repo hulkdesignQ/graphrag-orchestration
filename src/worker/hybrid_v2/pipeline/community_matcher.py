@@ -202,6 +202,7 @@ class CommunityMatcher:
         *,
         relative_threshold: float | None = None,
         max_k: int | None = None,
+        folder_id: Optional[str] = None,
     ) -> List[Tuple[Dict[str, Any], float]]:
         """Find communities most relevant to the query via embedding similarity.
 
@@ -212,6 +213,8 @@ class CommunityMatcher:
                 similarity is >= *relative_threshold* × best_score, up to
                 *max_k*.  Overrides *top_k*.
             max_k: Safety cap when using *relative_threshold* (default 10).
+            folder_id: Per-query folder scope override.  When provided, takes
+                priority over ``self.folder_id`` (pipeline default).
 
         Returns:
             List of (community_data, similarity_score) tuples, ordered by
@@ -246,8 +249,11 @@ class CommunityMatcher:
         # Post-filter: prune communities whose entities have no content
         # in the target folder.  Only runs when folder_id is set AND we
         # have a Neo4j service for the verification query.
-        if results and self.folder_id is not None and self.neo4j_service:
-            results = await self._filter_communities_by_folder(results)
+        effective_folder = folder_id if folder_id is not None else self.folder_id
+        if results and effective_folder is not None and self.neo4j_service:
+            results = await self._filter_communities_by_folder(
+                results, folder_id=effective_folder,
+            )
 
         if not results:
             logger.info(
@@ -337,6 +343,7 @@ class CommunityMatcher:
     async def _filter_communities_by_folder(
         self,
         candidates: List[Tuple[Dict[str, Any], float]],
+        folder_id: Optional[str] = None,
     ) -> List[Tuple[Dict[str, Any], float]]:
         """Remove communities that have no member entities in the target folder.
 
@@ -345,8 +352,12 @@ class CommunityMatcher:
         belongs to the target folder.  Communities that fail this check are
         pruned from the candidate list.
 
-        Only called when ``self.folder_id is not None``.
+        Args:
+            candidates: (community_dict, score) tuples to filter.
+            folder_id: Per-query folder scope.  Falls back to ``self.folder_id``
+                when ``None``.
         """
+        effective_folder = folder_id if folder_id is not None else self.folder_id
         community_ids = [
             c.get("id", c.get("title", ""))
             for c, _ in candidates
@@ -373,7 +384,7 @@ class CommunityMatcher:
                     query,
                     community_ids=community_ids,
                     group_ids=self.group_ids,
-                    folder_id=self.folder_id,
+                    folder_id=effective_folder,
                 )
                 records = await result.data()
 
@@ -387,7 +398,7 @@ class CommunityMatcher:
             if len(filtered) < before:
                 logger.info(
                     "community_folder_filter",
-                    folder_id=self.folder_id,
+                    folder_id=effective_folder,
                     before=before,
                     after=len(filtered),
                     pruned=before - len(filtered),
@@ -397,6 +408,33 @@ class CommunityMatcher:
             logger.warning("community_folder_filter_failed", error=str(exc))
             # On failure, return unfiltered to avoid data loss
             return candidates
+
+    async def filter_communities_by_folder(
+        self,
+        communities: List[Dict[str, Any]],
+        folder_id: str,
+    ) -> List[Dict[str, Any]]:
+        """Public API to prune communities that have no content in a folder.
+
+        Wraps ``_filter_communities_by_folder`` for callers that hold a plain
+        list of community dicts (without scores), e.g. Route 6's "rate all"
+        path.  Returns the filtered list preserving original order.
+
+        Args:
+            communities: Community dicts (must have 'id' field).
+            folder_id: Target folder to check against.
+
+        Returns:
+            Filtered community list.  On failure, returns the original list.
+        """
+        if not self.neo4j_service or not communities:
+            return communities
+        # Wrap as (dict, score) tuples for the internal method
+        as_tuples = [(c, 1.0) for c in communities]
+        filtered_tuples = await self._filter_communities_by_folder(
+            as_tuples, folder_id=folder_id,
+        )
+        return [c for c, _ in filtered_tuples]
 
     async def _get_embedding(self, text: str) -> Optional[List[float]]:
         """Get embedding for text using the configured embedding client."""

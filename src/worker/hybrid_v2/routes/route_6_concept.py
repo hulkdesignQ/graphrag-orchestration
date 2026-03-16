@@ -154,6 +154,11 @@ class ConceptSearchHandler(BaseRouteHandler):
         all_communities = await self.pipeline.community_matcher.get_all_communities()
         if len(all_communities) <= rate_all_threshold:
             community_data = list(all_communities)
+            # Folder-scope prune: remove communities with no content in target folder
+            if folder_id is not None:
+                community_data = await self.pipeline.community_matcher.filter_communities_by_folder(
+                    community_data, folder_id=folder_id,
+                )
             community_scores = [1.0] * len(community_data)
             logger.info(
                 "route6_rate_all_communities",
@@ -162,7 +167,7 @@ class ConceptSearchHandler(BaseRouteHandler):
             )
         else:
             matched_communities = await self.pipeline.community_matcher.match_communities(
-                query, top_k=community_top_k,
+                query, top_k=community_top_k, folder_id=folder_id,
             )
             community_data = [c for c, _ in matched_communities]
             community_scores = [s for _, s in matched_communities]
@@ -610,10 +615,15 @@ class ConceptSearchHandler(BaseRouteHandler):
         all_communities = await self.pipeline.community_matcher.get_all_communities()
         if len(all_communities) <= rate_all_threshold:
             community_data = list(all_communities)
+            # Folder-scope prune: remove communities with no content in target folder
+            if folder_id is not None:
+                community_data = await self.pipeline.community_matcher.filter_communities_by_folder(
+                    community_data, folder_id=folder_id,
+                )
             community_scores = [1.0] * len(community_data)
         else:
             matched_communities = await self.pipeline.community_matcher.match_communities(
-                query, top_k=community_top_k,
+                query, top_k=community_top_k, folder_id=folder_id,
             )
             community_data = [c for c, _ in matched_communities]
             community_scores = [s for _, s in matched_communities]
