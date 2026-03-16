@@ -918,11 +918,16 @@ class ConceptSearchHandler(BaseRouteHandler):
             tag = f" [{community}]" if community else ""
             formatted.append(f"- (importance: {score}) {desc}{tag}")
 
-        # Append raw summaries for communities that weren't extracted
-        if summary_communities:
+        # Append raw summaries for ALL communities as fallback context.
+        # Extracted communities get both focused key-points above AND their
+        # raw summary below, so synthesis never loses information that the
+        # extraction LLM filtered out too aggressively (fixes Q-G7 regression
+        # where "60 days written notice" etc. were dropped by extraction).
+        all_summary_communities = extract_communities + summary_communities
+        if all_summary_communities:
             formatted.append("")
-            formatted.append("--- Additional Thematic Context (lower relevance) ---")
-            for c in summary_communities:
+            formatted.append("--- Thematic Summaries (broad context) ---")
+            for c in all_summary_communities:
                 title = c.get("title", "?")
                 summary = (c.get("summary") or "").strip()
                 if summary:
@@ -934,7 +939,7 @@ class ConceptSearchHandler(BaseRouteHandler):
             after_dedup=len(unique_points),
             after_filter=len(points),
             max_points=max_points,
-            summary_appended=len(summary_communities),
+            summary_appended=len(all_summary_communities),
             top_score=points[0].get("score", 0) if points else 0,
         )
         return "\n".join(formatted)
