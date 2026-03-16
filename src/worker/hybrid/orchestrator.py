@@ -2446,7 +2446,7 @@ Instructions:
         """
         Search TextChunk nodes by vector similarity using Neo4j native vector index.
         
-        Uses db.index.vector.queryNodes() for efficient vector search (Neo4j 5.11+).
+        Uses SEARCH ... IN (VECTOR INDEX ...) for efficient vector search (Cypher 25).
         This uses proper vector indexes instead of computing similarity for all nodes,
         providing O(log n) retrieval via HNSW index rather than O(n) full scan.
         
