@@ -859,14 +859,6 @@ class ConceptSearchHandler(BaseRouteHandler):
                 try:
                     resp = await acomplete_with_retry(self.llm, prompt)
                     text = resp.text.strip()
-                    # DEBUG: log extraction input/output for investigation
-                    logger.info(
-                        "route6_extract_one_debug",
-                        community=title,
-                        source_chars=len(source_block),
-                        source_preview=source_block[:500],
-                        raw_output_preview=text[:500],
-                    )
                     if text.startswith("```"):
                         text = re.sub(r'^```(?:json)?\s*\n?', '', text)
                         text = re.sub(r'\n?```\s*$', '', text)
@@ -941,7 +933,6 @@ class ConceptSearchHandler(BaseRouteHandler):
                 if summary:
                     formatted.append(f"- [{title}]: {summary[:200]}")
 
-        # DEBUG: log final points that reach synthesis
         logger.info(
             "route6_community_extract_done",
             total_raw=len(all_points),
@@ -950,7 +941,6 @@ class ConceptSearchHandler(BaseRouteHandler):
             max_points=max_points,
             summary_appended=len(all_summary_communities),
             top_score=points[0].get("score", 0) if points else 0,
-            final_points=[f"[{p.get('score',0)}] {p.get('description','')[:120]}" for p in points],
         )
         return "\n".join(formatted)
 
