@@ -727,9 +727,25 @@ class ConceptSearchHandler(BaseRouteHandler):
         else:
             headings_text = "(No document structure available)"
 
+        # Format sentence evidence for REDUCE cross-check
+        if sentence_evidence:
+            evidence_lines = []
+            for i, ev in enumerate(sentence_evidence, 1):
+                doc = ev.get("document_title") or "Unknown"
+                section = ev.get("section_path") or ""
+                text = ev.get("text") or ""
+                if section:
+                    evidence_lines.append(f"{i}. [{doc} > {section}] {text}")
+                else:
+                    evidence_lines.append(f"{i}. [{doc}] {text}")
+            evidence_text = "\n".join(evidence_lines)
+        else:
+            evidence_text = "(No document evidence retrieved)"
+
         reduce_prompt = REDUCE_SYNTHESIS_PROMPT.format(
             query=query,
             community_responses=responses_text,
+            sentence_evidence=evidence_text,
             section_headings=headings_text,
         )
 

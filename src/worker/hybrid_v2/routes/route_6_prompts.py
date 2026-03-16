@@ -127,6 +127,7 @@ You are a document analysis assistant. Produce a focused response to the query u
 4. If no key points or sentences are relevant to the query, respond with exactly: "(No relevant information in this community.)"
 5. Keep the response focused and concise — bullet points preferred. Do NOT add introduction or conclusion.
 6. Do not mention methodology, the community theme name, or how evidence was obtained.
+7. PRECISION: Only include items that substantively match the query's stated category. A warranty limitation-of-liability clause is NOT a "non-refundable / forfeiture" term; a defect notification procedure is NOT a "record-keeping" obligation. If a key point does not fit the query's category, skip it. Do NOT include individual persons by name (e.g. "John Doe") for entity-listing queries unless they operate as a named business.
 
 **Response**:
 """
@@ -149,26 +150,29 @@ You are a document analysis assistant. Combine the analyst reports below into a 
 **Analyst Reports** (each report covers a different thematic area of the documents):
 {community_responses}
 
+**Document Evidence** (source passages — use these to verify and supplement the analyst reports):
+{sentence_evidence}
+
 **Document Structure** (section headings found in source documents):
 {section_headings}
 
 **Rules**:
-1. Combine ALL analyst reports into one unified answer. Every fact from every report must appear in the final answer — do NOT drop or summarize away any item.
-2. Deduplicate: if multiple reports mention the same fact, include it once with the most specific detail.
-3. Organise by theme or document — group related findings under clear headings.
-4. Preserve specific details: names, amounts, dates, conditions, section references.
-5. Preserve document citations in [Document > Section] format.
+1. Combine ALL analyst reports into one unified answer. Every fact from every report must appear — do NOT drop or summarize away any item.
+2. CROSS-CHECK with Document Evidence: scan the source passages for facts NOT covered by any analyst report. If a passage contains a relevant fact that no report mentions, include it in your answer. The analyst reports may have gaps — the document evidence is the ground truth.
+3. Deduplicate: if multiple reports or passages mention the same fact, include it once with the most specific detail.
+4. Organise by theme or document — group related findings under clear headings.
+5. Preserve specific details: names, amounts, dates, conditions, section references, document citations.
 6. Response length — choose based on query type:
-   - For queries asking for ALL, EVERY, COMPLETE LIST, or ENUMERATE: list EVERY item from the reports without truncation. Completeness is mandatory.
+   - For queries asking for ALL, EVERY, COMPLETE LIST, or ENUMERATE: list EVERY item without truncation. Completeness is mandatory.
    - For narrative/summary queries: 3-5 focused paragraphs.
-   - PRECISION OVER PADDING: form fields (signatures, registration numbers) are NOT obligations; general contract boilerplate is NOT a specific provision. For entity/party listing queries, include ALL named organisations but do NOT include individual persons by name unless they operate as a named business.
+   - PRECISION OVER PADDING: form fields (signatures, registration numbers) are NOT obligations; general contract boilerplate is NOT a specific provision. Do NOT include individual persons by name unless they operate as a named business. Do NOT include governmental jurisdictions unless they are a contractual party.
 7. Cross-document comparison — for queries asking which document has the latest/earliest/largest/smallest value:
    a. List: "[Document name]: [value found]" for every document.
    b. State which is largest/latest/most based only on the extracted values.
 8. Do not mention methodology, analyst reports, or how the evidence was retrieved.
 9. REFUSE for specific lookups where the exact data point is absent:
-   - Question asks about a specific term, clause, or concept by name but that exact term does NOT appear in ANY analyst report → say: "The requested information was not found in the available documents."
-10. DOCUMENT COVERAGE — For queries about clauses or provisions across documents: ensure EVERY document represented in the analyst reports is covered. Include broader variants of the requested category (e.g. warranty disclaimers = liability protection; risk-of-loss = risk management).
+   - Question asks about a specific term, clause, or concept by name but that exact term does NOT appear in ANY analyst report or document evidence → say: "The requested information was not found in the available documents."
+10. DOCUMENT COVERAGE — For queries about clauses or provisions across documents: ensure EVERY document represented in the analyst reports AND document evidence is covered.
 
 **Answer**:
 """

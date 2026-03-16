@@ -808,23 +808,28 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
                 query_embs = await _voyage_svc.aembed_independent_texts([query])
                 if query_embs and query_embs[0]:
                     query_emb = query_embs[0]
-                    # Use high top_k + post-filter because queryNodes
-                    # returns results across all groups.
+                    # Use SEARCH with in-index group_id filter (Cypher 25).
                     cypher = """
-                    CALL db.index.vector.queryNodes('entity_embedding', $raw_top_k, $emb)
-                    YIELD node, score
-                    WHERE node.group_id IN $group_ids
+                    CYPHER 25
+                    MATCH (node:Entity)
+                    SEARCH node IN (VECTOR INDEX entity_embedding FOR $emb WHERE node.group_id = $group_id LIMIT $top_k)
+                    SCORE AS score
                     RETURN node.id AS entity_id, node.name AS entity_name, score
                     ORDER BY score DESC
-                    LIMIT $top_k
+                    UNION ALL
+                    MATCH (node:Entity)
+                    SEARCH node IN (VECTOR INDEX entity_embedding FOR $emb WHERE node.group_id = $global_group_id LIMIT $top_k)
+                    SCORE AS score
+                    RETURN node.id AS entity_id, node.name AS entity_name, score
+                    ORDER BY score DESC
                     """
                     async with self._async_neo4j._get_session() as session:
                         result = await session.run(
                             cypher,
-                            raw_top_k=entity_emb_top_k * 10,
                             top_k=entity_emb_top_k,
                             emb=query_emb,
-                            group_ids=self.group_ids,
+                            group_id=self.group_ids[0] if self.group_ids else "",
+                            global_group_id=self.group_ids[-1] if len(self.group_ids) > 1 else "",
                         )
                         emb_records = await result.data()
 
@@ -3017,6 +3022,9 @@ Instructions:
   • "remedies" includes: repair, replace, refund, damages, penalties, sanctions, injunctions, attorneys' fees
   • "termination" includes: cancellation, expiration, early exit, notice period, non-renewal
   • "fees" includes: charges, costs, commissions, taxes, expenses, payments, installments, deposits
+  • "insurance/indemnity/hold harmless" includes: liability, risk of loss, limitation of liability, disclaimers, exclusion of damages, warranty exclusions, consequential damages, implied warranties
+  • "named parties" includes: any company name, person name, organization, association, or entity in headers, signatures, addresses, invoice fields, or body text
+  • "document purpose" includes: title, preamble, subject matter, scope, what the document governs or establishes
 - Include exact numeric values, dates, names, dollar amounts, and conditions VERBATIM.
 - Even single-sentence mentions count — do NOT skip brief references.
 - When in doubt, INCLUDE the fact. Over-extraction is better than missing relevant content.
@@ -3035,15 +3043,20 @@ Extracted facts from {n_docs} documents:
 {facts_block}
 
 Instructions:
-1. FIRST CHECK: Does the question ask for a SPECIFIC data point (e.g., bank routing number, IBAN, license number, VAT ID, wire instructions, shipping method, a specific named clause)?
-   - If YES and NONE of the extracted facts contain that EXACT data point, respond ONLY with: "The requested information was not found in the available documents."
-   - Do NOT substitute related-but-different information (e.g., do not provide general payment terms when asked for wire transfer instructions; do not provide general warranty exclusions when asked about a specific coverage like "mold damage").
-2. Deduplicate: if multiple documents mention the same fact, keep ONE bullet with all source documents.
+1. REFUSAL CHECK: Does the question ask for a SINGLE specific data point that should appear verbatim in a document (e.g., a routing number, IBAN, license number, VAT ID, wire instructions, a specific named clause like "mold damage")?
+   - If YES and none of the extracted facts contain that EXACT term or data point, respond ONLY with: "The requested information was not found in the available documents."
+   - Examples of specific lookups that require exact-term matching:
+     • "mold damage coverage" → extracted facts must mention "mold" — general warranty exclusions about condensation or moisture do NOT count
+     • "bank routing number" → must contain an actual routing number
+     • "IBAN / SWIFT code" → must contain actual IBAN or SWIFT values
+   - This refusal does NOT apply to questions that ask to "summarize", "list", "compare", or "identify" across documents — those are enumeration questions and should always be answered from the extracted facts.
+2. Deduplicate: if multiple documents state the same fact, keep ONE bullet citing all source documents.
 3. One bullet per UNIQUE item — do not repeat or paraphrase the same fact.
 4. Include the exact values from the extractions (numbers, timeframes, names).
-5. Cite document sources in parentheses after each bullet, e.g. (Source: Document Title).
+5. Cite document sources in parentheses, e.g. (Source: Document Title).
 6. Be CONCISE — state each fact once, move on.
-7. RESPECT ALL QUALIFIERS from the question. If it asks for day-based timeframes, do not include month-based ones.
+7. RESPECT ALL QUALIFIERS from the question.
+8. Include RELATED concepts found in the extractions even if the terminology differs from the question. For example, "limitation of liability" and "exclusion of damages" ARE relevant to a question about "indemnity / hold harmless".
 
 Respond using ONLY bullet points — no headers, no preamble, no summary paragraph:
 
@@ -3155,6 +3168,28 @@ Response:"""
                         doc_id=doc_id, error=str(e),
                     )
                     facts = []
+
+            # Validate: discard facts whose quote is fabricated (not in source)
+            content_lower = content.lower()
+            validated = []
+            for f in facts:
+                if not isinstance(f, dict) or not f.get("fact"):
+                    continue
+                quote = (f.get("quote") or "").strip()
+                if quote:
+                    # Check if at least 60% of quote words appear in source
+                    q_words = set(re.findall(r'[a-z0-9]+', quote.lower()))
+                    c_words = set(re.findall(r'[a-z0-9]+', content_lower))
+                    if q_words and len(q_words & c_words) / len(q_words) < 0.5:
+                        logger.debug(
+                            "map_fact_quote_mismatch",
+                            doc_id=doc_id,
+                            fact=f["fact"][:100],
+                            quote_overlap=len(q_words & c_words) / len(q_words),
+                        )
+                        continue
+                validated.append(f)
+            facts = validated
 
             return {
                 "doc_id": doc_id,

@@ -2063,9 +2063,10 @@ async def debug_test_vector_search(request: Request, body: HybridQueryRequest):
             try:
                 filtered_result = session.run(
                     """
-                    CALL db.index.vector.queryNodes('chunk_embedding', $k, $embedding)
-                    YIELD node, score
-                    WHERE node.group_id = $group_id
+                    CYPHER 25
+                    MATCH (node:TextChunk)
+                    SEARCH node IN (VECTOR INDEX chunk_embedding FOR $embedding WHERE node.group_id = $group_id LIMIT $k)
+                    SCORE AS score
                     RETURN node.id AS id, score
                     ORDER BY score DESC
                     """,
@@ -2090,9 +2091,10 @@ async def debug_test_vector_search(request: Request, body: HybridQueryRequest):
             try:
                 oversampled = session.run(
                     """
-                    CALL db.index.vector.queryNodes('chunk_embedding', $candidate_k, $embedding)
-                    YIELD node, score
-                    WHERE node.group_id = $group_id
+                    CYPHER 25
+                    MATCH (node:TextChunk)
+                    SEARCH node IN (VECTOR INDEX chunk_embedding FOR $embedding WHERE node.group_id = $group_id LIMIT $candidate_k)
+                    SCORE AS score
                     RETURN node.id AS id, score
                     ORDER BY score DESC
                     LIMIT $desired_k
@@ -2166,11 +2168,16 @@ async def debug_test_vector_search(request: Request, body: HybridQueryRequest):
             try:
                 presence = session.run(
                     """
+                    CYPHER 25
                     MATCH (c:TextChunk {group_id: $group_id})
                     WHERE c.embedding IS NOT NULL AND size(c.embedding) > 0
                     WITH c LIMIT 1
-                    CALL db.index.vector.queryNodes('chunk_embedding', $candidate_k, c.embedding)
-                    YIELD node, score
+                    CALL (c) {
+                        MATCH (node:TextChunk)
+                        SEARCH node IN (VECTOR INDEX chunk_embedding FOR c.embedding LIMIT $candidate_k)
+                        SCORE AS score
+                        RETURN node, score
+                    }
                     WITH c, collect({id: node.id, score: score}) AS hits
                     WITH c, [h IN hits WHERE h.id = c.id][0] AS self_hit
                     RETURN c.id AS source_id,
