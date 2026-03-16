@@ -410,9 +410,8 @@ async def get_available_plans(
             continue
         plans[tier.value] = {
             "name": tier.value.replace("_", " ").title(),
-            "queries_per_month": limits.queries_per_month,
-            "max_storage_gb": limits.max_storage_gb,
             "monthly_credits": limits.monthly_credits,
+            "max_storage_gb": limits.max_storage_gb,
             "advanced_analytics": limits.advanced_analytics,
             "api_access": limits.api_access,
             "centralized_billing": limits.centralized_billing,
@@ -619,9 +618,8 @@ async def _fetch_dashboard_all(
             continue
         plans_dict[tier.value] = {
             "name": tier.value.replace("_", " ").title(),
-            "queries_per_month": tier_limits.queries_per_month,
-            "max_storage_gb": tier_limits.max_storage_gb,
             "monthly_credits": tier_limits.monthly_credits,
+            "max_storage_gb": tier_limits.max_storage_gb,
             "advanced_analytics": tier_limits.advanced_analytics,
             "api_access": tier_limits.api_access,
             "centralized_billing": tier_limits.centralized_billing,
