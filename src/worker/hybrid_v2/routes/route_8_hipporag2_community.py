@@ -202,6 +202,7 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
             "community_passage_seeds": True,   # inject Community→Entity→Sentence into passage seeds
             "community_guided_instruction": True,  # guide embed + reranker with community summaries
             "rerank_dynamic_cutoff": True,  # relevance-score threshold instead of fixed top-K
+            "min_chunks_per_doc": 5,  # guarantee every doc gets at least 5 chunks for global questions
         },
     }
 
@@ -429,6 +430,15 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
         ).strip().lower() in {"1", "true", "yes"}
         map_reduce_concurrency = int(_ov(
             "map_reduce_concurrency", "ROUTE8_MAP_REDUCE_CONCURRENCY", "8"
+        ))
+
+        # Minimum chunks per document guarantee.
+        # For global cross-doc questions, PPR may under-represent documents
+        # whose entities are structurally peripheral.  This ensures every
+        # document in the group gets at least N chunks in synthesis context.
+        min_chunks_per_doc = int(_ov(
+            "min_chunks_per_doc", "ROUTE8_MIN_CHUNKS_PER_DOC",
+            str(preset.get("min_chunks_per_doc", 0))
         ))
 
         logger.info(
@@ -1368,6 +1378,100 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
             except Exception as e:
                 logger.warning("step_45c_entity_context_inject_failed", error=str(e))
 
+        # Step 45d: Minimum chunks per document guarantee.
+        # For global cross-doc questions, PPR may under-represent documents
+        # whose entities are structurally peripheral (e.g., purchase_contract
+        # getting 2 chunks while warranty gets 30).  This supplements
+        # under-represented documents with evenly-spaced sentences so
+        # every document's key parties/terms reach the MAP step.
+        if min_chunks_per_doc > 0 and pre_fetched_chunks is not None and self._async_neo4j:
+            try:
+                # Count existing chunks per document
+                _doc_counts: Dict[str, int] = defaultdict(int)
+                _existing_ids: set = set()
+                for c in pre_fetched_chunks:
+                    did = c.get("document_id", "")
+                    if did:
+                        _doc_counts[did] += 1
+                    _existing_ids.add(c.get("sentence_id") or c.get("id", ""))
+
+                # Find all documents in the group
+                _doc_cypher = """
+                MATCH (s:Sentence)
+                WHERE s.group_id IN $group_ids
+                RETURN DISTINCT s.document_id AS doc_id, count(s) AS total
+                """
+                async with self._async_neo4j._get_session() as session:
+                    _doc_result = await session.run(
+                        _doc_cypher, group_ids=self.group_ids
+                    )
+                    _all_docs = await _doc_result.data()
+
+                # Identify under-represented docs
+                _under_rep = [
+                    (d["doc_id"], d["total"])
+                    for d in _all_docs
+                    if d.get("doc_id")
+                    and _doc_counts.get(d["doc_id"], 0) < min_chunks_per_doc
+                ]
+
+                if _under_rep:
+                    # Fetch evenly-spaced sentences from each under-represented doc
+                    _supplement_ids: List[str] = []
+                    _need_cypher = """
+                    MATCH (s:Sentence)
+                    WHERE s.document_id = $doc_id
+                      AND s.group_id IN $group_ids
+                    RETURN s.id AS sid, s.index_in_doc AS idx
+                    ORDER BY s.index_in_doc
+                    """
+                    async with self._async_neo4j._get_session() as session:
+                        for doc_id, total in _under_rep:
+                            _have = _doc_counts.get(doc_id, 0)
+                            _need = min_chunks_per_doc - _have
+                            _res = await session.run(
+                                _need_cypher,
+                                doc_id=doc_id,
+                                group_ids=self.group_ids,
+                            )
+                            _rows = await _res.data()
+                            # Filter out already-fetched
+                            _available = [
+                                r for r in _rows
+                                if r["sid"] not in _existing_ids
+                            ]
+                            if _available:
+                                # Evenly space picks across the document
+                                _step = max(1, len(_available) // _need)
+                                _picks = _available[::_step][:_need]
+                                _supplement_ids.extend(
+                                    r["sid"] for r in _picks
+                                )
+
+                    if _supplement_ids:
+                        _supp_chunks = await self._fetch_sentences_by_ids(
+                            _supplement_ids,
+                            ppr_scores_map={
+                                sid: 0.005 for sid in _supplement_ids
+                            },
+                            sentence_window_enabled=False,
+                            folder_id=folder_id,
+                        )
+                        if _supp_chunks:
+                            pre_fetched_chunks = list(pre_fetched_chunks) + _supp_chunks
+                            logger.info(
+                                "step_45d_min_chunks_per_doc",
+                                min_per_doc=min_chunks_per_doc,
+                                under_represented=[
+                                    (d, _doc_counts.get(d, 0))
+                                    for d, _ in _under_rep
+                                ],
+                                supplement_chunks=len(_supp_chunks),
+                                total_chunks=len(pre_fetched_chunks),
+                            )
+            except Exception as e:
+                logger.warning("step_45d_min_chunks_per_doc_failed", error=str(e))
+
         # Convert sentence evidence to coverage_chunks format
         sentence_chunks: List[Dict[str, Any]] = []
         if sentence_evidence:
@@ -1405,6 +1509,7 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
                 language=language,
                 max_tokens=synthesis_max_tokens,
                 concurrency=map_reduce_concurrency,
+                graph_structural_header=graph_structural_header,
             )
         else:
             synthesis_result = await self.pipeline.synthesizer.synthesize(
@@ -3076,6 +3181,7 @@ Response:"""
         language: Optional[str] = None,
         max_tokens: Optional[int] = None,
         concurrency: int = 8,
+        graph_structural_header: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Per-document extraction → merge synthesis.
 
@@ -3250,6 +3356,16 @@ Response:"""
             n_docs=len(doc_groups),
             facts_block=facts_block,
         )
+        # Append entity-document map from knowledge graph (covers entities
+        # that may not appear in any chunk text, e.g. header-only mentions)
+        if graph_structural_header:
+            reduce_prompt += (
+                "\n\n--- ENTITY-DOCUMENT MAP (from knowledge graph) ---\n"
+                + graph_structural_header
+                + "\n\nUse the entity-document map above to supplement "
+                "your answer with any entities/parties not already covered "
+                "by the extracted facts."
+            )
         if language:
             reduce_prompt += f"\n\nIMPORTANT: Respond entirely in {language}."
 
