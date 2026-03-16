@@ -25,6 +25,8 @@ from src.core.roles import (
     PlanLimits,
     PLAN_DEFINITIONS,
     LEGACY_TIER_MAP,
+    B2C_TIERS,
+    B2B_TIERS,
     UserProfile,
     resolve_user_profile,
 )
@@ -380,13 +382,17 @@ async def _fetch_user_usage(
 
 @router.get("/plans", response_model=PlanInfoResponse)
 async def get_available_plans(
+    request: Request,
     user: Dict[str, Any] = Depends(get_current_user),
 ):
     """
     Get available payment plans and the user's current plan.
-    Used for the plan upgrade/comparison UI.
+    B2C users see Free/Pro/Pro+. B2B users see Business/Enterprise.
     """
     user_id = user.get("oid", "")
+    auth_type = getattr(request.state, "auth_type", "B2C")
+    billing_type = "b2b" if auth_type == "B2B" else "b2c"
+    visible_tiers = B2B_TIERS if billing_type == "b2b" else B2C_TIERS
 
     try:
         enforcer = await asyncio.wait_for(get_quota_enforcer(), timeout=5)
@@ -400,7 +406,7 @@ async def get_available_plans(
 
     plans = {}
     for tier, limits in PLAN_DEFINITIONS.items():
-        if tier in LEGACY_TIER_MAP:
+        if tier in LEGACY_TIER_MAP or tier not in visible_tiers:
             continue
         plans[tier.value] = {
             "name": tier.value.replace("_", " ").title(),
@@ -415,7 +421,7 @@ async def get_available_plans(
 
     return PlanInfoResponse(
         current_plan=current_plan.value,
-        billing_type="b2c",
+        billing_type=billing_type,
         plans=plans,
     )
 
@@ -606,9 +612,10 @@ async def _fetch_dashboard_all(
     )
 
     # ── Phase 4: Plans (pure computation, no I/O — reuses plan_tier) ─────
+    visible_tiers = B2B_TIERS if billing_type == "b2b" else B2C_TIERS
     plans_dict = {}
     for tier, tier_limits in PLAN_DEFINITIONS.items():
-        if tier in LEGACY_TIER_MAP:
+        if tier in LEGACY_TIER_MAP or tier not in visible_tiers:
             continue
         plans_dict[tier.value] = {
             "name": tier.value.replace("_", " ").title(),

@@ -169,6 +169,10 @@ LEGACY_TIER_MAP: Dict[PlanTier, PlanTier] = {
 for _legacy, _current in LEGACY_TIER_MAP.items():
     PLAN_DEFINITIONS[_legacy] = PLAN_DEFINITIONS[_current]
 
+# Tier grouping by billing type — used to filter plans in dashboard
+B2C_TIERS = {PlanTier.FREE, PlanTier.PRO, PlanTier.PRO_PLUS}
+B2B_TIERS = {PlanTier.BUSINESS, PlanTier.ENTERPRISE}
+
 
 # ============================================================================
 # User Profile Model
