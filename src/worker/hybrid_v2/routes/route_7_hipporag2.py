@@ -475,7 +475,7 @@ class HippoRAG2Handler(BaseRouteHandler):
                         sent_cypher = """
                         UNWIND $community_ids AS cid
                         MATCH (e:Entity)-[:BELONGS_TO]->(c:Community {id: cid})
-                        WHERE e.group_id IN $group_ids
+                        WHERE c.group_id IN $group_ids AND e.group_id IN $group_ids
                         MATCH (e)<-[:MENTIONS]-(s:Sentence)
                         WHERE s.group_id IN $group_ids
                         OPTIONAL MATCH (s)-[:IN_DOCUMENT]->(d:Document)
@@ -2112,7 +2112,7 @@ class HippoRAG2Handler(BaseRouteHandler):
             cypher = """
             UNWIND $community_ids AS cid
             MATCH (e:Entity)-[:BELONGS_TO]->(c:Community {id: cid})
-            WHERE e.group_id IN $group_ids
+            WHERE c.group_id IN $group_ids AND e.group_id IN $group_ids
               AND ($folder_id IS NULL
                OR EXISTS {
                  MATCH (e)<-[:MENTIONS]-(s2:Sentence)
