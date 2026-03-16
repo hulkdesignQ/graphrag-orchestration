@@ -11,22 +11,12 @@ import { getHeaders, fetchWithAuthRetry } from "./api";
 // ============================================================================
 
 export interface PlanLimits {
-    queries_per_day: number;
-    queries_per_month: number;
-    max_tokens_per_query: number;
-    max_documents: number;
-    max_document_size_mb: number;
     max_storage_gb: number;
     monthly_credits: number | null;
-    graphrag_enabled: boolean;
     advanced_analytics: boolean;
-    custom_models: boolean;
     api_access: boolean;
-    priority_support: boolean;
-    max_users: number | null;
-    sso_enabled: boolean;
-    custom_branding: boolean;
-    dedicated_resources: boolean;
+    centralized_billing: boolean;
+    audit_logs: boolean;
 }
 
 export interface UserProfileResponse {
@@ -49,10 +39,8 @@ export interface UserProfileResponse {
 export interface UsageStats {
     queries_today: number;
     queries_this_month: number;
-    queries_limit_day: number;
     queries_limit_month: number;
     documents_count: number;
-    documents_limit: number;
     personal_documents_count?: number;
     storage_used_gb: number;
     storage_limit_gb: number;

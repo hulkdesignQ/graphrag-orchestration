@@ -519,8 +519,8 @@ def main():
     parser.add_argument("--no-auth", action="store_true", default=False, help="Skip authentication (for local testing)")
     parser.add_argument(
         "--force-route", type=str, default=None,
-        choices=["hipporag2_search", "concept_search", "local_search", "global_search", "drift_multi_hop", "auto"],
-        help="Override FORCE_ROUTE (default: hipporag2_search). Use 'concept_search' for Route 6, 'auto' to use the auto-router without any force_route.",
+        choices=["hipporag2_search", "hipporag2_community", "concept_search", "local_search", "global_search", "drift_multi_hop", "auto"],
+        help="Override FORCE_ROUTE (default: hipporag2_search). Use 'hipporag2_community' for Route 8, 'concept_search' for Route 6, 'auto' to use the auto-router without any force_route.",
     )
     parser.add_argument(
         "--query-mode", type=str, default=None,

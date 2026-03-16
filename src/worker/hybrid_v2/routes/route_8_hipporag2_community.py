@@ -3002,7 +3002,7 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
     # Per-document map-reduce synthesis
     # ==================================================================
 
-    _MAP_EXTRACT_PROMPT = """You are a precise fact extractor. Extract ALL facts from this document that are relevant to the question below. Be EXHAUSTIVE — include every detail, no matter how brief the mention.
+    _MAP_EXTRACT_PROMPT = """You are a precise fact extractor. Your job is to find ALL information in this document that could be relevant to answering the question below.
 
 Question: {query}
 
@@ -3011,13 +3011,19 @@ Content:
 {content}
 
 Instructions:
-- Extract EVERY fact that answers or partially answers the question.
-- Include exact numeric values, dates, timeframes, names, and conditions verbatim.
+- Cast a WIDE net: extract any clause, term, provision, obligation, right, mechanism, condition, or procedure that relates to the question — even tangentially.
+- Think about SYNONYMS and RELATED CONCEPTS. For example:
+  • "dispute resolution" includes: arbitration, mediation, litigation, small claims, legal action, judicial proceedings, complaints, claims
+  • "remedies" includes: repair, replace, refund, damages, penalties, sanctions, injunctions, attorneys' fees
+  • "termination" includes: cancellation, expiration, early exit, notice period, non-renewal
+  • "fees" includes: charges, costs, commissions, taxes, expenses, payments, installments, deposits
+- Include exact numeric values, dates, names, dollar amounts, and conditions VERBATIM.
 - Even single-sentence mentions count — do NOT skip brief references.
+- When in doubt, INCLUDE the fact. Over-extraction is better than missing relevant content.
 - Return a JSON array of objects. Each object has:
   "fact": a concise statement of the extracted fact,
   "quote": the exact text from the document supporting this fact.
-- If this document contains NO relevant information, return an empty array: []
+- If this document contains truly NO relevant information, return an empty array: []
 
 Return ONLY valid JSON — no markdown fences, no commentary:"""
 
@@ -3029,13 +3035,15 @@ Extracted facts from {n_docs} documents:
 {facts_block}
 
 Instructions:
-1. Deduplicate: if multiple documents mention the same fact, keep ONE bullet with all source documents.
-2. One bullet per UNIQUE item — do not repeat or paraphrase the same fact.
-3. Include the exact values from the extractions (numbers, timeframes, names).
-4. Cite document sources in parentheses after each bullet, e.g. (Source: Document Title).
-5. Be CONCISE — state each fact once, move on.
-6. RESPECT ALL QUALIFIERS from the question. If it asks for day-based timeframes, do not include month-based ones.
-7. If no relevant facts were extracted, respond: "The requested information was not found in the available documents."
+1. FIRST CHECK: Does the question ask for a SPECIFIC data point (e.g., bank routing number, IBAN, license number, VAT ID, wire instructions, shipping method, a specific named clause)?
+   - If YES and NONE of the extracted facts contain that EXACT data point, respond ONLY with: "The requested information was not found in the available documents."
+   - Do NOT substitute related-but-different information (e.g., do not provide general payment terms when asked for wire transfer instructions; do not provide general warranty exclusions when asked about a specific coverage like "mold damage").
+2. Deduplicate: if multiple documents mention the same fact, keep ONE bullet with all source documents.
+3. One bullet per UNIQUE item — do not repeat or paraphrase the same fact.
+4. Include the exact values from the extractions (numbers, timeframes, names).
+5. Cite document sources in parentheses after each bullet, e.g. (Source: Document Title).
+6. Be CONCISE — state each fact once, move on.
+7. RESPECT ALL QUALIFIERS from the question. If it asks for day-based timeframes, do not include month-based ones.
 
 Respond using ONLY bullet points — no headers, no preamble, no summary paragraph:
 

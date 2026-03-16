@@ -131,10 +131,8 @@ const Dashboard = () => {
 
     if (!profile || !usage) return null;
 
-    const queryDay = usePct(usage.queries_today, usage.queries_limit_day);
     const queryMonth = usePct(usage.queries_this_month, usage.queries_limit_month);
     const credits = usePct(usage.credits_used_month, usage.credits_limit_month ?? 0);
-    const docs = usePct(usage.documents_count, usage.documents_limit);
     const storage = usePct(usage.storage_used_gb, usage.storage_limit_gb);
 
     return (
@@ -169,15 +167,6 @@ const Dashboard = () => {
             )}
             <div className={styles.statsGrid}>
                 <div className={styles.statCard}>
-                    <span className={styles.statLabel}>{t("dashboard.queriesToday")}</span>
-                    <span className={styles.statValue}>{usage.queries_today}</span>
-                    <span className={styles.statSubtext}>{t("dashboard.dailyLimit", { limit: usage.queries_limit_day })}</span>
-                    <div className={styles.statBar}>
-                        <div className={`${styles.statBarFill} ${queryDay.color}`} style={{ width: `${queryDay.pct}%` }} />
-                    </div>
-                </div>
-
-                <div className={styles.statCard}>
                     <span className={styles.statLabel}>{t("dashboard.queriesThisMonth")}</span>
                     <span className={styles.statValue}>{usage.queries_this_month}</span>
                     <span className={styles.statSubtext}>{t("dashboard.monthlyLimit", { limit: usage.queries_limit_month })}</span>
@@ -202,12 +191,6 @@ const Dashboard = () => {
                 <div className={styles.statCard}>
                     <span className={styles.statLabel}>{t("dashboard.documents")}</span>
                     <span className={styles.statValue}>{usage.documents_count}</span>
-                    <span className={styles.statSubtext}>
-                        {t("dashboard.ofLimit", { limit: usage.documents_limit })}
-                    </span>
-                    <div className={styles.statBar}>
-                        <div className={`${styles.statBarFill} ${docs.color}`} style={{ width: `${docs.pct}%` }} />
-                    </div>
                 </div>
 
                 <div className={styles.statCard}>
@@ -251,33 +234,6 @@ const Dashboard = () => {
                 </div>
             )}
 
-            {/* Features */}
-            <div className={styles.section}>
-                <h2 className={styles.sectionTitle}>{t("dashboard.yourFeatures")}</h2>
-                <div className={styles.featuresGrid}>
-                    {Object.entries({
-                        graphrag: t("dashboard.featureGraphrag"),
-                        advanced_analytics: t("dashboard.featureAdvancedAnalytics"),
-                        custom_models: t("dashboard.featureCustomModels"),
-                        api_access: t("dashboard.featureApiAccess"),
-                        priority_support: t("dashboard.featurePrioritySupport"),
-                        sso: t("dashboard.featureSso"),
-                        custom_branding: t("dashboard.featureCustomBranding")
-                    } as Record<string, string>).map(([key, label]) => {
-                        const enabled = profile.features[key] ?? false;
-                        return (
-                            <div
-                                key={key}
-                                className={`${styles.featureItem} ${enabled ? styles.featureEnabled : styles.featureDisabled}`}
-                            >
-                                <span className={styles.featureIcon}>{enabled ? "✅" : "🔒"}</span>
-                                <span>{label}</span>
-                            </div>
-                        );
-                    })}
-                </div>
-            </div>
-
             {/* Plans comparison */}
             {plans && (
                 <div className={styles.section}>
@@ -291,17 +247,16 @@ const Dashboard = () => {
                                     className={`${styles.planCard} ${isCurrent ? styles.planCardCurrent : ""}`}
                                 >
                                     <div className={styles.planCardName}>{info.name}</div>
-                                    <p className={styles.planCardDetail}>{t("dashboard.queriesPerDay", { count: info.queries_per_day })}</p>
-                                    <p className={styles.planCardDetail}>{t("dashboard.maxDocuments", { count: info.max_documents })}</p>
                                     <p className={styles.planCardDetail}>{t("dashboard.maxStorage", { count: info.max_storage_gb })}</p>
                                     <p className={styles.planCardDetail}>
                                         {info.monthly_credits != null
                                             ? t("dashboard.creditsPerMonth", { count: info.monthly_credits.toLocaleString() })
                                             : t("dashboard.unlimitedCredits")}
                                     </p>
-                                    <p className={styles.planCardDetail}>
-                                        {info.graphrag_enabled ? "✅ Evidoc" : "❌ Evidoc"}
-                                    </p>
+                                    {info.advanced_analytics && <p className={styles.planCardDetail}>✅ {t("dashboard.featureAdvancedAnalytics")}</p>}
+                                    {info.api_access && <p className={styles.planCardDetail}>✅ {t("dashboard.featureApiAccess")}</p>}
+                                    {info.centralized_billing && <p className={styles.planCardDetail}>✅ {t("dashboard.featureCentralizedBilling")}</p>}
+                                    {info.audit_logs && <p className={styles.planCardDetail}>✅ {t("dashboard.featureAuditLogs")}</p>}
                                     <button
                                         className={styles.upgradeButton}
                                         disabled={isCurrent}
