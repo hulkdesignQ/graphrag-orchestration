@@ -204,7 +204,6 @@ async def _fetch_profile(
     limits = profile.plan_limits or PLAN_DEFINITIONS[PlanTier.FREE]
 
     features = {
-        "graphrag": limits.graphrag_enabled,
         "advanced_analytics": limits.advanced_analytics,
         "api_access": limits.api_access,
         "centralized_billing": limits.centralized_billing,
@@ -419,7 +418,6 @@ async def get_available_plans(
             "queries_per_month": limits.queries_per_month,
             "max_storage_gb": limits.max_storage_gb,
             "monthly_credits": limits.monthly_credits,
-            "graphrag_enabled": limits.graphrag_enabled,
             "advanced_analytics": limits.advanced_analytics,
             "api_access": limits.api_access,
             "centralized_billing": limits.centralized_billing,
@@ -502,7 +500,6 @@ async def _fetch_dashboard_all(
     profile_limits = profile_obj.plan_limits or limits
 
     features = {
-        "graphrag": profile_limits.graphrag_enabled,
         "advanced_analytics": profile_limits.advanced_analytics,
         "api_access": profile_limits.api_access,
         "centralized_billing": profile_limits.centralized_billing,
@@ -639,7 +636,6 @@ async def _fetch_dashboard_all(
             "queries_per_month": tier_limits.queries_per_month,
             "max_storage_gb": tier_limits.max_storage_gb,
             "monthly_credits": tier_limits.monthly_credits,
-            "graphrag_enabled": tier_limits.graphrag_enabled,
             "advanced_analytics": tier_limits.advanced_analytics,
             "api_access": tier_limits.api_access,
             "centralized_billing": tier_limits.centralized_billing,

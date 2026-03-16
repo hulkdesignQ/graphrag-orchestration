@@ -32,7 +32,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import structlog
 
 from src.core.config import settings
-from .base import BaseRouteHandler, Citation, RouteResult, rerank_with_retry, make_voyage_client
+from .base import BaseRouteHandler, Citation, RouteResult, acomplete_with_retry, rerank_with_retry, make_voyage_client
 from ..services.neo4j_retry import retry_session
 
 logger = structlog.get_logger(__name__)
@@ -417,6 +417,19 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
             "sentence_window", "ROUTE7_SENTENCE_WINDOW",
             "1" if preset.get("sentence_window", True) else "0"
         ).strip().lower() in {"1", "true", "yes"}
+
+        # Map-reduce synthesis: per-document extraction → merge.
+        # Each document's chunks get their own LLM extraction call so no
+        # single dominant document can drown out others.  The merge step
+        # deduplicates and formats.  Essential for cross-doc enumeration
+        # queries like Q-D3 where warranty docs dominate context.
+        map_reduce_synthesis = _ov(
+            "map_reduce_synthesis", "ROUTE8_MAP_REDUCE_SYNTHESIS",
+            "1" if preset.get("map_reduce_synthesis", False) else "0"
+        ).strip().lower() in {"1", "true", "yes"}
+        map_reduce_concurrency = int(_ov(
+            "map_reduce_concurrency", "ROUTE8_MAP_REDUCE_CONCURRENCY", "8"
+        ))
 
         logger.info(
             "route_7_hipporag2_start",
@@ -1368,19 +1381,40 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
         evidence_nodes = entity_scores[:20]
 
         t0 = time.perf_counter()
-        synthesis_result = await self.pipeline.synthesizer.synthesize(
-            query=query,
-            evidence_nodes=evidence_nodes,
-            response_type=response_type,
-            coverage_chunks=sentence_chunks if sentence_chunks else None,
-            prompt_variant=prompt_variant,
-            synthesis_model=synthesis_model,
-            include_context=include_context,
-            pre_fetched_chunks=pre_fetched_chunks,
-            graph_structural_header=graph_structural_header,
-            language=language,
-            max_tokens=synthesis_max_tokens,
-        )
+
+        # ------------------------------------------------------------------
+        # Step 5: Synthesis — per-document map-reduce OR single-shot
+        # ------------------------------------------------------------------
+        all_chunks = list(pre_fetched_chunks or [])
+        if sentence_chunks:
+            all_chunks.extend(sentence_chunks)
+
+        if map_reduce_synthesis and all_chunks:
+            synthesis_result = await self._map_reduce_synthesize(
+                query=query,
+                chunks=all_chunks,
+                evidence_nodes=evidence_nodes,
+                prompt_variant=prompt_variant,
+                synthesis_model=synthesis_model,
+                include_context=include_context,
+                language=language,
+                max_tokens=synthesis_max_tokens,
+                concurrency=map_reduce_concurrency,
+            )
+        else:
+            synthesis_result = await self.pipeline.synthesizer.synthesize(
+                query=query,
+                evidence_nodes=evidence_nodes,
+                response_type=response_type,
+                coverage_chunks=sentence_chunks if sentence_chunks else None,
+                prompt_variant=prompt_variant,
+                synthesis_model=synthesis_model,
+                include_context=include_context,
+                pre_fetched_chunks=pre_fetched_chunks,
+                graph_structural_header=graph_structural_header,
+                language=language,
+                max_tokens=synthesis_max_tokens,
+            )
 
         timings_ms["step_5_synthesis_ms"] = int((time.perf_counter() - t0) * 1000)
         timings_ms["total_ms"] = int((time.perf_counter() - t_route_start) * 1000)
@@ -1390,6 +1424,7 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
             response_length=len(synthesis_result.get("response", "")),
             text_chunks_used=synthesis_result.get("text_chunks_used", 0),
             total_ms=timings_ms["total_ms"],
+            map_reduce=map_reduce_synthesis,
         )
 
         # ------------------------------------------------------------------
@@ -2962,3 +2997,288 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
         )
 
         return filtered
+
+    # ==================================================================
+    # Per-document map-reduce synthesis
+    # ==================================================================
+
+    _MAP_EXTRACT_PROMPT = """You are a precise fact extractor. Extract ALL facts from this document that are relevant to the question below. Be EXHAUSTIVE — include every detail, no matter how brief the mention.
+
+Question: {query}
+
+Document: {doc_title}
+Content:
+{content}
+
+Instructions:
+- Extract EVERY fact that answers or partially answers the question.
+- Include exact numeric values, dates, timeframes, names, and conditions verbatim.
+- Even single-sentence mentions count — do NOT skip brief references.
+- Return a JSON array of objects. Each object has:
+  "fact": a concise statement of the extracted fact,
+  "quote": the exact text from the document supporting this fact.
+- If this document contains NO relevant information, return an empty array: []
+
+Return ONLY valid JSON — no markdown fences, no commentary:"""
+
+    _REDUCE_MERGE_PROMPT = """You are an expert analyst. Merge these per-document extractions into a final answer.
+
+Question: {query}
+
+Extracted facts from {n_docs} documents:
+{facts_block}
+
+Instructions:
+1. Deduplicate: if multiple documents mention the same fact, keep ONE bullet with all source documents.
+2. One bullet per UNIQUE item — do not repeat or paraphrase the same fact.
+3. Include the exact values from the extractions (numbers, timeframes, names).
+4. Cite document sources in parentheses after each bullet, e.g. (Source: Document Title).
+5. Be CONCISE — state each fact once, move on.
+6. RESPECT ALL QUALIFIERS from the question. If it asks for day-based timeframes, do not include month-based ones.
+7. If no relevant facts were extracted, respond: "The requested information was not found in the available documents."
+
+Respond using ONLY bullet points — no headers, no preamble, no summary paragraph:
+
+- [Fact (Source: Document)]
+- [Fact (Source: Document)]
+
+Response:"""
+
+    async def _map_reduce_synthesize(
+        self,
+        query: str,
+        chunks: List[Dict[str, Any]],
+        evidence_nodes: List[Tuple[str, float]],
+        prompt_variant: Optional[str] = None,
+        synthesis_model: Optional[str] = None,
+        include_context: bool = False,
+        language: Optional[str] = None,
+        max_tokens: Optional[int] = None,
+        concurrency: int = 8,
+    ) -> Dict[str, Any]:
+        """Per-document extraction → merge synthesis.
+
+        MAP:  For each document's chunks, ask LLM to extract relevant facts.
+              Each doc has ≤5 chunks so LLM cannot miss anything.
+        REDUCE: Merge all per-doc extractions, deduplicate, format answer.
+        """
+        # ── Group chunks by document ─────────────────────────────────
+        doc_groups: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+        doc_titles: Dict[str, str] = {}
+        for chunk in chunks:
+            meta = chunk.get("metadata", {}) or {}
+            doc_id = (
+                meta.get("document_id")
+                or chunk.get("document_id")
+                or chunk.get("source", "unknown")
+            )
+            if "_sent_" in str(chunk.get("chunk_id", "")):
+                doc_id = str(chunk["chunk_id"]).split("_sent_")[0]
+            doc_groups[doc_id].append(chunk)
+            if doc_id not in doc_titles:
+                doc_titles[doc_id] = (
+                    meta.get("document_title")
+                    or chunk.get("document_title")
+                    or chunk.get("source")
+                    or doc_id
+                )
+
+        logger.info(
+            "map_reduce_grouping",
+            total_chunks=len(chunks),
+            num_documents=len(doc_groups),
+            doc_chunk_counts={did: len(chs) for did, chs in doc_groups.items()},
+        )
+
+        # ── Resolve LLM client ──────────────────────────────────────
+        llm = self.pipeline.synthesizer.llm
+        if synthesis_model:
+            try:
+                from src.worker.services.llm_service import LLMService
+                llm = LLMService()._create_llm_client(synthesis_model)
+                if hasattr(self.pipeline.synthesizer.llm, "_accumulator") and hasattr(llm, "set_accumulator"):
+                    llm.set_accumulator(
+                        object.__getattribute__(self.pipeline.synthesizer.llm, "_accumulator")
+                    )
+                    for attr in ("_group_id", "_user_id", "_route"):
+                        try:
+                            object.__setattr__(
+                                llm, attr,
+                                object.__getattribute__(self.pipeline.synthesizer.llm, attr),
+                            )
+                        except AttributeError:
+                            pass
+            except Exception as e:
+                logger.warning("map_reduce_model_override_failed", error=str(e))
+                llm = self.pipeline.synthesizer.llm
+
+        # ── MAP phase: parallel per-doc extraction ───────────────────
+        semaphore = asyncio.Semaphore(concurrency)
+
+        async def _extract_one(doc_id: str, doc_chunks: List[Dict]) -> Dict:
+            doc_title = doc_titles.get(doc_id, doc_id)
+            content_parts = []
+            for i, ch in enumerate(doc_chunks):
+                text = ch.get("text") or ch.get("sentence_text", "")
+                content_parts.append(f"[Passage {i+1}] {text}")
+            content = "\n\n".join(content_parts)
+
+            prompt = self._MAP_EXTRACT_PROMPT.format(
+                query=query, doc_title=doc_title, content=content,
+            )
+            if language:
+                prompt += f"\n\nExtract facts in {language}."
+
+            async with semaphore:
+                try:
+                    resp = await acomplete_with_retry(llm, prompt)
+                    raw = resp.text.strip()
+                    # Parse JSON array
+                    json_match = re.search(r'\[.*\]', raw, re.DOTALL)
+                    if json_match:
+                        facts = json.loads(json_match.group())
+                        if not isinstance(facts, list):
+                            facts = []
+                    else:
+                        facts = []
+                except Exception as e:
+                    logger.warning(
+                        "map_extract_failed",
+                        doc_id=doc_id, error=str(e),
+                    )
+                    facts = []
+
+            return {
+                "doc_id": doc_id,
+                "doc_title": doc_title,
+                "facts": facts,
+                "num_chunks": len(doc_chunks),
+                "chunks": doc_chunks,
+            }
+
+        map_tasks = [
+            _extract_one(did, chs) for did, chs in doc_groups.items()
+        ]
+        map_results = await asyncio.gather(*map_tasks)
+
+        # Collect all facts with document attribution
+        all_facts = []
+        total_extracted = 0
+        for mr in map_results:
+            for fact in mr["facts"]:
+                if isinstance(fact, dict) and fact.get("fact"):
+                    fact["_doc_title"] = mr["doc_title"]
+                    fact["_doc_id"] = mr["doc_id"]
+                    all_facts.append(fact)
+                    total_extracted += 1
+
+        logger.info(
+            "map_reduce_map_complete",
+            num_documents=len(map_results),
+            total_facts_extracted=total_extracted,
+            facts_per_doc={mr["doc_title"][:40]: len(mr["facts"]) for mr in map_results},
+        )
+
+        # ── REDUCE phase: merge + deduplicate ────────────────────────
+        if not all_facts:
+            return {
+                "response": "The requested information was not found in the available documents.",
+                "citations": [],
+                "evidence_path": [node for node, _ in evidence_nodes],
+                "text_chunks_used": len(chunks),
+                "sub_questions_addressed": [],
+                "llm_context": None,
+                "context_stats": {"map_reduce": True, "docs": len(doc_groups), "facts": 0},
+                "sentence_citation_map": {},
+            }
+
+        # Build facts block for reduce prompt
+        facts_lines = []
+        for i, fact in enumerate(all_facts, 1):
+            line = f'{i}. [{fact["_doc_title"]}] {fact["fact"]}'
+            quote = fact.get("quote", "")
+            if quote:
+                line += f' (Quote: "{quote[:150]}")'
+            facts_lines.append(line)
+        facts_block = "\n".join(facts_lines)
+
+        reduce_prompt = self._REDUCE_MERGE_PROMPT.format(
+            query=query,
+            n_docs=len(doc_groups),
+            facts_block=facts_block,
+        )
+        if language:
+            reduce_prompt += f"\n\nIMPORTANT: Respond entirely in {language}."
+
+        try:
+            acomplete_kwargs: Dict[str, Any] = {}
+            if max_tokens is not None:
+                acomplete_kwargs["max_tokens"] = max_tokens
+            reduce_resp = await acomplete_with_retry(llm, reduce_prompt, **acomplete_kwargs)
+            response = reduce_resp.text.strip()
+        except Exception as e:
+            logger.error("map_reduce_reduce_failed", error=str(e))
+            # Fallback: concatenate map extractions as bullet points
+            response = "\n".join(
+                f"- [{f['_doc_title']}] {f['fact']}" for f in all_facts
+            )
+
+        logger.info(
+            "map_reduce_reduce_complete",
+            response_length=len(response),
+            total_facts=len(all_facts),
+        )
+
+        # ── Build citations from original chunks ─────────────────────
+        # Map facts back to their source document chunks for citation
+        citations = []
+        cite_idx = 1
+        seen_doc_ids = set()
+        for mr in map_results:
+            if not mr["facts"]:
+                continue
+            if mr["doc_id"] in seen_doc_ids:
+                continue
+            seen_doc_ids.add(mr["doc_id"])
+            for ch in mr["chunks"]:
+                meta = ch.get("metadata", {}) or {}
+                citations.append({
+                    "citation": f"[{cite_idx}]",
+                    "citation_type": "chunk",
+                    "chunk_id": ch.get("chunk_id", f"chunk_{cite_idx}"),
+                    "document_id": mr["doc_id"],
+                    "document_title": mr["doc_title"],
+                    "document_url": meta.get("url", ""),
+                    "text": ch.get("text", ch.get("sentence_text", "")),
+                    "text_preview": (ch.get("text") or ch.get("sentence_text", ""))[:200],
+                    "page_number": ch.get("page") or meta.get("page_number"),
+                    "section_path": meta.get("section_path", ""),
+                    "score": ch.get("_entity_score", 0.0),
+                    "source": "map_reduce",
+                })
+                cite_idx += 1
+
+        context_for_debug = None
+        if include_context:
+            context_for_debug = (
+                f"=== MAP-REDUCE SYNTHESIS ===\n"
+                f"Documents: {len(doc_groups)}\n"
+                f"Total facts extracted: {total_extracted}\n\n"
+                f"--- MAP EXTRACTIONS ---\n{facts_block}\n\n"
+                f"--- REDUCE PROMPT ---\n{reduce_prompt}"
+            )
+
+        return {
+            "response": response,
+            "citations": citations,
+            "evidence_path": [node for node, _ in evidence_nodes],
+            "text_chunks_used": len(chunks),
+            "sub_questions_addressed": [],
+            "llm_context": context_for_debug,
+            "context_stats": {
+                "map_reduce": True,
+                "num_documents": len(doc_groups),
+                "total_facts": total_extracted,
+            },
+            "sentence_citation_map": {},
+        }
