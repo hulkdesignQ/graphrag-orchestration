@@ -481,7 +481,7 @@ async def resolve_thematic_seeds(
     # Step 1: Community match
     try:
         matched = await community_matcher.match_communities(
-            query, top_k=top_k_communities,
+            query, top_k=top_k_communities, folder_id=folder_id,
         )
     except Exception as e:
         logger.warning("thematic_community_match_failed", error=str(e))

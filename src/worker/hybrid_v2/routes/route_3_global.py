@@ -112,6 +112,9 @@ class GlobalSearchHandler(BaseRouteHandler):
         timings_ms: Dict[str, int] = {}
         t_route_start = time.perf_counter()
 
+        # Resolve per-query folder scope (overrides pipeline default)
+        folder_id = self._resolve_folder_id(folder_id)
+
         max_claims = int(os.getenv("ROUTE3_MAP_MAX_CLAIMS", "10"))
         community_top_k = int(os.getenv("ROUTE3_COMMUNITY_TOP_K", "3"))
         sentence_top_k = int(os.getenv("ROUTE3_SENTENCE_TOP_K", "30"))
@@ -137,12 +140,12 @@ class GlobalSearchHandler(BaseRouteHandler):
 
         # Fire off sentence search immediately (doesn't depend on communities)
         sentence_search_task = asyncio.create_task(
-            self._retrieve_sentence_evidence(query, top_k=sentence_top_k)
+            self._retrieve_sentence_evidence(query, top_k=sentence_top_k, folder_id=folder_id)
         )
 
         # Run community matching concurrently
         matched_communities = await self.pipeline.community_matcher.match_communities(
-            query, top_k=community_top_k,
+            query, top_k=community_top_k, folder_id=folder_id,
         )
         community_data: List[Dict[str, Any]] = [c for c, _ in matched_communities]
         community_scores: List[float] = [s for _, s in matched_communities]
@@ -343,6 +346,7 @@ class GlobalSearchHandler(BaseRouteHandler):
         self,
         query: str,
         top_k: int = 20,
+        folder_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Retrieve sentence-level evidence via Voyage vector search.
 
@@ -362,6 +366,7 @@ class GlobalSearchHandler(BaseRouteHandler):
         Args:
             query: User query to embed and search.
             top_k: Max sentences to retrieve.
+            folder_id: Folder scope filter (None = all folders).
 
         Returns:
             List of sentence dicts with text, metadata, and score.
@@ -450,7 +455,7 @@ class GlobalSearchHandler(BaseRouteHandler):
                         group_ids=self.group_ids,
                         top_k=fetch_k,
                         threshold=threshold,
-                        folder_id=self.folder_id,
+                        folder_id=folder_id if folder_id is not None else self.folder_id,
                     )
                     return [dict(r) for r in records]
 

@@ -312,9 +312,10 @@ class HippoRAG2Handler(BaseRouteHandler):
         dpr_sentence_top_k = int(_ov("dpr_sentence_top_k", "ROUTE7_DPR_SENTENCE_TOP_K", "0"))
         ppr_damping = float(_ov("damping", "ROUTE7_DAMPING", "0.5"))
         passage_node_weight = float(_ov("passage_node_weight", "ROUTE7_PASSAGE_NODE_WEIGHT", "0.05"))
-        ppr_passage_top_k = preset.get("ppr_passage_top_k") or int(
-            _ov("ppr_passage_top_k", "ROUTE7_PPR_PASSAGE_TOP_K", "50")
-        )
+        ppr_passage_top_k = int(_ov(
+            "ppr_passage_top_k", "ROUTE7_PPR_PASSAGE_TOP_K",
+            str(preset.get("ppr_passage_top_k", 50))
+        ))
         # Reranker: enabled by default — cross-encoder on PPR output improves Q-D10 accuracy
         rerank_enabled = _ov("rerank", "ROUTE7_RERANK", "1").strip().lower() in {"1", "true", "yes"}
         rerank_top_k = int(_ov("rerank_top_k", "ROUTE7_RERANK_TOP_K", "30"))
@@ -417,14 +418,12 @@ class HippoRAG2Handler(BaseRouteHandler):
             "ppr_hub_deval", "ROUTE7_PPR_HUB_DEVAL", "0"
         ).strip().lower() in {"1", "true", "yes"}
 
-        # Sentence window: preset can explicitly disable (local_search keeps
-        # citations narrow); otherwise fall back to env / config_overrides.
-        if "sentence_window" in preset:
-            sentence_window_enabled = bool(preset["sentence_window"])
-        else:
-            sentence_window_enabled = _ov(
-                "sentence_window", "ROUTE7_SENTENCE_WINDOW", "1"
-            ).strip().lower() in {"1", "true", "yes"}
+        # Sentence window: preset provides the default; config_overrides / env
+        # can still override (e.g. re-enable windowing for local_search).
+        sentence_window_enabled = _ov(
+            "sentence_window", "ROUTE7_SENTENCE_WINDOW",
+            "1" if preset.get("sentence_window", True) else "0"
+        ).strip().lower() in {"1", "true", "yes"}
 
         logger.info(
             "route_7_hipporag2_start",
@@ -464,7 +463,7 @@ class HippoRAG2Handler(BaseRouteHandler):
                 _cm = self.pipeline.community_matcher
                 _matched_tuples = await _cm.match_communities(
                     query, relative_threshold=community_adaptive_ratio,
-                    max_k=community_max_k,
+                    max_k=community_max_k, folder_id=folder_id,
                 )
                 if _matched_tuples:
                     community_ids = [
@@ -522,7 +521,7 @@ class HippoRAG2Handler(BaseRouteHandler):
         # ------------------------------------------------------------------
         t0 = time.perf_counter()
         voyage_service = _get_voyage_service()
-        query_embedding = voyage_service.embed_query(query)
+        query_embedding = await asyncio.to_thread(voyage_service.embed_query, query)
         timings_ms["step_1_embed_ms"] = int((time.perf_counter() - t0) * 1000)
 
         # ------------------------------------------------------------------
@@ -2099,6 +2098,7 @@ class HippoRAG2Handler(BaseRouteHandler):
             # Match communities (returns list of (community_dict, score) tuples)
             matched_tuples = await community_matcher.match_communities(
                 query, relative_threshold=adaptive_ratio, max_k=max_k,
+                folder_id=folder_id,
             )
             if not matched_tuples:
                 return [], [], []
@@ -2359,10 +2359,11 @@ class HippoRAG2Handler(BaseRouteHandler):
         if not documents:
             return [(cid, 1.0 - i * 0.01) for i, cid in enumerate(candidate_ids[:top_k])]
 
-        # Always request the same top_k from Voyage — dynamic cutoff only
-        # filters the returned results by relevance_score, never changes
-        # the number of candidates Voyage evaluates.
-        request_k = min(top_k, len(documents))
+        # Request enough results to satisfy dynamic cutoff: when dynamic_max
+        # exceeds top_k, Voyage must return the larger amount so the threshold
+        # filter has enough candidates to work with.
+        effective_k = max(top_k, dynamic_max) if dynamic_max > 0 else top_k
+        request_k = min(effective_k, len(documents))
 
         # Call Voyage reranker
         vc = make_voyage_client()
@@ -2536,7 +2537,8 @@ class HippoRAG2Handler(BaseRouteHandler):
         if not documents:
             return []
 
-        request_k = min(top_k, len(documents))
+        effective_k = max(top_k, dynamic_max) if dynamic_max > 0 else top_k
+        request_k = min(effective_k, len(documents))
 
         vc = make_voyage_client()
 
