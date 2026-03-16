@@ -1,15 +1,19 @@
-"""Route 6: Concept Search — Synthesis prompts.
+"""Route 6: Concept Search — Synthesis prompt.
 
-Route 6 follows the Microsoft GraphRAG global search MAP-REDUCE design:
-  1. Community MAP extraction — per-community LLM call to extract key points
-     from source sentences (Community→Entity→MENTIONS→Sentence traversal).
-  2. Per-community MAP synthesis — each community produces a focused
-     mini-answer from its key points + sentence evidence.
-  3. REDUCE synthesis — merge all mini-answers into the final response.
+Route 6 restores the LazyGraphRAG insight: community summaries provide
+thematic structure.  Unlike Route 3 (MAP-REDUCE), there is NO MAP phase.
+Community summaries are passed **directly** to synthesis alongside sentence
+evidence, eliminating the lossy claim-extraction step and the N extra LLM
+calls that produced +41% latency for +1% containment improvement.
 
-The MAP-REDUCE synthesis (toggled by ROUTE6_MAP_REDUCE_SYNTHESIS=1) solves
-the LLM variance problem: each MAP call sees only 3-5 focused points, so
-it cannot "forget" items. The REDUCE step just organises/merges.
+The prompt receives three evidence streams:
+  1. Community summaries  — thematic structure from graph communities
+  2. Section headings     — structural heading context (title + summary)
+  3. Sentence evidence    — direct vector search on source sentences
+
+When ROUTE6_COMMUNITY_EXTRACT=1 (default), the community MAP phase
+fetches actual source sentences via Community→Entity→MENTIONS→Sentence
+graph traversal, aligning with Microsoft's LazyGraphRAG MAP design.
 
 Design rationale documented in:
   ANALYSIS_ROUTE3_LAZYGRAPHRAG_DEVIATION_AND_ROUTE6_PLAN_2026-02-19.md
@@ -94,85 +98,4 @@ Respond with ONLY a JSON object:
     {{"description": "specific fact or detail from source text", "score": importance_0_to_100, "community": "community title"}},
     ...
 ]}}
-"""
-
-# ─────────────────────────────────────────────────────────────────
-# MAP SYNTHESIS PROMPT  (per-community mini-answer)
-# ─────────────────────────────────────────────────────────────────
-# Called once per community in parallel.  Each call receives only that
-# community's key points and sentence evidence, so the LLM gives focused
-# attention to a small set of items — eliminating the variance caused by
-# a single monolithic synthesis dropping items from a large context.
-#
-# Input:  {query}, {community_title}, {key_points}, {sentence_evidence}
-# Output: free-text mini-answer (paragraph/bullets) for this community
-
-COMMUNITY_MAP_SYNTHESIS_PROMPT = """\
-You are a document analysis assistant. Produce a focused response to the query using ONLY the evidence from this thematic community.
-
-**Query**: {query}
-
-**Community Theme**: {community_title}
-
-**Key Points** (pre-extracted facts relevant to the query):
-{key_points}
-
-**Supporting Sentences** (source passages from this community's documents):
-{sentence_evidence}
-
-**Rules**:
-1. Include EVERY key point that substantively answers the query. Missing an item is the worst possible error.
-2. Preserve exact details: names, amounts, dates, conditions, legal terms, section references.
-3. Cite the source document for each fact using [Document > Section] notation where available.
-4. If no key points or sentences are relevant to the query, respond with exactly: "(No relevant information in this community.)"
-5. Keep the response focused and concise — bullet points preferred. Do NOT add introduction or conclusion.
-6. Do not mention methodology, the community theme name, or how evidence was obtained.
-7. PRECISION: Only include items that substantively match the query's stated category. A warranty limitation-of-liability clause is NOT a "non-refundable / forfeiture" term; a defect notification procedure is NOT a "record-keeping" obligation. If a key point does not fit the query's category, skip it. Do NOT include individual persons by name (e.g. "John Doe") for entity-listing queries unless they operate as a named business.
-
-**Response**:
-"""
-
-# ─────────────────────────────────────────────────────────────────
-# REDUCE SYNTHESIS PROMPT  (merge community mini-answers)
-# ─────────────────────────────────────────────────────────────────
-# Receives all MAP mini-answers and produces the final user-facing response.
-# The hard work (extracting facts) is done — this step just organises,
-# deduplicates, and formats.
-#
-# Input:  {query}, {community_responses}, {section_headings}
-# Output: final synthesized response
-
-REDUCE_SYNTHESIS_PROMPT = """\
-You are a document analysis assistant. Combine the analyst reports below into a single, comprehensive answer to the query.
-
-**Query**: {query}
-
-**Analyst Reports** (each report covers a different thematic area of the documents):
-{community_responses}
-
-**Document Evidence** (source passages — use these to verify and supplement the analyst reports):
-{sentence_evidence}
-
-**Document Structure** (section headings found in source documents):
-{section_headings}
-
-**Rules**:
-1. Combine ALL analyst reports into one unified answer. Every fact from every report must appear — do NOT drop or summarize away any item.
-2. CROSS-CHECK with Document Evidence: scan the source passages for facts NOT covered by any analyst report. If a passage contains a relevant fact that no report mentions, include it in your answer. The analyst reports may have gaps — the document evidence is the ground truth.
-3. Deduplicate: if multiple reports or passages mention the same fact, include it once with the most specific detail.
-4. Organise by theme or document — group related findings under clear headings.
-5. Preserve specific details: names, amounts, dates, conditions, section references, document citations.
-6. Response length — choose based on query type:
-   - For queries asking for ALL, EVERY, COMPLETE LIST, or ENUMERATE: list EVERY item without truncation. Completeness is mandatory.
-   - For narrative/summary queries: 3-5 focused paragraphs.
-   - PRECISION OVER PADDING: form fields (signatures, registration numbers) are NOT obligations; general contract boilerplate is NOT a specific provision. Do NOT include individual persons by name unless they operate as a named business. Do NOT include governmental jurisdictions unless they are a contractual party.
-7. Cross-document comparison — for queries asking which document has the latest/earliest/largest/smallest value:
-   a. List: "[Document name]: [value found]" for every document.
-   b. State which is largest/latest/most based only on the extracted values.
-8. Do not mention methodology, analyst reports, or how the evidence was retrieved.
-9. REFUSE for specific lookups where the exact data point is absent:
-   - Question asks about a specific term, clause, or concept by name but that exact term does NOT appear in ANY analyst report or document evidence → say: "The requested information was not found in the available documents."
-10. DOCUMENT COVERAGE — For queries about clauses or provisions across documents: ensure EVERY document represented in the analyst reports AND document evidence is covered.
-
-**Answer**:
 """

@@ -36,12 +36,7 @@ import tiktoken
 
 from src.core.config import settings
 from .base import BaseRouteHandler, Citation, RouteResult, rerank_with_retry, make_voyage_client, acomplete_with_retry
-from .route_6_prompts import (
-    COMMUNITY_EXTRACT_PROMPT,
-    COMMUNITY_MAP_SYNTHESIS_PROMPT,
-    CONCEPT_SYNTHESIS_PROMPT,
-    REDUCE_SYNTHESIS_PROMPT,
-)
+from .route_6_prompts import CONCEPT_SYNTHESIS_PROMPT, COMMUNITY_EXTRACT_PROMPT
 from ..services.neo4j_retry import retry_session
 
 # Shared tiktoken encoder for token budget control (Feature 4)
@@ -408,23 +403,13 @@ class ConceptSearchHandler(BaseRouteHandler):
             )
 
         # ================================================================
-        # Step 3: Synthesis (MAP-REDUCE or single-call)
+        # Step 3: Single LLM synthesis (communities + sentences)
         # ================================================================
         t0 = time.perf_counter()
-        use_map_reduce = os.getenv(
-            "ROUTE6_MAP_REDUCE_SYNTHESIS", "1"
-        ).strip().lower() in {"1", "true", "yes"}
-
-        if use_map_reduce and community_data:
-            response_text = await self._map_reduce_synthesize(
-                query, community_data, section_headings, sentence_evidence,
-                language=language, folder_id=folder_id,
-            )
-        else:
-            response_text = await self._synthesize(
-                query, community_data, section_headings, sentence_evidence,
-                language=language, folder_id=folder_id,
-            )
+        response_text = await self._synthesize(
+            query, community_data, section_headings, sentence_evidence,
+            language=language, folder_id=folder_id,
+        )
         timings_ms["step_3_synthesis_ms"] = int(
             (time.perf_counter() - t0) * 1000
         )
@@ -555,208 +540,6 @@ class ConceptSearchHandler(BaseRouteHandler):
                 error=str(e),
                 error_type=type(e).__name__,
             )
-            return (
-                "An error occurred while synthesizing the response. "
-                f"Please try again. (Error: {type(e).__name__})"
-            )
-
-    # ==================================================================
-    # Step 3b: MAP-REDUCE synthesis (per-community focused attention)
-    # ==================================================================
-
-    async def _map_reduce_synthesize(
-        self,
-        query: str,
-        communities: List[Dict[str, Any]],
-        section_headings: List[Dict[str, Any]],
-        sentence_evidence: List[Dict[str, Any]],
-        language: Optional[str] = None,
-        folder_id: Optional[str] = None,
-    ) -> str:
-        """MAP-REDUCE synthesis: per-community mini-answers then merge.
-
-        Solves the LLM variance problem where a single monolithic synthesis
-        call non-deterministically drops items from a large context (30+ points).
-        Each MAP call sees only 3-5 focused points and cannot "forget" items.
-
-        Flow:
-        1. Extract key points (same as legacy) → grouped by community
-        2. MAP: per-community parallel LLM calls → mini-answers
-        3. REDUCE: merge all mini-answers → final answer
-        """
-        # Step 1: Extract key points with structured output
-        community_extract = os.getenv(
-            "ROUTE6_COMMUNITY_EXTRACT", "1"
-        ).strip().lower() in {"1", "true", "yes"}
-
-        if community_extract and communities:
-            extract_result = await self._extract_community_key_points_structured(
-                query, communities, folder_id=folder_id,
-            )
-            points_by_community = extract_result["points_by_community"]
-        else:
-            points_by_community = {}
-
-        if not points_by_community:
-            # Fall back to legacy single-call synthesis
-            logger.info("route6_map_reduce_fallback_no_points")
-            return await self._synthesize(
-                query, communities, section_headings, sentence_evidence,
-                language=language, folder_id=folder_id,
-            )
-
-        # Build a sentence evidence index by document title for community matching
-        evidence_by_doc: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-        for ev in sentence_evidence:
-            doc = ev.get("document_title") or "Unknown"
-            evidence_by_doc[doc].append(ev)
-
-        # Step 2: MAP — per-community parallel synthesis
-        max_concurrent = int(os.getenv("ROUTE6_EXTRACT_CONCURRENCY", "12"))
-        semaphore = asyncio.Semaphore(max_concurrent)
-
-        async def _map_one(comm_title: str, comm_points: List[Dict[str, Any]]) -> Tuple[str, str]:
-            """Produce a mini-answer for one community."""
-            # Format key points
-            kp_lines = []
-            for p in comm_points:
-                desc = p.get("description", "")
-                score = p.get("score", 0)
-                kp_lines.append(f"- (importance: {score}) {desc}")
-            key_points_text = "\n".join(kp_lines)
-
-            # Collect sentence evidence that relates to this community's documents
-            comm_evidence_lines = []
-            seen_texts: set = set()
-            for p in comm_points:
-                desc_lower = p.get("description", "").lower()[:80]
-                for ev in sentence_evidence:
-                    ev_text = (ev.get("text") or "").strip()
-                    if not ev_text or ev_text in seen_texts:
-                        continue
-                    # Match if sentence text overlaps with the key point
-                    if ev_text[:60].lower() in desc_lower or desc_lower[:40] in ev_text.lower():
-                        doc = ev.get("document_title") or "Unknown"
-                        section = ev.get("section_path") or ""
-                        label = f"[{doc} > {section}]" if section else f"[{doc}]"
-                        comm_evidence_lines.append(f"- {label} {ev_text}")
-                        seen_texts.add(ev_text)
-
-            # Also add any sentence evidence from documents mentioned in key points
-            for ev in sentence_evidence:
-                ev_text = (ev.get("text") or "").strip()
-                if ev_text in seen_texts:
-                    continue
-                doc = ev.get("document_title") or "Unknown"
-                section = ev.get("section_path") or ""
-                label = f"[{doc} > {section}]" if section else f"[{doc}]"
-                # If sentence text contains keywords from any key point description
-                for p in comm_points:
-                    desc = p.get("description", "")
-                    # Simple overlap: share 3+ significant words
-                    desc_words = {w.lower() for w in desc.split() if len(w) > 4}
-                    ev_words = {w.lower() for w in ev_text.split() if len(w) > 4}
-                    if len(desc_words & ev_words) >= 3:
-                        comm_evidence_lines.append(f"- {label} {ev_text}")
-                        seen_texts.add(ev_text)
-                        break
-
-            evidence_text = "\n".join(comm_evidence_lines) if comm_evidence_lines else "(No supporting sentences)"
-
-            prompt = COMMUNITY_MAP_SYNTHESIS_PROMPT.format(
-                query=query,
-                community_title=comm_title,
-                key_points=key_points_text,
-                sentence_evidence=evidence_text,
-            )
-
-            async with semaphore:
-                try:
-                    resp = await acomplete_with_retry(self.llm, prompt)
-                    return (comm_title, resp.text.strip())
-                except Exception as e:
-                    logger.warning("route6_map_synthesis_failed", community=comm_title, error=str(e))
-                    # Fallback: return key points as raw text
-                    return (comm_title, key_points_text)
-
-        tasks = [_map_one(title, pts) for title, pts in points_by_community.items()]
-        map_results = await asyncio.gather(*tasks)
-
-        # Filter out empty/irrelevant community responses
-        community_responses = []
-        for title, response in map_results:
-            if response and "(No relevant information" not in response:
-                community_responses.append((title, response))
-
-        if not community_responses:
-            logger.info("route6_map_reduce_all_empty")
-            return await self._synthesize(
-                query, communities, section_headings, sentence_evidence,
-                language=language, folder_id=folder_id,
-            )
-
-        logger.info(
-            "route6_map_synthesis_done",
-            total_communities=len(points_by_community),
-            communities_with_response=len(community_responses),
-        )
-
-        # Step 3: REDUCE — merge mini-answers into final response
-        # Format community responses
-        response_blocks = []
-        for i, (title, response) in enumerate(community_responses, 1):
-            response_blocks.append(f"--- Analyst {i}: {title} ---\n{response}")
-        responses_text = "\n\n".join(response_blocks)
-
-        # Format section headings
-        if section_headings:
-            heading_lines = []
-            for sec in section_headings:
-                title = sec.get("title", "")
-                doc_title = sec.get("document_title", "")
-                path_key = sec.get("path_key", "").strip()
-                parts = []
-                if doc_title:
-                    parts.append(f"[{doc_title}]")
-                if path_key and path_key != title:
-                    parts.append(path_key)
-                else:
-                    parts.append(title)
-                heading_lines.append(f"- {' '.join(parts)}")
-            headings_text = "\n".join(heading_lines)
-        else:
-            headings_text = "(No document structure available)"
-
-        # Format sentence evidence for REDUCE cross-check
-        if sentence_evidence:
-            evidence_lines = []
-            for i, ev in enumerate(sentence_evidence, 1):
-                doc = ev.get("document_title") or "Unknown"
-                section = ev.get("section_path") or ""
-                text = ev.get("text") or ""
-                if section:
-                    evidence_lines.append(f"{i}. [{doc} > {section}] {text}")
-                else:
-                    evidence_lines.append(f"{i}. [{doc}] {text}")
-            evidence_text = "\n".join(evidence_lines)
-        else:
-            evidence_text = "(No document evidence retrieved)"
-
-        reduce_prompt = REDUCE_SYNTHESIS_PROMPT.format(
-            query=query,
-            community_responses=responses_text,
-            sentence_evidence=evidence_text,
-            section_headings=headings_text,
-        )
-
-        if language:
-            reduce_prompt += f"\n\nIMPORTANT: Respond entirely in {language}."
-
-        try:
-            response = await acomplete_with_retry(self.llm, reduce_prompt)
-            return response.text.strip()
-        except Exception as e:
-            logger.error("route6_reduce_synthesis_failed", error=str(e))
             return (
                 "An error occurred while synthesizing the response. "
                 f"Please try again. (Error: {type(e).__name__})"
@@ -993,18 +776,6 @@ class ConceptSearchHandler(BaseRouteHandler):
         communities: List[Dict[str, Any]],
         folder_id: Optional[str] = None,
     ) -> str:
-        """Extract key points and return formatted text (legacy single-call path)."""
-        result = await self._extract_community_key_points_structured(
-            query, communities, folder_id=folder_id,
-        )
-        return result["formatted"]
-
-    async def _extract_community_key_points_structured(
-        self,
-        query: str,
-        communities: List[Dict[str, Any]],
-        folder_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
         """Extract query-relevant key points from community SOURCE TEXT.
 
         True MAP pattern (upstream-aligned):
@@ -1016,11 +787,6 @@ class ConceptSearchHandler(BaseRouteHandler):
         3. Lower-rated communities use raw summaries (no LLM call) to save latency.
         4. Aggregate, deduplicate, sort, and filter all key points.
 
-        Returns dict with:
-          "formatted": str — formatted text for legacy single-call synthesis
-          "points_by_community": Dict[str, List[Dict]] — key points grouped by
-              community title (for MAP-REDUCE synthesis)
-          "communities": List[Dict] — original community list
         Falls back to raw summaries if source fetch fails.
         """
         extract_top_k = int(os.getenv("ROUTE6_EXTRACT_TOP_K", "12"))
@@ -1122,8 +888,7 @@ class ConceptSearchHandler(BaseRouteHandler):
 
         if not all_points:
             logger.info("route6_community_extract_no_points")
-            fallback = self._format_raw_summaries(communities)
-            return {"formatted": fallback, "points_by_community": {}, "communities": communities}
+            return self._format_raw_summaries(communities)
 
         # Deduplicate by description similarity (exact match on first 60 chars)
         seen_descs: set = set()
@@ -1139,18 +904,11 @@ class ConceptSearchHandler(BaseRouteHandler):
         min_score = int(os.getenv("ROUTE6_EXTRACT_MIN_SCORE", "20"))
         points = [p for p in unique_points if p.get("score", 0) >= min_score]
         if not points:
-            fallback = self._format_raw_summaries(communities)
-            return {"formatted": fallback, "points_by_community": {}, "communities": communities}
+            return self._format_raw_summaries(communities)
 
         # Cap key points to keep synthesis prompt tractable (reduces latency)
         max_points = int(os.getenv("ROUTE6_MAX_EXTRACT_POINTS", "30"))
         points = points[:max_points]
-
-        # Group points by community for MAP-REDUCE synthesis
-        points_by_community: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-        for p in points:
-            comm = p.get("community", "Unknown")
-            points_by_community[comm].append(p)
 
         formatted = []
         for p in points:
@@ -1161,6 +919,10 @@ class ConceptSearchHandler(BaseRouteHandler):
             formatted.append(f"- (importance: {score}) {desc}{tag}")
 
         # Append raw summaries for ALL communities as fallback context.
+        # Extracted communities get both focused key-points above AND their
+        # raw summary below, so synthesis never loses information that the
+        # extraction LLM filtered out too aggressively (fixes Q-G7 regression
+        # where "60 days written notice" etc. were dropped by extraction).
         all_summary_communities = extract_communities + summary_communities
         if all_summary_communities:
             formatted.append("")
@@ -1179,13 +941,8 @@ class ConceptSearchHandler(BaseRouteHandler):
             max_points=max_points,
             summary_appended=len(all_summary_communities),
             top_score=points[0].get("score", 0) if points else 0,
-            communities_with_points=len(points_by_community),
         )
-        return {
-            "formatted": "\n".join(formatted),
-            "points_by_community": dict(points_by_community),
-            "communities": communities,
-        }
+        return "\n".join(formatted)
 
     @staticmethod
     def _format_raw_summaries(communities: List[Dict[str, Any]]) -> str:
