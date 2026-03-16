@@ -148,7 +148,6 @@ def _get_voyage_service():
         return _voyage_service
     with _voyage_init_lock:
         if not _voyage_init_attempted:
-            _voyage_init_attempted = True
             try:
                 from src.core.config import settings
 
@@ -156,10 +155,14 @@ def _get_voyage_service():
                     from src.worker.hybrid_v2.embeddings.voyage_embed import VoyageEmbedService
 
                     _voyage_service = VoyageEmbedService()
+                    _voyage_init_attempted = True
                     logger.info("route7_voyage_service_initialized")
                 else:
+                    # Missing API key is a permanent config issue — don't retry
+                    _voyage_init_attempted = True
                     logger.warning("route7_voyage_service_no_api_key")
             except Exception as e:
+                # Transient failure — allow retry on next call
                 logger.warning("route7_voyage_service_init_failed", error=str(e))
     return _voyage_service
 
@@ -2197,7 +2200,7 @@ class HippoRAG2Handler(BaseRouteHandler):
             return []
 
         try:
-            query_embedding = voyage_service.embed_query(query)
+            query_embedding = await asyncio.to_thread(voyage_service.embed_query, query)
         except Exception as e:
             logger.warning("route7_sentence_embed_failed", error=str(e))
             return []
@@ -2469,7 +2472,7 @@ class HippoRAG2Handler(BaseRouteHandler):
         )
         try:
             instructed_query = instruction + " " + query
-            query_embedding = voyage_service.embed_query(instructed_query)
+            query_embedding = await asyncio.to_thread(voyage_service.embed_query, instructed_query)
         except Exception as e:
             logger.warning("prefilter_embed_failed", error=str(e))
             return candidate_ids[:top_n]
