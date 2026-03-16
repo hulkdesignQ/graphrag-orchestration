@@ -88,7 +88,6 @@ class UsageStatsResponse(BaseModel):
     """Personal usage statistics."""
     queries_today: int = 0
     queries_this_month: int = 0
-    queries_limit_day: int = 0
     queries_limit_month: int = 0
     documents_count: int = 0
     documents_limit: int = Field(default=0, description="Deprecated — storage cap is the effective limit")
@@ -203,13 +202,6 @@ async def _fetch_profile(
 
     limits = profile.plan_limits or PLAN_DEFINITIONS[PlanTier.FREE]
 
-    features = {
-        "advanced_analytics": limits.advanced_analytics,
-        "api_access": limits.api_access,
-        "centralized_billing": limits.centralized_billing,
-        "audit_logs": limits.audit_logs,
-    }
-
     return UserProfileResponse(
         user_id=profile.user_id,
         display_name=profile.display_name,
@@ -224,7 +216,6 @@ async def _fetch_profile(
         queries_this_month=usage["queries_this_month"],
         documents_count=0,
         storage_used_gb=0.0,
-        features=features,
     )
 
 
@@ -370,7 +361,6 @@ async def _fetch_user_usage(
     return UsageStatsResponse(
         queries_today=usage["queries_today"],
         queries_this_month=usage["queries_this_month"],
-        queries_limit_day=limits.queries_per_day,
         queries_limit_month=limits.queries_per_month,
         documents_count=total_documents,
         documents_limit=0,  # deprecated — storage cap is the effective limit
@@ -414,7 +404,6 @@ async def get_available_plans(
             continue
         plans[tier.value] = {
             "name": tier.value.replace("_", " ").title(),
-            "queries_per_day": limits.queries_per_day,
             "queries_per_month": limits.queries_per_month,
             "max_storage_gb": limits.max_storage_gb,
             "monthly_credits": limits.monthly_credits,
@@ -499,13 +488,6 @@ async def _fetch_dashboard_all(
     profile_obj = resolve_user_profile(user, plan_tier=plan_tier, billing_type=billing_type)
     profile_limits = profile_obj.plan_limits or limits
 
-    features = {
-        "advanced_analytics": profile_limits.advanced_analytics,
-        "api_access": profile_limits.api_access,
-        "centralized_billing": profile_limits.centralized_billing,
-        "audit_logs": profile_limits.audit_logs,
-    }
-
     profile_resp = UserProfileResponse(
         user_id=profile_obj.user_id,
         display_name=profile_obj.display_name,
@@ -520,7 +502,6 @@ async def _fetch_dashboard_all(
         queries_this_month=redis_usage["queries_this_month"],
         documents_count=0,
         storage_used_gb=0.0,
-        features=features,
     )
 
     # ── Phase 3: Blob + Cosmos + credits in parallel ─────────────────────
@@ -608,7 +589,6 @@ async def _fetch_dashboard_all(
     usage_resp = UsageStatsResponse(
         queries_today=redis_usage["queries_today"],
         queries_this_month=redis_usage["queries_this_month"],
-        queries_limit_day=limits.queries_per_day,
         queries_limit_month=limits.queries_per_month,
         documents_count=total_documents,
         documents_limit=0,  # deprecated — storage cap is the effective limit
@@ -632,7 +612,6 @@ async def _fetch_dashboard_all(
             continue
         plans_dict[tier.value] = {
             "name": tier.value.replace("_", " ").title(),
-            "queries_per_day": tier_limits.queries_per_day,
             "queries_per_month": tier_limits.queries_per_month,
             "max_storage_gb": tier_limits.max_storage_gb,
             "monthly_credits": tier_limits.monthly_credits,

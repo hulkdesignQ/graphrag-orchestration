@@ -49,7 +49,7 @@ class PlanTier(str, Enum):
 class PlanLimits(BaseModel):
     """Resource limits for a payment plan."""
     # Chat limits
-    queries_per_day: int = Field(description="Max chat queries per day")
+    queries_per_day: int = Field(default=10000, description="Safety cap — credits are the primary gate")
     queries_per_month: int = Field(description="Max chat queries per month")
     max_tokens_per_query: int = Field(default=4096, description="Max output tokens per query")
     
@@ -82,7 +82,6 @@ class PlanLimits(BaseModel):
 # Pricing mirrors GitHub Copilot tiers: Free / Pro $10 / Pro+ $39 / Business $19/user / Enterprise $39/user
 PLAN_DEFINITIONS: Dict[PlanTier, PlanLimits] = {
     PlanTier.FREE: PlanLimits(
-        queries_per_day=100,
         queries_per_month=2000,
         max_tokens_per_query=2048,
         monthly_credits=500,          # ~$0.50/month — trial usage
@@ -96,7 +95,6 @@ PLAN_DEFINITIONS: Dict[PlanTier, PlanLimits] = {
         priority_support=False,
     ),
     PlanTier.PRO: PlanLimits(
-        queries_per_day=200,
         queries_per_month=5000,
         max_tokens_per_query=4096,
         monthly_credits=3_000,        # ~$3/month — ~200 queries — $10/mo price
@@ -110,7 +108,6 @@ PLAN_DEFINITIONS: Dict[PlanTier, PlanLimits] = {
         priority_support=False,
     ),
     PlanTier.PRO_PLUS: PlanLimits(
-        queries_per_day=1000,
         queries_per_month=20000,
         max_tokens_per_query=8192,
         monthly_credits=15_000,       # ~$15/month — ~1000 queries — $39/mo price
@@ -124,7 +121,6 @@ PLAN_DEFINITIONS: Dict[PlanTier, PlanLimits] = {
         priority_support=False,
     ),
     PlanTier.BUSINESS: PlanLimits(
-        queries_per_day=200,
         queries_per_month=5000,
         max_tokens_per_query=4096,
         monthly_credits=5_000,        # ~$5/month — ~330 queries — $19/user/mo for governance
@@ -142,7 +138,6 @@ PLAN_DEFINITIONS: Dict[PlanTier, PlanLimits] = {
         policy_controls=True,
     ),
     PlanTier.ENTERPRISE: PlanLimits(
-        queries_per_day=2000,
         queries_per_month=50000,
         max_tokens_per_query=16384,
         monthly_credits=14_000,       # ~$14/month — ~930 queries — $39/user/mo (2.8× Business)
