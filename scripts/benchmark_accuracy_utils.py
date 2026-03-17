@@ -167,6 +167,8 @@ def calculate_accuracy_metrics(expected: str, actual: str, is_negative: bool) ->
             "left blank", "is blank", "not filled in", "no shipping method",
             "not recorded", "no value", "is empty", "field is blank",
             "no data", "does not record", "doesn't record",
+            # Catch "No documents [verb]" or "No [noun] are governed by"
+            "no documents",
         ]
         negative_test_pass = any(phrase in actual_lower for phrase in not_found_phrases)
         return {

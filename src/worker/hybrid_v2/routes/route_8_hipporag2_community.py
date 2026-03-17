@@ -1395,18 +1395,16 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
                     )
                     _all_docs = await _doc_result.data()
 
-                # Supplement under-represented docs with query-relevant
-                # chunks using cosine similarity. Only targets docs below
-                # min_chunks_per_doc to avoid adding noise to docs that
-                # already have good coverage.
-                _under_rep = [
+                # Supplement under-represented docs (below min_chunks_per_doc)
+                # with query-relevant chunks selected by cosine similarity.
+                _target_docs = [
                     (d["doc_id"], d["total"])
                     for d in _all_docs
                     if d.get("doc_id")
                     and _doc_counts.get(d["doc_id"], 0) < min_chunks_per_doc
                 ]
 
-                if _under_rep:
+                if _target_docs:
                     _supplement_ids: List[str] = []
                     _need_cypher = """
                     MATCH (s:Sentence)
@@ -1424,9 +1422,11 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
                         return dot / (na * nb) if na and nb else 0.0
 
                     async with self._async_neo4j._get_session() as session:
-                        for doc_id, total in _under_rep:
+                        for doc_id, total in _target_docs:
                             _have = _doc_counts.get(doc_id, 0)
                             _need = min_chunks_per_doc - _have
+                            if _need <= 0:
+                                continue
                             _res = await session.run(
                                 _need_cypher,
                                 doc_id=doc_id,
@@ -1464,10 +1464,7 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
                             logger.info(
                                 "step_45d_min_chunks_per_doc",
                                 min_per_doc=min_chunks_per_doc,
-                                under_represented=[
-                                    (d, _doc_counts.get(d, 0))
-                                    for d, _ in _under_rep
-                                ],
+                                docs_supplemented=len(_target_docs),
                                 supplement_chunks=len(_supp_chunks),
                                 total_chunks=len(pre_fetched_chunks),
                             )
@@ -3102,7 +3099,7 @@ Content:
 
 Instructions:
 - Cast a WIDE net: extract any fact, detail, provision, data point, relationship, or reference that relates to the question — even tangentially.
-- Think about SYNONYMS and RELATED CONCEPTS: the question may use different terminology than the document. If the document discusses the same topic using different words, extract it.
+- Think about SYNONYMS and RELATED CONCEPTS: the question may use different terminology than the document. If the document discusses the same topic using different words, extract it. Think broadly about the question's topic and include provisions that fall under the same conceptual umbrella, even if the exact wording differs.
 - Include exact numeric values, dates, names, amounts, and conditions VERBATIM.
 - Extract EACH distinct provision, condition, or requirement as a SEPARATE fact — do not merge multiple provisions into one fact.
 - Even single-sentence mentions count — do NOT skip brief references.
@@ -3218,6 +3215,28 @@ Response:"""
         semaphore = asyncio.Semaphore(concurrency)
         quote_overlap_threshold = 0.5  # configurable: discard facts below this
 
+        # Precompute key-phrase set for hallucination guard (shared by
+        # _extract_one and _retry_extract).
+        _stopwords = {"the", "and", "for", "are", "but", "not", "you",
+                      "all", "can", "her", "was", "one", "our", "out",
+                      "what", "which", "their", "from", "have", "has",
+                      "this", "that", "with", "they", "been", "how",
+                      "about", "across", "documents", "document", "list",
+                      "summarize", "identify", "describe", "explain",
+                      "named", "parties", "organizations", "mentioned",
+                      "company", "companies", "clauses", "terms",
+                      "explicit", "specific"}
+        _query_lower = query.lower()
+        _key_phrases = set(
+            m.group(1).lower()
+            for m in re.finditer(r'\*\*([^*]+)\*\*', query)
+        )
+        if not _key_phrases:
+            _key_phrases = {
+                w for w in re.findall(r'[a-z]+', _query_lower)
+                if len(w) >= 6 and w not in _stopwords
+            }
+
         async def _extract_one(doc_id: str, doc_chunks: List[Dict]) -> Dict:
             doc_title = doc_titles.get(doc_id, doc_id)
             content_parts = []
@@ -3253,33 +3272,7 @@ Response:"""
 
             # Validate: discard facts whose quote is fabricated (not in source)
             content_lower = content.lower()
-            # Key-term hallucination check: extract multi-word noun phrases
-            # from the question that are specific enough to be the subject.
-            # Single common words like "parties" or "organizations" are too
-            # broad and would false-positive on legitimate extractions.
-            # We look for 2+ word phrases quoted or bolded in the question,
-            # or fall back to distinctive rare words (6+ chars, not stopwords).
-            _stopwords = {"the", "and", "for", "are", "but", "not", "you",
-                          "all", "can", "her", "was", "one", "our", "out",
-                          "what", "which", "their", "from", "have", "has",
-                          "this", "that", "with", "they", "been", "how",
-                          "about", "across", "documents", "document", "list",
-                          "summarize", "identify", "describe", "explain",
-                          "named", "parties", "organizations", "mentioned",
-                          "company", "companies", "clauses", "terms",
-                          "explicit", "specific"}
-            query_lower = query.lower()
-            # Extract quoted/bolded phrases first (e.g., **mold damage**)
-            _key_phrases = set(
-                m.group(1).lower()
-                for m in re.finditer(r'\*\*([^*]+)\*\*', query)
-            )
-            # Also extract rare distinctive words (6+ chars)
-            if not _key_phrases:
-                _key_phrases = {
-                    w for w in re.findall(r'[a-z]+', query_lower)
-                    if len(w) >= 6 and w not in _stopwords
-                }
+            # _key_phrases and _stopwords are computed once above both closures
             validated = []
             for f in facts:
                 if not isinstance(f, dict) or not f.get("fact"):
