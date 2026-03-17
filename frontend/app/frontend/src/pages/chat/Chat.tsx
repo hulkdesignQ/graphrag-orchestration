@@ -9,6 +9,7 @@ import styles from "./Chat.module.css";
 
 import { chatApi, configApi, RetrievalMode, ChatAppResponse, ChatAppResponseOrError, ChatAppRequest, ResponseMessage, SpeechConfig } from "../../api";
 import { StructuredCitation } from "../../api/models";
+import { Events } from "../../analytics";
 import { Answer, AnswerError, AnswerLoading } from "../../components/Answer";
 import { QuestionInput } from "../../components/QuestionInput";
 import { ExampleList } from "../../components/Example";
@@ -281,6 +282,9 @@ const Chat = () => {
         setActiveCitation(undefined);
         setActiveAnalysisPanelTab(undefined);
 
+        const queryStartMs = performance.now();
+        Events.querySent({ language: i18n.language, folderId: selectedFolderId ?? undefined });
+
         const token = client ? await getToken(client) : undefined;
 
         try {
@@ -337,6 +341,7 @@ const Chat = () => {
                 const plan = detail?.plan || "free";
                 const dailyLimit = detail?.daily_limit || "?";
                 const upgradeUrl = detail?.upgrade_url || "/dashboard#plans";
+                Events.rateLimitHit({ plan });
                 throw Error(
                     `You've reached your daily query limit (${dailyLimit} queries on the ${plan} plan). ` +
                     `Visit your [dashboard](${upgradeUrl}) to upgrade your plan.`
@@ -371,6 +376,7 @@ const Chat = () => {
                 }
             }
             setSpeechUrls([...speechUrls, null]);
+            Events.queryCompleted({ latencyMs: Math.round(performance.now() - queryStartMs) });
         } catch (e) {
             if (e instanceof DOMException && e.name === "AbortError") {
                 // Stopped during loading - restore question to input
@@ -378,6 +384,7 @@ const Chat = () => {
                 setRestoredQuestion(question);
             } else {
                 setError(e);
+                Events.queryError({ errorType: e instanceof Error ? e.message.slice(0, 80) : "unknown", statusCode: undefined });
             }
         } finally {
             setIsLoading(false);
@@ -430,6 +437,8 @@ const Chat = () => {
         } else {
             setActiveCitation(citation);
             setActiveAnalysisPanelTab(AnalysisPanelTabs.CitationTab);
+            const docName = decodeURIComponent(citation.split("#")[0].replace(/^.*\/content\//, ""));
+            Events.citationClicked({ documentName: docName });
 
             // Look up structured citation data for highlighting
             const answer = (isStreaming ? streamedAnswers : answers)[index]?.[1];

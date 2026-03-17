@@ -7,6 +7,10 @@ import { MsalProvider } from "@azure/msal-react";
 import { AuthenticationResult, EventType, PublicClientApplication } from "@azure/msal-browser";
 
 import "./index.css";
+import { initAnalytics, analytics } from "./analytics";
+
+// Initialize analytics (PostHog + Sentry) — no-ops if env vars are not set
+initAnalytics();
 
 import Chat from "./pages/chat/Chat";
 import Dashboard from "./pages/dashboard/Dashboard";
@@ -75,6 +79,10 @@ const root = ReactDOM.createRoot(document.getElementById("root") as HTMLElement)
                     const result = event.payload as AuthenticationResult;
                     if (result.account) {
                         msalInstance!.setActiveAccount(result.account);
+                        analytics.identify(result.account.localAccountId, {
+                            name: result.account.name,
+                            tenantId: result.account.tenantId,
+                        });
                     }
                 }
             });

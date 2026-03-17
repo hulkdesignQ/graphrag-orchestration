@@ -15,6 +15,17 @@ logging.getLogger("neo4j.notifications").setLevel(logging.ERROR)
 from dotenv import load_dotenv
 load_dotenv()  # pick up .env for local development; no-op in containerized deployments
 
+# Sentry error tracking — opt-in via SENTRY_DSN env var
+import sentry_sdk
+_sentry_dsn = os.getenv("SENTRY_DSN")
+if _sentry_dsn:
+    sentry_sdk.init(
+        dsn=_sentry_dsn,
+        environment=os.getenv("SENTRY_ENVIRONMENT", "production"),
+        traces_sample_rate=0.05,
+        send_default_pii=False,
+    )
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse

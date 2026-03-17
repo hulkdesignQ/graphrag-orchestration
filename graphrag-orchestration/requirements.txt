@@ -79,3 +79,4 @@ anyio>=4.0.0
 
 # HTTP client for CU Standard ingestion
 httpx>=0.25.0
+sentry-sdk[fastapi]>=2.0.0

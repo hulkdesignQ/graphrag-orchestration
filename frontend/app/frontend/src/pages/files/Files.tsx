@@ -17,6 +17,7 @@ import { useNavigate } from "react-router-dom";
 import { useMsal } from "@azure/msal-react";
 import { useLogin, requireLogin, getToken } from "../../authConfig";
 import { LoginContext } from "../../loginContext";
+import { Events } from "../../analytics";
 import {
     listFilesApi,
     uploadFilesApi,
@@ -229,6 +230,7 @@ const Files = () => {
                 setUploadProgress(100);
                 if (successCount > 0) {
                     addToast("success", t("files.filesUploaded", { count: successCount }));
+                    Events.fileUploaded({ fileCount: successCount, folderId: activeFolderId ?? undefined });
                 }
                 await loadFiles();
                 setSelected(new Set());

@@ -6,6 +6,7 @@ import styles from "./Dashboard.module.css";
 import { useLogin, getToken, isUsingAppServicesLogin } from "../../authConfig";
 import { LoginContext } from "../../loginContext";
 import { fetchDashboardAll, UserProfileResponse, UsageStats, PlanInfo } from "../../api/dashboard";
+import { Events } from "../../analytics";
 
 const PLAN_BADGE_CLASS: Record<string, string> = {
     free: styles.planFree,
@@ -74,6 +75,7 @@ const Dashboard = () => {
         }
 
         loadDashboard();
+        Events.dashboardViewed();
 
         // Re-fetch when user returns to this tab (e.g. after making queries)
         const handleVisibility = () => {
@@ -260,7 +262,12 @@ const Dashboard = () => {
                                     <button
                                         className={styles.upgradeButton}
                                         disabled={isCurrent}
-                                        onClick={() => { if (!isCurrent) window.location.hash = "#/dashboard#plans"; }}
+                                        onClick={() => {
+                                            if (!isCurrent) {
+                                                Events.planUpgradeClicked({ currentPlan: plans.current_plan, targetPlan: tier });
+                                                window.location.hash = "#/dashboard#plans";
+                                            }
+                                        }}
                                     >
                                         {isCurrent ? t("dashboard.currentPlan") : t("dashboard.contactSales")}
                                     </button>
