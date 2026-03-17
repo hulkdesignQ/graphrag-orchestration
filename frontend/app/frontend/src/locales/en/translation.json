@@ -188,6 +188,8 @@
         "loadingFiles": "Loading files...",
         "noFilesYet": "No files yet",
         "uploadFilesHint": "Upload files to get started.",
+        "selectFolderFirst": "Select or create a folder first",
+        "selectFolderHint": "Files must be uploaded into a folder to be indexed and searchable.",
         "nameColumn": "Name",
         "typeColumn": "Type",
         "actionsColumn": "Actions",

@@ -506,6 +506,7 @@ const Files = () => {
                     acceptedTypes={ACCEPTED_FILE_TYPES}
                     uploadedCount={uploadedCount}
                     uploadTotal={uploadTotal}
+                    disabled={!activeFolderId}
                 />
 
             <div className={styles.mainArea}>

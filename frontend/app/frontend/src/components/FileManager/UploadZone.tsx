@@ -9,9 +9,11 @@ interface UploadZoneProps {
     acceptedTypes: string;
     uploadedCount?: number;
     uploadTotal?: number;
+    disabled?: boolean;
+    disabledMessage?: string;
 }
 
-export const UploadZone = ({ onUpload, uploading, progress, acceptedTypes, uploadedCount, uploadTotal }: UploadZoneProps) => {
+export const UploadZone = ({ onUpload, uploading, progress, acceptedTypes, uploadedCount, uploadTotal, disabled, disabledMessage }: UploadZoneProps) => {
     const { t } = useTranslation();
     const [dragOver, setDragOver] = useState(false);
     const inputRef = useRef<HTMLInputElement>(null);
@@ -52,6 +54,7 @@ export const UploadZone = ({ onUpload, uploading, progress, acceptedTypes, uploa
         styles.uploadZone,
         dragOver ? styles.uploadZoneDragOver : "",
         uploading ? styles.uploadZoneUploading : "",
+        disabled ? styles.uploadZoneDisabled : "",
     ]
         .filter(Boolean)
         .join(" ");
@@ -59,15 +62,17 @@ export const UploadZone = ({ onUpload, uploading, progress, acceptedTypes, uploa
     return (
         <div
             className={zoneClass}
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-            onDrop={handleDrop}
-            onClick={handleBrowse}
+            onDragOver={disabled ? undefined : handleDragOver}
+            onDragLeave={disabled ? undefined : handleDragLeave}
+            onDrop={disabled ? undefined : handleDrop}
+            onClick={disabled ? undefined : handleBrowse}
             role="button"
-            tabIndex={0}
-            onKeyDown={(e) => e.key === "Enter" && handleBrowse()}
+            tabIndex={disabled ? -1 : 0}
+            onKeyDown={disabled ? undefined : (e) => e.key === "Enter" && handleBrowse()}
+            aria-disabled={disabled}
+            title={disabled ? disabledMessage : undefined}
         >
-            <span className={styles.uploadIcon}>{uploading ? "⏳" : "📤"}</span>
+            <span className={styles.uploadIcon}>{uploading ? "⏳" : disabled ? "📁" : "📤"}</span>
             {uploading ? (
                 <>
                     <p className={styles.uploadText}>
@@ -79,6 +84,11 @@ export const UploadZone = ({ onUpload, uploading, progress, acceptedTypes, uploa
                         <div className={styles.progressBarInner} style={{ width: `${progress}%` }} />
                     </div>
                     <p className={styles.progressLabel}>{progress}%</p>
+                </>
+            ) : disabled ? (
+                <>
+                    <p className={styles.uploadText}>{disabledMessage || t("files.selectFolderFirst")}</p>
+                    <p className={styles.uploadTextSub}>{t("files.selectFolderHint")}</p>
                 </>
             ) : (
                 <>
