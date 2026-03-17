@@ -575,13 +575,13 @@ class Neo4jHybridSearchService:
         # Get entity IDs from seed nodes
         entity_ids = [node["entity_id"] for node in seed_nodes]
         
-        # Multi-hop traversal query
-        cypher = """
+        # Multi-hop traversal query (CYPHER 25 scoped CALL)
+        cypher = """CYPHER 25
         UNWIND $entity_ids AS start_id
         MATCH (start:Entity {id: start_id, group_id: $group_id})
-        CALL (start, group_id, depth) {
-            MATCH path = (start)-[r*1..depth]-(end:Entity)
-            WHERE end.group_id = group_id
+        CALL (start) {
+            MATCH path = (start)-[r*1..$depth]-(end:Entity)
+            WHERE end.group_id = $group_id
             UNWIND relationships(path) AS rel
             WITH startNode(rel) AS source, rel, endNode(rel) AS target
             RETURN source.name AS source_name, 
