@@ -48,51 +48,38 @@ _ENTITY_TYPE_KEYWORDS: Dict[str, List[str]] = {
         "company", "companies", "firm", "firms",
         "entity", "entities", "contractor", "contractors",
         "vendor", "vendors", "principal", "principals",
-        # German
-        "partei", "parteien", "organisation", "organisationen",
-        "unternehmen", "firma", "firmen",
-        "auftragnehmer", "lieferant", "lieferanten",
+        "institution", "institutions", "agency", "agencies",
     ],
     "PERSON": [
         "party", "parties", "people", "individual", "individuals",
         "person", "persons", "signatory", "signatories",
         "representative", "representatives", "personnel",
-        # German
-        "partei", "parteien", "leute", "einzelperson", "einzelpersonen",
-        "personen", "unterzeichner", "vertreter",
+        "author", "authors", "contributor", "contributors",
     ],
     "LOCATION": [
         "location", "locations", "place", "places",
         "address", "addresses", "jurisdiction", "jurisdictions",
         "city", "cities", "state", "states", "country", "countries",
-        # German
-        "ort", "orte", "standort", "standorte",
-        "adresse", "adressen", "gerichtsstand",
-        "stadt", "städte", "land", "länder",
+        "region", "regions", "site", "sites",
     ],
 }
 
 # Structural signals for exhaustive intent (no domain nouns)
 _EXHAUSTIVE_INTENT_RE = re.compile(
     r"(?:"
-    r"\b(?:list|enumerate|identify|name|find|what\s+are)\b"
+    r"\b(?:list|enumerate|identify|name|find|what\s+are|show|extract|gather)\b"
     r".{0,40}"
     r"\b(?:all|every|each|across)\b"
     r"|"
     # Entity comparison: "across the set, which entity appears in the most documents"
     r"\b(?:across)\b.{0,60}\b(?:which|what|compare)\b"
-    r"|"
-    # German: "liste/nenne/finde alle/jede/sämtliche"
-    r"\b(?:liste|nenne|finde|identifiziere|zähle\s+auf|welche\s+sind)\b"
-    r".{0,40}"
-    r"\b(?:alle|jede[rsmn]?|sämtliche[rn]?)\b"
     r")",
     re.IGNORECASE,
 )
 
 # Corpus-scope confirmation (query must reference documents/corpus)
 _CORPUS_SCOPE_RE = re.compile(
-    r"\b(?:documents?|files?|contracts?|agreements?|corpus|set|collection)\b",
+    r"\b(?:documents?|files?|records?|reports?|pages?|corpus|set|collection|data(?:set)?)\b",
     re.IGNORECASE,
 )
 
@@ -104,18 +91,14 @@ _CORPUS_SCOPE_RE = re.compile(
 # Matching is case-insensitive on the normalized (stripped, lowered) name.
 # ---------------------------------------------------------------------------
 _ROLE_LABEL_BLOCKLIST: set = {
-    # contract role labels
-    "builder", "buyer", "buyer/owner", "seller", "owner", "agent",
-    "customer", "contractor", "subcontractor", "vendor", "supplier",
-    "manufacturer", "administrator", "arbitrator", "mediator",
-    "pumper", "tenant", "landlord", "lessee", "lessor", "licensee",
-    "licensor", "manager", "principal", "representative",
-    "authorized representative",
-    # generic legal/governance labels
-    "party", "parties", "claimant", "respondent", "insured",
-    "beneficiary", "guarantor", "indemnitor",
-    # governmental/institutional generics
-    "county", "state", "municipality", "city", "government",
+    # generic role labels (not named entities)
+    "owner", "agent", "customer", "contractor", "subcontractor",
+    "vendor", "supplier", "manufacturer", "administrator",
+    "manager", "principal", "representative",
+    "authorized representative", "author", "editor",
+    # generic relational labels
+    "party", "parties", "member", "participant",
+    "sender", "receiver", "recipient", "user",
 }
 
 
@@ -125,10 +108,10 @@ def _is_role_label(entity_name: str) -> bool:
 
 
 # Structured relationship types to surface in the entity-doc map Role column.
-# Only these short, schema-defined labels are fetched; freeform co-occurrence
-# descriptions (up to 200-char sentence text) are excluded.
+# These are common graph relationship labels from entity extraction.
 _STRUCTURED_ROLE_TYPES: list = [
     "PARTY_TO", "LOCATED_IN", "DEFINES", "REFERENCES", "FOUND_IN",
+    "BELONGS_TO", "PART_OF", "HAS", "CONTAINS", "RELATED_TO",
 ]
 
 # ---------------------------------------------------------------------------
@@ -2138,7 +2121,7 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
                 sentence_top_k = corpus_size
 
         sentence_cypher = """CYPHER 25
-        CALL {
+        CALL () {
             MATCH (s:Sentence)
             SEARCH s IN (VECTOR INDEX sentence_embedding FOR $embedding WHERE s.group_id = $group_id LIMIT $sentence_top_k)
             SCORE AS score
@@ -3129,16 +3112,9 @@ Content:
 {content}
 
 Instructions:
-- Cast a WIDE net: extract any clause, term, provision, obligation, right, mechanism, condition, or procedure that relates to the question — even tangentially.
-- Think about SYNONYMS and RELATED CONCEPTS. For example:
-  • "dispute resolution" includes: arbitration, mediation, litigation, small claims, legal action, judicial proceedings, complaints, claims
-  • "remedies" includes: repair, replace, refund, damages, penalties, sanctions, injunctions, attorneys' fees
-  • "termination" includes: cancellation, expiration, early exit, notice period, non-renewal
-  • "fees" includes: charges, costs, commissions, taxes, expenses, payments, installments, deposits
-  • "insurance/indemnity/hold harmless" includes: liability, risk of loss, limitation of liability, disclaimers, exclusion of damages, warranty exclusions, consequential damages, implied warranties
-  • "named parties" includes: any company name, person name, organization, association, or entity in headers, signatures, addresses, invoice fields, or body text
-  • "document purpose" includes: title, preamble, subject matter, scope, what the document governs or establishes
-- Include exact numeric values, dates, names, dollar amounts, and conditions VERBATIM.
+- Cast a WIDE net: extract any fact, detail, provision, data point, relationship, or reference that relates to the question — even tangentially.
+- Think about SYNONYMS and RELATED CONCEPTS: the question may use different terminology than the document. If the document discusses the same topic using different words, extract it.
+- Include exact numeric values, dates, names, amounts, and conditions VERBATIM.
 - Even single-sentence mentions count — do NOT skip brief references.
 - When in doubt, INCLUDE the fact. Over-extraction is better than missing relevant content.
 - Return a JSON array of objects. Each object has:
@@ -3156,12 +3132,12 @@ Extracted facts from {n_docs} documents:
 {facts_block}
 
 Instructions:
-1. REFUSAL CHECK: Does the question ask for a SINGLE specific data point that should appear verbatim in a document (e.g., a routing number, IBAN, license number, VAT ID, wire instructions, a specific named clause like "mold damage")?
-   - If YES and none of the extracted facts contain that EXACT term or data point, respond ONLY with: "The requested information was not found in the available documents."
-   - Examples of specific lookups that require exact-term matching:
-     • "mold damage coverage" → extracted facts must mention "mold" — general warranty exclusions about condensation or moisture do NOT count
-     • "bank routing number" → must contain an actual routing number
-     • "IBAN / SWIFT code" → must contain actual IBAN or SWIFT values
+1. REFUSAL CHECK — apply this for SPECIFIC LOOKUP questions:
+   - If the question asks for a SINGLE specific data point, term, clause, or identifier:
+     a. Identify the KEY TERM in the question (e.g., "mold damage", "routing number", "IBAN").
+     b. Check if ANY extracted fact contains that key term or a direct equivalent.
+     c. If NO fact mentions it, respond ONLY with: "The requested information was not found in the available documents."
+     d. Do NOT infer or generalize — if the question asks about "mold damage" and facts only mention "implied warranties", that is NOT a match.
    - This refusal does NOT apply to questions that ask to "summarize", "list", "compare", or "identify" across documents — those are enumeration questions and should always be answered from the extracted facts.
 2. Deduplicate: if multiple documents state the same fact, keep ONE bullet citing all source documents.
 3. One bullet per UNIQUE item — do not repeat or paraphrase the same fact.
@@ -3169,7 +3145,7 @@ Instructions:
 5. Cite document sources in parentheses, e.g. (Source: Document Title).
 6. Be CONCISE — state each fact once, move on.
 7. RESPECT ALL QUALIFIERS from the question.
-8. Include RELATED concepts found in the extractions even if the terminology differs from the question. For example, "limitation of liability" and "exclusion of damages" ARE relevant to a question about "indemnity / hold harmless".
+8. Include RELATED concepts found in the extractions even if the terminology differs from the question.
 
 Respond using ONLY bullet points — no headers, no preamble, no summary paragraph:
 
@@ -3249,6 +3225,7 @@ Response:"""
 
         # ── MAP phase: parallel per-doc extraction ───────────────────
         semaphore = asyncio.Semaphore(concurrency)
+        quote_overlap_threshold = 0.5  # configurable: discard facts below this
 
         async def _extract_one(doc_id: str, doc_chunks: List[Dict]) -> Dict:
             doc_title = doc_titles.get(doc_id, doc_id)
@@ -3285,22 +3262,67 @@ Response:"""
 
             # Validate: discard facts whose quote is fabricated (not in source)
             content_lower = content.lower()
+            # Key-term hallucination check: extract multi-word noun phrases
+            # from the question that are specific enough to be the subject.
+            # Single common words like "parties" or "organizations" are too
+            # broad and would false-positive on legitimate extractions.
+            # We look for 2+ word phrases quoted or bolded in the question,
+            # or fall back to distinctive rare words (6+ chars, not stopwords).
+            _stopwords = {"the", "and", "for", "are", "but", "not", "you",
+                          "all", "can", "her", "was", "one", "our", "out",
+                          "what", "which", "their", "from", "have", "has",
+                          "this", "that", "with", "they", "been", "how",
+                          "about", "across", "documents", "document", "list",
+                          "summarize", "identify", "describe", "explain",
+                          "named", "parties", "organizations", "mentioned",
+                          "company", "companies", "clauses", "terms",
+                          "explicit", "specific"}
+            query_lower = query.lower()
+            # Extract quoted/bolded phrases first (e.g., **mold damage**)
+            _key_phrases = set(
+                m.group(1).lower()
+                for m in re.finditer(r'\*\*([^*]+)\*\*', query)
+            )
+            # Also extract rare distinctive words (6+ chars)
+            if not _key_phrases:
+                _key_phrases = {
+                    w for w in re.findall(r'[a-z]+', query_lower)
+                    if len(w) >= 6 and w not in _stopwords
+                }
             validated = []
             for f in facts:
                 if not isinstance(f, dict) or not f.get("fact"):
                     continue
                 quote = (f.get("quote") or "").strip()
                 if quote:
-                    # Check if at least 60% of quote words appear in source
+                    # Check word overlap between quote and source content
                     q_words = set(re.findall(r'[a-z0-9]+', quote.lower()))
                     c_words = set(re.findall(r'[a-z0-9]+', content_lower))
-                    if q_words and len(q_words & c_words) / len(q_words) < 0.5:
+                    if q_words and len(q_words & c_words) / len(q_words) < quote_overlap_threshold:
                         logger.debug(
                             "map_fact_quote_mismatch",
                             doc_id=doc_id,
                             fact=f["fact"][:100],
                             quote_overlap=len(q_words & c_words) / len(q_words),
                         )
+                        continue
+                # Key-phrase hallucination check: if the fact echoes a
+                # distinctive query phrase that doesn't exist in the source
+                # content, the LLM likely injected it from the question.
+                if _key_phrases:
+                    fact_lower = f["fact"].lower()
+                    hallucinated = False
+                    for kp in _key_phrases:
+                        if kp in fact_lower and kp not in content_lower:
+                            logger.debug(
+                                "map_fact_keyphrase_hallucination",
+                                doc_id=doc_id,
+                                fact=f["fact"][:100],
+                                hallucinated_phrase=kp,
+                            )
+                            hallucinated = True
+                            break
+                    if hallucinated:
                         continue
                 validated.append(f)
             facts = validated
