@@ -193,22 +193,16 @@ export const Answer = ({
 
                                 return (
                                     <span key={`${sc.citation || docName}-${idx}`} className={styles.citationEntry}>
-                                        {path ? (
-                                            <a
-                                                className={styles.citation}
-                                                title={sentencePreview || docName}
-                                                onClick={e => {
-                                                    e.preventDefault();
-                                                    onCitationClicked(path);
-                                                }}
-                                            >
-                                                {`${idx + 1}. ${label}`}
-                                            </a>
-                                        ) : (
-                                            <span className={styles.citation} title={sentencePreview || docName}>
-                                                {`${idx + 1}. ${label}`}
-                                            </span>
-                                        )}
+                                        <a
+                                            className={styles.citation}
+                                            title={sentencePreview || docName}
+                                            onClick={e => {
+                                                e.preventDefault();
+                                                onCitationClicked(path);
+                                            }}
+                                        >
+                                            {`${idx + 1}. ${label}`}
+                                        </a>
                                     </span>
                                 );
                             })}

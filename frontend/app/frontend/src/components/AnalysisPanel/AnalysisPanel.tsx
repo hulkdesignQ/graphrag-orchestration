@@ -145,29 +145,31 @@ export const AnalysisPanel = ({
     const fetchCitation = async () => {
         const token = client ? await getToken(client) : undefined;
         if (activeCitation) {
-            // Skip fetch for non-file citations (empty path from getCitationFilePath)
             const urlNoHash = activeCitation.split("#")[0];
-            if (!urlNoHash || urlNoHash === "") {
-                setCitationBlob("");
-                setCitation("");
-                return;
-            }
             const originalHash = activeCitation.includes("#") ? activeCitation.split("#")[1] : "";
-            const response = await fetchWithAuthRetry(urlNoHash, {
-                method: "GET",
-                headers: await getHeaders(token),
-            });
-            if (!response.ok) {
-                console.error(`Citation fetch failed: ${response.status} ${response.statusText}`);
+            try {
+                const response = await fetchWithAuthRetry(urlNoHash, {
+                    method: "GET",
+                    headers: await getHeaders(token),
+                });
+                if (!response.ok) {
+                    // 404 is expected for community/graph citations — not an error
+                    if (response.status !== 404) {
+                        console.error(`Citation fetch failed: ${response.status} ${response.statusText}`);
+                    }
+                    setCitationBlob("");
+                    setCitation("");
+                    return;
+                }
+                const citationContent = await response.blob();
+                const blobUrl = URL.createObjectURL(citationContent);
+                setCitationBlob(blobUrl);
+                // For iframe/legacy viewers, add hash back
+                setCitation(originalHash ? blobUrl + "#" + originalHash : blobUrl);
+            } catch {
                 setCitationBlob("");
                 setCitation("");
-                return;
             }
-            const citationContent = await response.blob();
-            const blobUrl = URL.createObjectURL(citationContent);
-            setCitationBlob(blobUrl);
-            // For iframe/legacy viewers, add hash back
-            setCitation(originalHash ? blobUrl + "#" + originalHash : blobUrl);
         }
     };
     useEffect(() => {

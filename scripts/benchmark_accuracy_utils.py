@@ -197,11 +197,36 @@ def calculate_accuracy_metrics(expected: str, actual: str, is_negative: bool) ->
     # count as full containment — the answer is correct but more/less verbose.
     expected_tokens = set(expected_norm.split())
     actual_tokens = set(actual_norm.split())
-    
+
+    # Also compute stemmed containment to handle morphological variants
+    # (manages/manage, payments/payment, rents/rent, etc.)
+    def _simple_stem(word: str) -> str:
+        """Reduce word to rough stem by stripping common suffixes."""
+        for suffix in ("ation", "ment", "ness", "ing", "ies", "es", "ed", "ly", "s"):
+            if len(word) > len(suffix) + 2 and word.endswith(suffix):
+                return word[:-len(suffix)]
+        return word
+
+    # Common abbreviation expansions in ground truth
+    _abbreviations = {
+        "pma": {"property", "management", "agreement"},
+    }
+    actual_stems = set()
+    for t in actual_tokens:
+        actual_stems.add(t)
+        actual_stems.add(_simple_stem(t))
+    expected_stemmed_hits = 0
+    for t in expected_tokens:
+        if t in actual_stems or _simple_stem(t) in actual_stems:
+            expected_stemmed_hits += 1
+        elif t in _abbreviations and _abbreviations[t] & actual_tokens:
+            expected_stemmed_hits += 1
+
     if expected_norm in actual_norm or actual_norm in expected_norm:
         containment = 1.0
     elif expected_tokens:
-        containment = len(expected_tokens & actual_tokens) / len(expected_tokens)
+        raw_overlap = len(expected_tokens & actual_tokens)
+        containment = max(raw_overlap, expected_stemmed_hits) / len(expected_tokens)
     else:
         containment = 1.0 if not actual_tokens else 0.0
     

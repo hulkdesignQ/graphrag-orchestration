@@ -207,14 +207,6 @@ export function getCitationFilePath(citation: string, documentUrl?: string): str
     }
     // Remove only the last parenthesized suffix (e.g., "(page 3)")
     const cleanedCitation = filename.replace(/\s*\([^)]*\)\s*$/, "").trim();
-
-    // If no documentUrl and no file extension, this is likely a community/graph
-    // citation (not a real file). Return empty so the UI doesn't try to fetch it.
-    const hasFileExtension = /\.\w{2,5}$/.test(cleanedCitation);
-    if (!documentUrl && !hasFileExtension) {
-        return "";
-    }
-
     let url = `${BACKEND_URI}/content/${encodeURIComponent(cleanedCitation)}`;
     // Pass the original blob URL so the backend can proxy from it directly
     if (documentUrl) {
