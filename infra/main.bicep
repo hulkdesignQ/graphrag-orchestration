@@ -134,6 +134,24 @@ param auraDsClientSecret string = ''
 @description('Neo4j Aura DS client ID for GDS operations')
 param auraDsClientId string = ''
 
+// ── Stripe Billing ──────────────────────────────────────────────────────
+@secure()
+@description('Stripe secret key for payment processing')
+param stripeSecretKey string = ''
+
+@description('Stripe publishable key (safe to expose to frontend)')
+param stripePublishableKey string = ''
+
+@secure()
+@description('Stripe webhook signing secret')
+param stripeWebhookSecret string = ''
+
+@description('Stripe Price ID for Pro plan ($10/mo)')
+param stripePricePro string = ''
+
+@description('Stripe Price ID for Pro+ plan ($39/mo)')
+param stripePriceProPlus string = ''
+
 // ── Parameterized resource names (previously hardcoded) ─────────────────
 
 @description('Name of the existing resource group')
@@ -447,6 +465,13 @@ var conditionalSecretEnvVars = concat(
   !empty(auraDsClientSecret) ? [
       { name: 'AURA_DS_CLIENT_ID', value: auraDsClientId }
       { name: 'AURA_DS_CLIENT_SECRET', secretRef: 'aura-ds-client-secret' }
+    ] : [],
+  !empty(stripeSecretKey) ? [
+      { name: 'STRIPE_SECRET_KEY', secretRef: 'stripe-secret-key' }
+      { name: 'STRIPE_PUBLISHABLE_KEY', value: stripePublishableKey }
+      { name: 'STRIPE_WEBHOOK_SECRET', secretRef: 'stripe-webhook-secret' }
+      { name: 'STRIPE_PRICE_PRO', value: stripePricePro }
+      { name: 'STRIPE_PRICE_PRO_PLUS', value: stripePriceProPlus }
     ] : []
 )
 
@@ -678,6 +703,17 @@ var sharedSecrets = concat([
   {
     name: 'aura-ds-client-secret'
     keyVaultUrl: '${keyVault.outputs.vaultUri}secrets/aura-ds-client-secret'
+    identity: managedIdentity.outputs.id
+  }
+] : [], !empty(stripeSecretKey) ? [
+  {
+    name: 'stripe-secret-key'
+    keyVaultUrl: '${keyVault.outputs.vaultUri}secrets/stripe-secret-key'
+    identity: managedIdentity.outputs.id
+  }
+  {
+    name: 'stripe-webhook-secret'
+    keyVaultUrl: '${keyVault.outputs.vaultUri}secrets/stripe-webhook-secret'
     identity: managedIdentity.outputs.id
   }
 ] : [])
