@@ -41,17 +41,17 @@
     "chatEmptyStateTitle": "Fragen Sie Ihre Dokumente. Vertrauen Sie jeder Antwort.",
     "chatEmptyStateSubtitle": "Jede Antwort ist bis zum genauen Satz rückverfolgbar — klicken Sie zur Überprüfung im Original-PDF. Probieren Sie es mit unseren Beispieldokumenten oder laden Sie Ihre eigenen hoch.",
     "defaultExamples": {
-        "1": "Stimmen der Gesamtpreis im Kaufvertrag und die Rechnungssumme überein?",
-        "2": "Vergleichen Sie die Kündigungs- und Widerrufsregelungen aller Vereinbarungen.",
-        "3": "Wie hoch ist die Maklerprovision für Kurzzeitmieten unter 180 Tagen?",
-        "placeholder": "Stellen Sie eine Frage zu Ihren Dokumenten (z.B. stimmt diese Rechnung mit den Vertragsbedingungen überein?)"
+        "1": "Was sind die wichtigsten Bedingungen in meinen Dokumenten?",
+        "2": "Fassen Sie die Hauptpunkte aller meiner Dokumente zusammen.",
+        "3": "Welche wichtigen Daten und Fristen werden in meinen Dokumenten erwähnt?",
+        "placeholder": "Stellen Sie eine Frage zu Ihren Dokumenten (z.B. welche Zahlungsbedingungen gelten?)"
     },
     "askTitle": "Fragen Sie Ihre Dokumente",
     "multimodalExamples": {
-        "1": "Stimmen der Gesamtpreis im Kaufvertrag und die Rechnungssumme überein?",
-        "2": "Vergleichen Sie die Kündigungs- und Widerrufsregelungen aller Vereinbarungen.",
-        "3": "Wie hoch ist die Maklerprovision für Kurzzeitmieten unter 180 Tagen?",
-        "placeholder": "Stellen Sie eine Frage zu Ihren Dokumenten (z.B. stimmt diese Rechnung mit den Vertragsbedingungen überein?)"
+        "1": "Was sind die wichtigsten Bedingungen in meinen Dokumenten?",
+        "2": "Fassen Sie die Hauptpunkte aller meiner Dokumente zusammen.",
+        "3": "Welche wichtigen Daten und Fristen werden in meinen Dokumenten erwähnt?",
+        "placeholder": "Stellen Sie eine Frage zu Ihren Dokumenten (z.B. welche Zahlungsbedingungen gelten?)"
     },
     "generatingAnswer": "Antwort wird generiert",
     "citationWithColon": "Quellenangabe:",

@@ -35,17 +35,17 @@
     "chatEmptyStateTitle": "Belgelerinize sorun. Her yanıta güvenin.",
     "chatEmptyStateSubtitle": "Her yanıt tam cümleye kadar izlenebilir — orijinal PDF üzerinde doğrulamak için tıklayın. Örnek belgelerimizle deneyin veya kendi belgelerinizi yükleyin.",
     "defaultExamples": {
-        "1": "Satın alma sözleşmesinin toplam fiyatı ile fatura toplamı uyuşuyor mu?",
-        "2": "Tüm sözleşmelerdeki fesih ve iptal kurallarını karşılaştırın.",
-        "3": "180 günün altındaki kısa süreli kiralamalar için acentenin ücreti nedir?",
-        "placeholder": "Belgeleriniz hakkında bir soru sorun (ör. bu fatura sözleşme koşullarıyla uyuşuyor mu?)"
+        "1": "Belgelerimin temel şart ve koşulları nelerdir?",
+        "2": "Tüm belgelerimin ana noktalarını özetleyin.",
+        "3": "Belgelerimde belirtilen önemli tarihler ve son tarihler nelerdir?",
+        "placeholder": "Belgeleriniz hakkında bir soru sorun (örn. ödeme koşulları nelerdir?)"
     },
     "askTitle": "Belgelerinize sorun",
     "multimodalExamples": {
-        "1": "Satın alma sözleşmesinin toplam fiyatı ile fatura toplamı uyuşuyor mu?",
-        "2": "Tüm sözleşmelerdeki fesih ve iptal kurallarını karşılaştırın.",
-        "3": "180 günün altındaki kısa süreli kiralamalar için acentenin ücreti nedir?",
-        "placeholder": "Belgeleriniz hakkında bir soru sorun (ör. bu fatura sözleşme koşullarıyla uyuşuyor mu?)"
+        "1": "Belgelerimin temel şart ve koşulları nelerdir?",
+        "2": "Tüm belgelerimin ana noktalarını özetleyin.",
+        "3": "Belgelerimde belirtilen önemli tarihler ve son tarihler nelerdir?",
+        "placeholder": "Belgeleriniz hakkında bir soru sorun (örn. ödeme koşulları nelerdir?)"
     },
     "generatingAnswer": "Cevap oluşturuluyor",
     "citationWithColon": "Alıntı:",

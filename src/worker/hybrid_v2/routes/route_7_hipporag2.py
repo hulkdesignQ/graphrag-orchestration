@@ -189,10 +189,10 @@ class HippoRAG2Handler(BaseRouteHandler):
     # adjusts parameters to match the query type's needs.  Without query_mode
     # (backward-compatible default), all values come from env vars as before.
     QUERY_MODE_PRESETS: Dict[str, Dict[str, Any]] = {
-        "local_search": {              # Factual extraction — fast & concise
+        "local_search": {              # Factual extraction — focused retrieval
             "ppr_passage_top_k": 5,
-            "prompt_variant": "v1_concise",
-            "max_tokens": 150,
+            "prompt_variant": None,    # use default (v10_comprehensive) to preserve [N] citations
+            "max_tokens": None,        # use default — v1_concise's 150 was too low for cited answers
             "sentence_window": False,  # skip ±1 enrichment — keeps table-cell citations precise
         },
         "global_search": {             # Thematic/community-level — needs breadth

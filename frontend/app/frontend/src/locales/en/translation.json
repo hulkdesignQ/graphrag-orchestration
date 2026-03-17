@@ -41,17 +41,17 @@
     "chatEmptyStateTitle": "Ask your documents. Trust every answer.",
     "chatEmptyStateSubtitle": "Every answer is traced to the exact sentence — click to verify on the original PDF. Try with our sample documents or upload your own.",
     "defaultExamples": {
-        "1": "Do the purchase contract total price and the invoice total match?",
-        "2": "Compare the termination and cancellation rules across all agreements.",
-        "3": "What is the Agent's fee for short-term rentals under 180 days?",
-        "placeholder": "Ask a question across your documents (e.g., does this invoice match the contract terms?)"
+        "1": "What are the key terms and conditions in my documents?",
+        "2": "Summarize the main points across all my documents.",
+        "3": "What important dates and deadlines are mentioned in my documents?",
+        "placeholder": "Ask a question across your documents (e.g., what are the payment terms?)"
     },
     "askTitle": "Ask your documents",
     "multimodalExamples": {
-        "1": "Do the purchase contract total price and the invoice total match?",
-        "2": "Compare the termination and cancellation rules across all agreements.",
-        "3": "What is the Agent's fee for short-term rentals under 180 days?",
-        "placeholder": "Ask a question across your documents (e.g., does this invoice match the contract terms?)"
+        "1": "What are the key terms and conditions in my documents?",
+        "2": "Summarize the main points across all my documents.",
+        "3": "What important dates and deadlines are mentioned in my documents?",
+        "placeholder": "Ask a question across your documents (e.g., what are the payment terms?)"
     },
     "generatingAnswer": "Generating answer",
     "citationWithColon": "Citation:",

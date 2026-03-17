@@ -35,17 +35,17 @@
     "chatEmptyStateTitle": "Interrogez vos documents. Faites confiance à chaque réponse.",
     "chatEmptyStateSubtitle": "Chaque réponse est reliée à la phrase exacte — cliquez pour vérifier dans le PDF original. Essayez avec nos documents d'exemple ou téléchargez les vôtres.",
     "defaultExamples": {
-        "1": "Le prix total du contrat d'achat et le total de la facture correspondent-ils ?",
-        "2": "Comparez les clauses de résiliation et d'annulation dans tous les accords.",
-        "3": "Quel est le tarif de l'agent pour les locations à court terme de moins de 180 jours ?",
-        "placeholder": "Posez une question sur vos documents (ex. : cette facture correspond-elle aux termes du contrat ?)"
+        "1": "Quelles sont les conditions principales de mes documents ?",
+        "2": "Résumez les points principaux de tous mes documents.",
+        "3": "Quelles dates et échéances importantes sont mentionnées dans mes documents ?",
+        "placeholder": "Posez une question sur vos documents (ex. : quelles sont les conditions de paiement ?)"
     },
     "askTitle": "Interrogez vos documents",
     "multimodalExamples": {
-        "1": "Le prix total du contrat d'achat et le total de la facture correspondent-ils ?",
-        "2": "Comparez les clauses de résiliation et d'annulation dans tous les accords.",
-        "3": "Quel est le tarif de l'agent pour les locations à court terme de moins de 180 jours ?",
-        "placeholder": "Posez une question sur vos documents (ex. : cette facture correspond-elle aux termes du contrat ?)"
+        "1": "Quelles sont les conditions principales de mes documents ?",
+        "2": "Résumez les points principaux de tous mes documents.",
+        "3": "Quelles dates et échéances importantes sont mentionnées dans mes documents ?",
+        "placeholder": "Posez une question sur vos documents (ex. : quelles sont les conditions de paiement ?)"
     },
     "generatingAnswer": "Génération de la réponse",
     "citationWithColon": "Citation :",

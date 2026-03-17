@@ -35,17 +35,17 @@
     "chatEmptyStateTitle": "Stel vragen aan je documenten. Vertrouw elk antwoord.",
     "chatEmptyStateSubtitle": "Elk antwoord is terug te herleiden tot de exacte zin — klik om te verifiëren in de originele PDF. Probeer met onze voorbeelddocumenten of upload je eigen.",
     "defaultExamples": {
-        "1": "Komen de totaalprijs van het koopcontract en het factuurtotaal overeen?",
-        "2": "Vergelijk de beëindigings- en annuleringsregels in alle overeenkomsten.",
-        "3": "Wat is de vergoeding van de makelaar voor kortetermijnverhuur onder 180 dagen?",
-        "placeholder": "Stel een vraag over je documenten (bijv. komt deze factuur overeen met de contractvoorwaarden?)"
+        "1": "Wat zijn de belangrijkste voorwaarden in mijn documenten?",
+        "2": "Vat de hoofdpunten van al mijn documenten samen.",
+        "3": "Welke belangrijke data en deadlines worden in mijn documenten genoemd?",
+        "placeholder": "Stel een vraag over uw documenten (bijv. wat zijn de betalingsvoorwaarden?)"
     },
     "askTitle": "Stel vragen aan je documenten",
     "multimodalExamples": {
-        "1": "Komen de totaalprijs van het koopcontract en het factuurtotaal overeen?",
-        "2": "Vergelijk de beëindigings- en annuleringsregels in alle overeenkomsten.",
-        "3": "Wat is de vergoeding van de makelaar voor kortetermijnverhuur onder 180 dagen?",
-        "placeholder": "Stel een vraag over je documenten (bijv. komt deze factuur overeen met de contractvoorwaarden?)"
+        "1": "Wat zijn de belangrijkste voorwaarden in mijn documenten?",
+        "2": "Vat de hoofdpunten van al mijn documenten samen.",
+        "3": "Welke belangrijke data en deadlines worden in mijn documenten genoemd?",
+        "placeholder": "Stel een vraag over uw documenten (bijv. wat zijn de betalingsvoorwaarden?)"
     },
     "generatingAnswer": "Antwoord genereren",
     "citationWithColon": "Citaat:",

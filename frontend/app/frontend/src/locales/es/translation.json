@@ -35,17 +35,17 @@
     "chatEmptyStateTitle": "Pregunta a tus documentos. Confía en cada respuesta.",
     "chatEmptyStateSubtitle": "Cada respuesta se rastrea hasta la oración exacta — haz clic para verificar en el PDF original. Prueba con nuestros documentos de ejemplo o sube los tuyos.",
     "defaultExamples": {
-        "1": "¿Coinciden el precio total del contrato de compra y el total de la factura?",
-        "2": "Compara las reglas de rescisión y cancelación en todos los acuerdos.",
-        "3": "¿Cuál es la comisión del Agente para alquileres a corto plazo de menos de 180 días?",
-        "placeholder": "Haz una pregunta sobre tus documentos (p. ej., ¿coincide esta factura con los términos del contrato?)"
+        "1": "¿Cuáles son los términos y condiciones clave de mis documentos?",
+        "2": "Resume los puntos principales de todos mis documentos.",
+        "3": "¿Qué fechas y plazos importantes se mencionan en mis documentos?",
+        "placeholder": "Haz una pregunta sobre tus documentos (p. ej., ¿cuáles son las condiciones de pago?)"
     },
     "askTitle": "Pregunta a tus documentos",
     "multimodalExamples": {
-        "1": "¿Coinciden el precio total del contrato de compra y el total de la factura?",
-        "2": "Compara las reglas de rescisión y cancelación en todos los acuerdos.",
-        "3": "¿Cuál es la comisión del Agente para alquileres a corto plazo de menos de 180 días?",
-        "placeholder": "Haz una pregunta sobre tus documentos (p. ej., ¿coincide esta factura con los términos del contrato?)"
+        "1": "¿Cuáles son los términos y condiciones clave de mis documentos?",
+        "2": "Resume los puntos principales de todos mis documentos.",
+        "3": "¿Qué fechas y plazos importantes se mencionan en mis documentos?",
+        "placeholder": "Haz una pregunta sobre tus documentos (p. ej., ¿cuáles son las condiciones de pago?)"
     },
     "generatingAnswer": "Generando respuesta",
     "citationWithColon": "Cita:",

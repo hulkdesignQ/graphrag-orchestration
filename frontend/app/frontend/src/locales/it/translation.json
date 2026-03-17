@@ -35,17 +35,17 @@
     "chatEmptyStateTitle": "Interroga i tuoi documenti. Fidati di ogni risposta.",
     "chatEmptyStateSubtitle": "Ogni risposta è tracciabile fino alla frase esatta — clicca per verificare nel PDF originale. Prova con i nostri documenti di esempio o carica i tuoi.",
     "defaultExamples": {
-        "1": "Il prezzo totale del contratto di acquisto e il totale della fattura corrispondono?",
-        "2": "Confronta le clausole di rescissione e cancellazione in tutti gli accordi.",
-        "3": "Qual è la commissione dell'agente per gli affitti a breve termine inferiori a 180 giorni?",
-        "placeholder": "Fai una domanda sui tuoi documenti (es. questa fattura corrisponde ai termini del contratto?)"
+        "1": "Quali sono i termini e le condizioni principali dei miei documenti?",
+        "2": "Riassumi i punti principali di tutti i miei documenti.",
+        "3": "Quali date e scadenze importanti sono menzionate nei miei documenti?",
+        "placeholder": "Fai una domanda sui tuoi documenti (es. quali sono le condizioni di pagamento?)"
     },
     "askTitle": "Interroga i tuoi documenti",
     "multimodalExamples": {
-        "1": "Il prezzo totale del contratto di acquisto e il totale della fattura corrispondono?",
-        "2": "Confronta le clausole di rescissione e cancellazione in tutti gli accordi.",
-        "3": "Qual è la commissione dell'agente per gli affitti a breve termine inferiori a 180 giorni?",
-        "placeholder": "Fai una domanda sui tuoi documenti (es. questa fattura corrisponde ai termini del contratto?)"
+        "1": "Quali sono i termini e le condizioni principali dei miei documenti?",
+        "2": "Riassumi i punti principali di tutti i miei documenti.",
+        "3": "Quali date e scadenze importanti sono menzionate nei miei documenti?",
+        "placeholder": "Fai una domanda sui tuoi documenti (es. quali sono le condizioni di pagamento?)"
     },
     "generatingAnswer": "Generazione della risposta",
     "citationWithColon": "Citazione:",
