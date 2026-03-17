@@ -85,10 +85,10 @@
 
 | # | Item | Status | Notes |
 |---|---|---|---|
-| 48 | Product analytics (Plausible/PostHog) | 🔴 Pending | Zero analytics integration |
-| 49 | Funnel tracking (signup → upload → query) | 🔴 Pending | — |
-| 50 | Error tracking (Sentry/Datadog) | 🔴 Pending | Backend has structured logging, no error aggregation |
-| 51 | Conversion tracking (free → paid) | 🔴 Pending | Blocked by payment integration |
+| 48 | Product analytics (PostHog) | ✅ Done | Opt-in via `VITE_POSTHOG_KEY` env var |
+| 49 | Funnel tracking (signup → upload → query) | ✅ Done | Events: query_sent, file_uploaded, citation_clicked, dashboard_viewed |
+| 50 | Error tracking (Sentry) | ✅ Done | Frontend `VITE_SENTRY_DSN` + Backend `SENTRY_DSN` |
+| 51 | Conversion tracking (free → paid) | ✅ Done | plan_upgrade_clicked + rate_limit_hit events |
 
 ## Legal & Compliance
 
@@ -120,10 +120,10 @@
 | Marketing Materials | 7 | 0 | 0 |
 | Public Website | 0 | 5 | 2 |
 | User Experience | 2 | 3 | 0 |
-| Analytics & Monitoring | 0 | 4 | 0 |
+| Analytics & Monitoring | 4 | 0 | 0 |
 | Legal & Compliance | 0 | 3 | 2 |
 | Technical Debt | 0 | 3 | 0 |
-| **Total** | **33** | **21** | **4** |
+| **Total** | **37** | **17** | **4** |
 
 ---
 
