@@ -146,12 +146,6 @@ export const AnalysisPanel = ({
         const token = client ? await getToken(client) : undefined;
         if (activeCitation) {
             const urlNoHash = activeCitation.split("#")[0];
-            // No ?source= means no backing file (community/graph citation) — skip fetch
-            if (!urlNoHash.includes("?source=")) {
-                setCitationBlob("");
-                setCitation("");
-                return;
-            }
             const originalHash = activeCitation.includes("#") ? activeCitation.split("#")[1] : "";
             try {
                 const response = await fetchWithAuthRetry(urlNoHash, {
@@ -159,9 +153,6 @@ export const AnalysisPanel = ({
                     headers: await getHeaders(token),
                 });
                 if (!response.ok) {
-                    if (response.status !== 404) {
-                        console.error(`Citation fetch failed: ${response.status} ${response.statusText}`);
-                    }
                     setCitationBlob("");
                     setCitation("");
                     return;
@@ -169,7 +160,6 @@ export const AnalysisPanel = ({
                 const citationContent = await response.blob();
                 const blobUrl = URL.createObjectURL(citationContent);
                 setCitationBlob(blobUrl);
-                // For iframe/legacy viewers, add hash back
                 setCitation(originalHash ? blobUrl + "#" + originalHash : blobUrl);
             } catch {
                 setCitationBlob("");
