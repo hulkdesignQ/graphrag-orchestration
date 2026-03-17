@@ -59,7 +59,7 @@ class TestSpeechTokenEndpoint:
         assert body["token"] == "aad#test-speech-resource#fake-access-token-12345"
         assert body["region"] == "swedencentral"
         assert isinstance(body["languages"], list)
-        assert len(body["languages"]) == 10
+        assert len(body["languages"]) == 15
         assert "en-US" in body["languages"]
         assert "ja-JP" in body["languages"]
 
@@ -169,13 +169,14 @@ class TestSpeechTranslationLanguages:
     def test_all_supported_locales_present(self):
         from src.api_gateway.routers.speech import _SPEECH_TRANSLATION_LANGUAGES
         expected = {"en-US", "ja-JP", "fr-FR", "es-ES", "da-DK",
-                    "nl-NL", "pt-BR", "tr-TR", "it-IT", "de-DE"}
+                    "nl-NL", "pt-BR", "tr-TR", "it-IT", "de-DE",
+                    "ko-KR", "pl-PL", "zh-CN", "zh-TW", "th-TH"}
         assert set(_SPEECH_TRANSLATION_LANGUAGES) == expected
 
-    def test_max_10_languages(self):
-        """Azure Speech SDK auto-detect supports max 10 candidate languages."""
+    def test_max_15_languages(self):
+        """Azure Speech SDK supports up to 15 candidate languages."""
         from src.api_gateway.routers.speech import _SPEECH_TRANSLATION_LANGUAGES
-        assert len(_SPEECH_TRANSLATION_LANGUAGES) <= 10
+        assert len(_SPEECH_TRANSLATION_LANGUAGES) <= 15
 
 
 # ============================================================================
