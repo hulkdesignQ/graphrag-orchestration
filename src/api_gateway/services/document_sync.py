@@ -156,7 +156,36 @@ class DocumentSyncService:
 
         When extraction_only=True, only runs steps 1-7 (DI, sentences,
         entities) without graph-wide algorithms (KNN, communities).
+
+        Acquires a Redis distributed lock to prevent concurrent indexing
+        for the same group_id (matching the /hybrid/index/documents path).
         """
+        try:
+            # Acquire distributed lock — same key as hybrid.py uses — to
+            # prevent two concurrent uploads from racing on the same group.
+            from src.core.services.redis_service import get_redis_service
+            redis_svc = await get_redis_service()
+            lock_key = f"lock:{group_id}:indexing"
+            async with redis_svc.lock(lock_key, ttl_seconds=600):
+                await self._on_file_uploaded_locked(
+                    group_id, filename, blob_url, user_id, extraction_only,
+                )
+        except Exception as e:
+            logger.error(
+                "doc_sync_upload_failed",
+                extra={
+                    "group_id": group_id,
+                    "file_name": filename,
+                    "error": str(e),
+                },
+                exc_info=True,
+            )
+
+    async def _on_file_uploaded_locked(
+        self, group_id: str, filename: str, blob_url: str, user_id: str = "",
+        extraction_only: bool = False,
+    ) -> None:
+        """Inner implementation (caller holds distributed lock)."""
         try:
             # Clean previous version if this is an overwrite
             await self._delete_existing_document(group_id, blob_url)

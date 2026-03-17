@@ -8,6 +8,7 @@ from typing import Optional, Dict, Any, Callable
 import asyncio
 import logging
 import os
+import threading
 
 from src.core.config import settings
 from src.core.services.usage_tracker import UsageTracker
@@ -28,13 +29,17 @@ class LLMService:
     """
     
     _instance: Optional["LLMService"] = None
+    _instance_lock = threading.Lock()
     _llm: Optional[Any] = None  # AzureOpenAI when initialized
     _embed_model: Optional[Any] = None  # AzureOpenAIEmbedding when initialized
 
     def __new__(cls) -> "LLMService":
-        if cls._instance is None:
-            cls._instance = super(LLMService, cls).__new__(cls)
-            cls._instance._initialize()
+        if cls._instance is not None:
+            return cls._instance
+        with cls._instance_lock:
+            if cls._instance is None:
+                cls._instance = super(LLMService, cls).__new__(cls)
+                cls._instance._initialize()
         return cls._instance
 
     @property

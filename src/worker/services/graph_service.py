@@ -471,37 +471,40 @@ class GraphService:
         """Attempt to reconnect to Neo4j if the driver is dead or None.
         
         Returns True if the driver is healthy after the attempt.
+        Thread-safe: uses _instance_lock to prevent concurrent
+        driver close + recreate races.
         """
-        # If driver exists, check if it's still alive
-        if self._driver is not None:
-            try:
-                self._driver.verify_connectivity()
-                return True
-            except Exception:
-                logger.warning("Neo4j driver defunct, attempting reconnect...")
+        with self._instance_lock:
+            # If driver exists, check if it's still alive
+            if self._driver is not None:
                 try:
-                    self._driver.close()
+                    self._driver.verify_connectivity()
+                    return True
                 except Exception:
-                    pass
-                self._driver = None
+                    logger.warning("Neo4j driver defunct, attempting reconnect...")
+                    try:
+                        self._driver.close()
+                    except Exception:
+                        pass
+                    self._driver = None
 
-        # Try to create a new driver
-        if settings.NEO4J_URI and settings.NEO4J_USERNAME and settings.NEO4J_PASSWORD:
-            try:
-                driver = GraphDatabase.driver(
-                    settings.NEO4J_URI,
-                    auth=(settings.NEO4J_USERNAME, settings.NEO4J_PASSWORD),
-                    max_connection_lifetime=300,
-                )
-                driver.verify_connectivity()
-                self._driver = driver
-                logger.info("Neo4j reconnected successfully")
-                return True
-            except Exception as e:
-                logger.error(f"Neo4j reconnect failed: {e}")
-                self._driver = None
-                return False
-        return False
+            # Try to create a new driver
+            if settings.NEO4J_URI and settings.NEO4J_USERNAME and settings.NEO4J_PASSWORD:
+                try:
+                    driver = GraphDatabase.driver(
+                        settings.NEO4J_URI,
+                        auth=(settings.NEO4J_USERNAME, settings.NEO4J_PASSWORD),
+                        max_connection_lifetime=300,
+                    )
+                    driver.verify_connectivity()
+                    self._driver = driver
+                    logger.info("Neo4j reconnected successfully")
+                    return True
+                except Exception as e:
+                    logger.error(f"Neo4j reconnect failed: {e}")
+                    self._driver = None
+                    return False
+            return False
 
     def _initialize_uniqueness_constraints(self) -> None:
         """

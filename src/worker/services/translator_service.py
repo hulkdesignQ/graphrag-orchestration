@@ -59,6 +59,7 @@ class TranslatorService:
         self.resource_id = resource_id or settings.AZURE_TRANSLATOR_RESOURCE_ID or ""
         self._credential: Optional[DefaultAzureCredential] = None
         self._session: Optional[aiohttp.ClientSession] = None
+        self._session_lock = asyncio.Lock()
         if not self.endpoint:
             logger.warning("translator_service_disabled: AZURE_TRANSLATOR_ENDPOINT not set")
 
@@ -81,9 +82,10 @@ class TranslatorService:
         return token.token
 
     async def _get_session(self) -> aiohttp.ClientSession:
-        if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession()
-        return self._session
+        async with self._session_lock:
+            if self._session is None or self._session.closed:
+                self._session = aiohttp.ClientSession()
+            return self._session
 
     async def detect_and_translate(
         self,

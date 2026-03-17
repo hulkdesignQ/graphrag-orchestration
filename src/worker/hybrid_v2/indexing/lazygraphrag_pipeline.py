@@ -212,10 +212,13 @@ class LazyGraphRAGIndexingPipeline:
         self.voyage_service = voyage_service  # VoyageEmbedService for entity + passage embedding
         self.config = config or LazyGraphRAGIndexingConfig()
 
-        # Limit concurrent Neo4j write operations to prevent Aura write storms.
-        # Parallel steps (section enrichment, foundation edges) each acquire
-        # this semaphore before writing, keeping max concurrent writes bounded.
-        self._neo4j_write_sem = asyncio.Semaphore(settings.NEO4J_WRITE_CONCURRENCY)
+        # Lazy semaphores: created on first use so they bind to the
+        # correct running event loop.  The pipeline is a process-wide
+        # singleton but each indexing job may run on its own event loop
+        # (hybrid.py creates a new loop per thread), so we must NOT
+        # create asyncio primitives here in __init__.
+        self.__neo4j_write_sem: Optional[asyncio.Semaphore] = None
+        self.__neo4j_write_sem_loop: Optional[asyncio.AbstractEventLoop] = None
 
         self._splitter = SentenceSplitter(
             chunk_size=self.config.chunk_size,
@@ -234,6 +237,21 @@ class LazyGraphRAGIndexingPipeline:
         self._openie_two_step = os.getenv("OPENIE_TWO_STEP", "true").strip().lower() in {"1", "true", "yes"}
         # NER scope: "narrow" (upstream HippoRAG 2 style) or "broad" (adds abstract concepts — causes hub entities)
         self._ner_scope = os.getenv("OPENIE_NER_SCOPE", "broad").strip().lower()
+
+    @property
+    def _neo4j_write_sem(self) -> asyncio.Semaphore:
+        """Return an asyncio.Semaphore bound to the current running loop.
+
+        The pipeline singleton may be reused across event loops (the hybrid
+        endpoint creates a fresh loop per indexing thread).  If the loop has
+        changed since the semaphore was created we must recreate it so the
+        internal waiters deque belongs to the right loop.
+        """
+        loop = asyncio.get_running_loop()
+        if self.__neo4j_write_sem is None or self.__neo4j_write_sem_loop is not loop:
+            self.__neo4j_write_sem = asyncio.Semaphore(settings.NEO4J_WRITE_CONCURRENCY)
+            self.__neo4j_write_sem_loop = loop
+        return self.__neo4j_write_sem
 
     async def _achat_with_retry(self, messages, *, timeout: Optional[int] = None) -> Any:
         """Call self.llm.achat() with retry + timeout.
@@ -643,11 +661,19 @@ class LazyGraphRAGIndexingPipeline:
             # Dispatch: run both in parallel if both needed, or just the one needed.
             if section_needed and entities_needed:
                 logger.info("🚀 Running Steps 4.x ‖ Steps 5-7 in parallel (no data dependencies)")
-                section_result, entity_passed = await asyncio.gather(
+                results = await asyncio.gather(
                     _run_section_block(),
                     _run_entity_block(),
+                    return_exceptions=True,
                 )
-                # Set "entities_committed" only after BOTH complete.
+                # Surface any exceptions from either branch
+                errors = [r for r in results if isinstance(r, BaseException)]
+                if errors:
+                    # Log all failures, then re-raise the first
+                    for err in errors:
+                        logger.error("parallel_block_failed: %s: %s", type(err).__name__, err, exc_info=err)
+                    raise errors[0]
+                section_result, entity_passed = results                # Set "entities_committed" only after BOTH complete.
                 # "section_graph" was already set inside _run_section_block().
                 if not entity_passed and not dry_run:
                     stats["skipped"].append("entity_validation_failed")
@@ -1133,33 +1159,37 @@ class LazyGraphRAGIndexingPipeline:
         # in HTTP client setup and Managed Identity token acquisition.
         by_source: Dict[str, List[LlamaDocument]] = {}
 
+        # Cap concurrent DI extraction requests to avoid Azure throttling
+        _di_sem = asyncio.Semaphore(int(os.getenv("DI_CONCURRENCY", "5")))
+
         t_di_start = time.perf_counter()
         async with di_service._create_client() as client:
             async def _analyze_one(url: str) -> None:
-                max_di_retries = 2
-                for attempt in range(max_di_retries):
-                    try:
-                        _result_url, docs, error = await di_service._analyze_single_document(
-                            client, url, group_id, default_model="prebuilt-layout",
-                            user_id=user_id,
-                        )
-                        if error:
+                async with _di_sem:
+                    max_di_retries = 2
+                    for attempt in range(max_di_retries):
+                        try:
+                            _result_url, docs, error = await di_service._analyze_single_document(
+                                client, url, group_id, default_model="prebuilt-layout",
+                                user_id=user_id,
+                            )
+                            if error:
+                                if attempt < max_di_retries - 1:
+                                    logger.warning("DI extraction error for %s (attempt %d), retrying: %s", url.split("/")[-1], attempt + 1, error)
+                                    await asyncio.sleep(2 ** attempt)
+                                    continue
+                                logger.warning("DI extraction failed for %s after %d attempts: %s", url.split("/")[-1], max_di_retries, error)
+                            else:
+                                target_url = source_remap.get(url, url)
+                                by_source[target_url] = docs
+                                logger.info("DI extracted %d units for %s", len(docs), url.split("/")[-1])
+                            return
+                        except Exception as exc:
                             if attempt < max_di_retries - 1:
-                                logger.warning("DI extraction error for %s (attempt %d), retrying: %s", url.split("/")[-1], attempt + 1, error)
+                                logger.warning("DI extraction exception for %s (attempt %d), retrying: %s", url.split("/")[-1], attempt + 1, exc)
                                 await asyncio.sleep(2 ** attempt)
-                                continue
-                            logger.warning("DI extraction failed for %s after %d attempts: %s", url.split("/")[-1], max_di_retries, error)
-                        else:
-                            target_url = source_remap.get(url, url)
-                            by_source[target_url] = docs
-                            logger.info("DI extracted %d units for %s", len(docs), url.split("/")[-1])
-                        return
-                    except Exception as exc:
-                        if attempt < max_di_retries - 1:
-                            logger.warning("DI extraction exception for %s (attempt %d), retrying: %s", url.split("/")[-1], attempt + 1, exc)
-                            await asyncio.sleep(2 ** attempt)
-                        else:
-                            logger.warning("DI extraction failed for %s after %d attempts: %s", url.split("/")[-1], max_di_retries, exc)
+                            else:
+                                logger.warning("DI extraction failed for %s after %d attempts: %s", url.split("/")[-1], max_di_retries, exc)
 
             await asyncio.gather(*[_analyze_one(url) for url in effective_urls])
         await di_service.close()
@@ -1801,22 +1831,28 @@ class LazyGraphRAGIndexingPipeline:
 
         # For each sentence, find its top-k non-adjacent neighbours
         # Process by descending similarity to ensure we keep the best edges
-        candidates = []
-        for i in range(len(sentences)):
-            row_candidates = []
-            for j in range(len(sentences)):
-                if i == j:
-                    continue
-                if _is_same_context(sentences[i], sentences[j]):
-                    continue  # Too close — already linked via NEXT
-                sim = float(sim_matrix[i, j])
-                if sim >= threshold:
-                    row_candidates.append((j, sim))
-            
-            # Sort by similarity descending, take top max_k
-            row_candidates.sort(key=lambda x: x[1], reverse=True)
-            for j, sim in row_candidates[:max_k]:
-                candidates.append((i, j, sim))
+        # Offload O(n²) candidate selection to a thread so the event loop
+        # stays responsive (mirrors _build_section_similarity_edges pattern).
+        def _compute_knn_candidates():
+            _candidates = []
+            for i in range(len(sentences)):
+                row_candidates = []
+                for j in range(len(sentences)):
+                    if i == j:
+                        continue
+                    if _is_same_context(sentences[i], sentences[j]):
+                        continue  # Too close — already linked via NEXT
+                    sim = float(sim_matrix[i, j])
+                    if sim >= threshold:
+                        row_candidates.append((j, sim))
+
+                # Sort by similarity descending, take top max_k
+                row_candidates.sort(key=lambda x: x[1], reverse=True)
+                for j, sim in row_candidates[:max_k]:
+                    _candidates.append((i, j, sim))
+            return _candidates
+
+        candidates = await asyncio.to_thread(_compute_knn_candidates)
         
         # Deduplicate: (i→j) and (j→i) are the same edge, keep highest sim
         seen_pairs: Dict[tuple, float] = {}
@@ -4159,8 +4195,8 @@ Output:
                       AND m.entity_embedding IS NOT NULL
                     RETURN 
                       n AS source, r AS rel, m AS target,
-                      n {{ .entity_embedding }} AS sourceNodeProperties,
-                      m {{ .entity_embedding }} AS targetNodeProperties
+                      n {{ .entity_embedding, .id }} AS sourceNodeProperties,
+                      m {{ .entity_embedding, .id }} AS targetNodeProperties
                 }}
                 RETURN gds.graph.project.remote(source, target, {{
                     sourceNodeProperties: sourceNodeProperties,

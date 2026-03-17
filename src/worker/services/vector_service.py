@@ -31,6 +31,7 @@ Supports: LanceDB (development) and Azure AI Search (production).
 
 from typing import List, Optional, Dict, Any
 import logging
+import threading
 from abc import ABC, abstractmethod
 
 from llama_index.core import VectorStoreIndex
@@ -469,12 +470,16 @@ class VectorStoreService:
     """
     
     _instance: Optional["VectorStoreService"] = None
+    _instance_lock = threading.Lock()
     _provider: Optional[VectorStoreProvider] = None
 
     def __new__(cls) -> "VectorStoreService":
-        if cls._instance is None:
-            cls._instance = super(VectorStoreService, cls).__new__(cls)
-            cls._instance._initialize()
+        if cls._instance is not None:
+            return cls._instance
+        with cls._instance_lock:
+            if cls._instance is None:
+                cls._instance = super(VectorStoreService, cls).__new__(cls)
+                cls._instance._initialize()
         return cls._instance
 
     @property
