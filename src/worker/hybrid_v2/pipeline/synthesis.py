@@ -390,7 +390,50 @@ class EvidenceSynthesizer:
                 response, citation_map,
                 sentence_citation_map=sentence_citation_map if sentence_citation_map else None,
             )
-        
+
+        # Step 5b: Fallback — when the LLM produced [N] markers that don't
+        # match citation_map keys (e.g. hallucinated numbers), the bottom
+        # citation list would be empty.  Attach ALL citation_map entries so
+        # the user always sees source references.  Also re-number any stale
+        # [N] markers in the response to match the fallback list.
+        citation_fallback_used = False
+        if not citations and citation_map:
+            logger.warning(
+                "citation_fallback_triggered",
+                citation_map_keys=sorted(citation_map.keys()),
+                response_bracket_matches=re.findall(r'\[\d+\]', response)[:10],
+                response_preview=response[:200],
+            )
+            citations = []
+            sorted_keys = sorted(
+                citation_map.keys(),
+                key=lambda k: int(k.strip("[]")),
+            )
+            for cite_key in sorted_keys:
+                citations.append({
+                    "citation": cite_key,
+                    "citation_type": "chunk",
+                    **citation_map[cite_key],
+                })
+            citation_fallback_used = True
+
+            # Re-number stale [N] markers: replace ALL [digit] in the
+            # response with [1] cycling through available citations.  This
+            # is imperfect but ensures inline badges can match.
+            existing_nums = re.findall(r'\[(\d+)\]', response)
+            if existing_nums:
+                valid_keys = {k.strip("[]") for k in citation_map}
+                for num in set(existing_nums):
+                    if num not in valid_keys:
+                        # Map hallucinated number to nearest valid key
+                        nearest = min(valid_keys, key=lambda v: abs(int(v) - int(num)))
+                        response = response.replace(f"[{num}]", f"[{nearest}]")
+                        logger.info(
+                            "citation_renumber",
+                            old=num,
+                            new=nearest,
+                        )
+
         # Measure final context (after sparse-retrieval injection + sentence hints)
         final_context_chars = len(context)
         final_context_tokens = self._estimate_tokens(context)
@@ -403,6 +446,8 @@ class EvidenceSynthesizer:
         logger.info("synthesis_complete",
                    query=query,
                    num_citations=len(citations),
+                   citation_fallback=citation_fallback_used,
+                   citation_map_size=len(citation_map),
                    response_length=len(response),
                    response_type=response_type,
                    is_drift_mode=sub_questions is not None,
@@ -4004,5 +4049,15 @@ BEGIN ANALYSIS:"""
                     "citation_type": "chunk",
                     **citation_map[cite_key]
                 })
+        
+        # Diagnostic: log when response has [N] markers but none match
+        if not citations and (used_citations or _sent_map):
+            logger.warning(
+                "extract_citations_no_match",
+                response_markers=sorted(used_citations) if used_citations else [],
+                citation_map_keys=sorted(citation_map.keys()),
+                sent_map_keys=sorted(_sent_map.keys()) if _sent_map else [],
+                response_preview=response[:200],
+            )
         
         return citations

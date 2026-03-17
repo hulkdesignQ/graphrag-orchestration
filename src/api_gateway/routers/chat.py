@@ -1431,6 +1431,14 @@ async def _frontend_stream_response(
             raw_citations
         )
 
+        logger.info(
+            "stream_citation_debug",
+            raw_citation_count=len(raw_citations),
+            structured_count=len(structured_citations) if structured_citations else 0,
+            flat_count=len(flat_citations),
+            route_used=result.get("route_used", "unknown"),
+        )
+
         # Build context for streaming
         stream_context = {
             "data_points": {
