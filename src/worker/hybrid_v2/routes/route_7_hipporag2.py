@@ -482,9 +482,6 @@ class HippoRAG2Handler(BaseRouteHandler):
                         WHERE s.group_id IN $group_ids
                         OPTIONAL MATCH (s)-[:IN_DOCUMENT]->(d:Document)
                         WHERE d.group_id IN $group_ids
-                        WITH s, d
-                        WHERE $folder_id IS NULL OR d IS NULL
-                           OR EXISTS { MATCH (d)-[:IN_FOLDER]->(f:Folder {id: $folder_id}) }
                         RETURN DISTINCT s.text AS text, s.sent_index AS idx
                         ORDER BY idx
                         LIMIT 20
@@ -1469,8 +1466,6 @@ class HippoRAG2Handler(BaseRouteHandler):
           AND tc.group_id IN $group_ids
           AND d.group_id IN $group_ids
           AND e.type IN $entity_types
-          AND ($folder_id IS NULL
-               OR EXISTS { MATCH (d)-[:IN_FOLDER]->(f:Folder {id: $folder_id}) })
         WITH e, d, count(tc) AS doc_mentions,
              collect(tc.text)[0] AS doc_sample_chunk
         OPTIONAL MATCH (e)-[r:RELATED_TO]-(e2:Entity)
@@ -1749,9 +1744,6 @@ class HippoRAG2Handler(BaseRouteHandler):
         WITH s, max(score) AS score
         OPTIONAL MATCH (s)-[:IN_DOCUMENT]->(d:Document)
         WHERE d.group_id IN $group_ids
-        WITH s, score, d
-        WHERE $folder_id IS NULL OR d IS NULL
-           OR EXISTS { MATCH (d)-[:IN_FOLDER]->(f:Folder {id: $folder_id}) }
         RETURN s.id AS sentence_id, score
         ORDER BY score DESC
         LIMIT $top_k
@@ -1825,9 +1817,6 @@ class HippoRAG2Handler(BaseRouteHandler):
         WHERE node.group_id IN $group_ids
         OPTIONAL MATCH (node)-[:IN_DOCUMENT]->(d:Document)
         WHERE d.group_id IN $group_ids
-        WITH cid, node, d
-        WHERE $folder_id IS NULL OR d IS NULL
-           OR EXISTS { MATCH (d)-[:IN_FOLDER]->(f:Folder {id: $folder_id}) }
         OPTIONAL MATCH (node)-[:IN_SECTION]->(s:Section)
         OPTIONAL MATCH (node)-[:NEXT_IN_SECTION]->(next_sent:Sentence)
         OPTIONAL MATCH (prev_sent:Sentence)-[:NEXT_IN_SECTION]->(node)
@@ -2143,15 +2132,6 @@ class HippoRAG2Handler(BaseRouteHandler):
             UNWIND $community_ids AS cid
             MATCH (e:Entity)-[:BELONGS_TO]->(c:Community {id: cid})
             WHERE c.group_id IN $group_ids AND e.group_id IN $group_ids
-              AND ($folder_id IS NULL
-               OR EXISTS {
-                 MATCH (e)<-[:MENTIONS]-(s2:Sentence)
-                       -[:IN_DOCUMENT]->(d:Document)
-                       -[:IN_FOLDER]->(f:Folder)
-                 WHERE s2.group_id IN $group_ids
-                   AND d.group_id IN $group_ids
-                   AND f.id = $folder_id
-               })
             RETURN e.id AS entity_id, e.name AS entity_name, c.id AS community_id
             ORDER BY e.degree DESC
             LIMIT 15
@@ -2177,12 +2157,6 @@ class HippoRAG2Handler(BaseRouteHandler):
                 WHERE e.group_id IN $group_ids
                 MATCH (e)<-[:MENTIONS]-(s:Sentence)
                 WHERE s.group_id IN $group_ids
-                  AND ($folder_id IS NULL
-                   OR EXISTS {
-                     MATCH (s)-[:IN_DOCUMENT]->(d:Document)-[:IN_FOLDER]->(f:Folder)
-                     WHERE d.group_id IN $group_ids
-                       AND f.id = $folder_id
-                   })
                 RETURN DISTINCT s.id AS sentence_eid
                 """
                 async with self._async_neo4j._get_session() as session:
@@ -2253,9 +2227,6 @@ class HippoRAG2Handler(BaseRouteHandler):
 
         OPTIONAL MATCH (sent)-[:IN_DOCUMENT]->(doc:Document)
         WHERE doc.group_id IN $group_ids
-        WITH sent, score, doc
-        WHERE $folder_id IS NULL
-           OR (doc IS NOT NULL AND EXISTS { MATCH (doc)-[:IN_FOLDER]->(f:Folder {id: $folder_id}) })
 
         RETURN sent.id AS sentence_id,
                sent.text AS text,
