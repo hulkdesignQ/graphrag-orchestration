@@ -3253,7 +3253,7 @@ Response:"""
 
             async with semaphore:
                 try:
-                    resp = await acomplete_with_retry(llm, prompt)
+                    resp = await acomplete_with_retry(llm, prompt, temperature=0)
                     raw = resp.text.strip()
                     # Parse JSON array
                     json_match = re.search(r'\[.*\]', raw, re.DOTALL)
@@ -3436,7 +3436,7 @@ Response:"""
             reduce_prompt += f"\n\nIMPORTANT: Respond entirely in {language}."
 
         try:
-            acomplete_kwargs: Dict[str, Any] = {}
+            acomplete_kwargs: Dict[str, Any] = {"temperature": 0}
             if max_tokens is not None:
                 acomplete_kwargs["max_tokens"] = max_tokens
             reduce_resp = await acomplete_with_retry(llm, reduce_prompt, **acomplete_kwargs)

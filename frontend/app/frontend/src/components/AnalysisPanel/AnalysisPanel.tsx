@@ -189,6 +189,14 @@ export const AnalysisPanel = ({
     const renderFileViewer = () => {
         if (!activeCitation) return null;
 
+        // No blob loaded (404 or community citation) — show text-only fallback
+        if (!citationBlob && !citation) {
+            if (activeCitationObj && activeCitationObj.length > 0) {
+                return null; // renderSentenceTextPanel handles this
+            }
+            return <div style={{ padding: "16px", color: "#666" }}>{t("analysis.noPdfAvailable", "Source document not available for this citation.")}</div>;
+        }
+
         // PDF with polygon highlights → use pdf.js viewer
         if ((fileExtension === "pdf" || !fileExtension) && hasPolygonHighlights && citationBlob) {
             return (
@@ -229,8 +237,8 @@ export const AnalysisPanel = ({
     // Sentence text panel for non-PDF/non-image formats (show cited text alongside iframe)
     const renderSentenceTextPanel = () => {
         if (!activeCitationObj || activeCitationObj.length === 0) return null;
-        // Only show for formats without polygon overlays
-        if (hasPolygonHighlights && (fileExtension === "pdf" || ["png", "jpg", "jpeg", "tiff", "tif", "bmp"].includes(fileExtension))) return null;
+        // Only hide for formats WITH polygon overlays when the blob loaded successfully
+        if (citationBlob && hasPolygonHighlights && (fileExtension === "pdf" || ["png", "jpg", "jpeg", "tiff", "tif", "bmp"].includes(fileExtension))) return null;
 
         return (
             <div className={styles.sentencePanel}>
