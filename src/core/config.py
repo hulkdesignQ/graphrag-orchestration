@@ -234,6 +234,13 @@ class Settings(BaseSettings):
     # Azure Key Vault (optional — secrets auto-loaded at module import when set)
     AZURE_KEY_VAULT_URL: Optional[str] = None
 
+    # Stripe Billing (opt-in — set keys to enable self-service plan upgrades)
+    STRIPE_SECRET_KEY: Optional[str] = None
+    STRIPE_PUBLISHABLE_KEY: Optional[str] = None
+    STRIPE_WEBHOOK_SECRET: Optional[str] = None
+    STRIPE_PRICE_PRO: Optional[str] = None          # price_xxx from Stripe Dashboard
+    STRIPE_PRICE_PRO_PLUS: Optional[str] = None      # price_xxx from Stripe Dashboard
+
     # Authentication & Security
     AUTH_TYPE: str = "B2B"  # B2B (Azure AD with groups) or B2C (Azure AD B2C with oid)
     REQUIRE_AUTH: bool = True  # Fail closed. Set to False for local dev without Easy Auth.

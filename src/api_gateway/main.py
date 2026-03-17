@@ -45,6 +45,7 @@ from src.api_gateway.routers import (
 )
 from src.api_gateway.routers.admin import router as admin_router
 from src.api_gateway.routers.dashboard import router as dashboard_router
+from src.api_gateway.routers.billing import router as billing_router
 from src.worker.hybrid_v2.routers.document_lifecycle import router as document_lifecycle_router
 from src.worker.hybrid_v2.routers.maintenance import router as maintenance_router
 
@@ -590,6 +591,12 @@ app.include_router(admin_router, tags=["admin"])
 # ============================================================================
 # Personal endpoints require auth; admin endpoints require Admin role
 app.include_router(dashboard_router, tags=["dashboard"])
+
+# ============================================================================
+# Billing API - Stripe Checkout, Portal, and Webhooks
+# ============================================================================
+# Checkout/portal require auth; webhook endpoint uses Stripe signature verification
+app.include_router(billing_router, tags=["billing"])
 
 # ============================================================================
 # V3 Endpoints - Alternative DRIFT-based Implementation

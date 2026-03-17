@@ -327,6 +327,8 @@
         "plans": "Plans",
         "currentPlan": "Current Plan",
         "contactSales": "Contact Sales",
+        "upgrade": "Upgrade",
+        "manageBilling": "Manage Billing",
         "maxStorage": "{{count}} GB storage",
         "creditsPerMonth": "{{count}} credits/mo",
         "featureAdvancedAnalytics": "Advanced Analytics",

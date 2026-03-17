@@ -6,6 +6,7 @@ import styles from "./Dashboard.module.css";
 import { useLogin, getToken, isUsingAppServicesLogin } from "../../authConfig";
 import { LoginContext } from "../../loginContext";
 import { fetchDashboardAll, UserProfileResponse, UsageStats, PlanInfo } from "../../api/dashboard";
+import { fetchBillingConfig, createCheckoutSession, createPortalSession, BillingConfig } from "../../api/billing";
 import { Events } from "../../analytics";
 
 const PLAN_BADGE_CLASS: Record<string, string> = {
@@ -39,6 +40,11 @@ const Dashboard = () => {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [sessionExpired, setSessionExpired] = useState(false);
+    const [billingConfig, setBillingConfig] = useState<BillingConfig | null>(null);
+    const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null);
+
+    // B2B tiers require sales contact — never show Stripe checkout
+    const B2B_TIERS = new Set(["business", "enterprise"]);
 
     const handleReLogin = () => {
         if (isUsingAppServicesLogin) {
@@ -52,10 +58,14 @@ const Dashboard = () => {
     const loadDashboard = useCallback(async () => {
         try {
             const token = client ? await getToken(client) : undefined;
-            const data = await fetchDashboardAll(token);
+            const [data, billing] = await Promise.all([
+                fetchDashboardAll(token),
+                fetchBillingConfig(),
+            ]);
             setProfile(data.profile);
             setUsage(data.usage);
             setPlans(data.plans);
+            setBillingConfig(billing);
         } catch (e: any) {
             const msg = e.message || "Failed to load dashboard";
             if (msg.includes("401") || msg.toLowerCase().includes("expired") || msg.toLowerCase().includes("unauthorized")) {
@@ -243,6 +253,9 @@ const Dashboard = () => {
                     <div className={styles.planGrid}>
                         {Object.entries(plans.plans).map(([tier, info]) => {
                             const isCurrent = tier === plans.current_plan;
+                            const isB2B = B2B_TIERS.has(tier);
+                            const canCheckout = billingConfig?.stripe_enabled && !isB2B && tier !== "free";
+                            const isUpgrade = !isCurrent && canCheckout;
                             return (
                                 <div
                                     key={tier}
@@ -261,20 +274,55 @@ const Dashboard = () => {
                                     {info.audit_logs && <p className={styles.planCardDetail}>✅ {t("dashboard.featureAuditLogs")}</p>}
                                     <button
                                         className={styles.upgradeButton}
-                                        disabled={isCurrent}
-                                        onClick={() => {
-                                            if (!isCurrent) {
-                                                Events.planUpgradeClicked({ currentPlan: plans.current_plan, targetPlan: tier });
+                                        disabled={isCurrent || checkoutLoading === tier}
+                                        onClick={async () => {
+                                            if (isCurrent) return;
+                                            Events.planUpgradeClicked({ currentPlan: plans.current_plan, targetPlan: tier });
+                                            if (isUpgrade) {
+                                                try {
+                                                    setCheckoutLoading(tier);
+                                                    const token = client ? await getToken(client) : undefined;
+                                                    const { checkout_url } = await createCheckoutSession(tier, token);
+                                                    window.location.href = checkout_url;
+                                                } catch (err: any) {
+                                                    setError(err.message || "Failed to start checkout");
+                                                    setCheckoutLoading(null);
+                                                }
+                                            } else {
                                                 window.location.hash = "#/dashboard#plans";
                                             }
                                         }}
                                     >
-                                        {isCurrent ? t("dashboard.currentPlan") : t("dashboard.contactSales")}
+                                        {isCurrent
+                                            ? t("dashboard.currentPlan")
+                                            : checkoutLoading === tier
+                                                ? "..."
+                                                : isUpgrade
+                                                    ? t("dashboard.upgrade")
+                                                    : t("dashboard.contactSales")}
                                     </button>
                                 </div>
                             );
                         })}
                     </div>
+                    {/* Manage Billing — shown only for paid subscribers */}
+                    {billingConfig?.stripe_enabled && profile.plan !== "free" && (
+                        <button
+                            className={styles.upgradeButton}
+                            style={{ marginTop: "1rem" }}
+                            onClick={async () => {
+                                try {
+                                    const token = client ? await getToken(client) : undefined;
+                                    const { portal_url } = await createPortalSession(token);
+                                    window.location.href = portal_url;
+                                } catch (err: any) {
+                                    setError(err.message || "Failed to open billing portal");
+                                }
+                            }}
+                        >
+                            💳 {t("dashboard.manageBilling")}
+                        </button>
+                    )}
                 </div>
             )}
         </div>

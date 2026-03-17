@@ -173,6 +173,26 @@ for _legacy, _current in LEGACY_TIER_MAP.items():
 B2C_TIERS = {PlanTier.FREE, PlanTier.PRO, PlanTier.PRO_PLUS}
 B2B_TIERS = {PlanTier.BUSINESS, PlanTier.ENTERPRISE}
 
+# Stripe Price ID → PlanTier mapping (populated from env vars at import time)
+# Only B2C paid tiers are self-service; B2B tiers require sales contact.
+STRIPE_PRICE_TO_TIER: Dict[str, PlanTier] = {}
+
+def _init_stripe_prices() -> None:
+    """Populate STRIPE_PRICE_TO_TIER from env vars (called at module load)."""
+    import os
+    for env_key, tier in [
+        ("STRIPE_PRICE_PRO", PlanTier.PRO),
+        ("STRIPE_PRICE_PRO_PLUS", PlanTier.PRO_PLUS),
+    ]:
+        price_id = os.getenv(env_key)
+        if price_id:
+            STRIPE_PRICE_TO_TIER[price_id] = tier
+
+_init_stripe_prices()
+
+# Reverse mapping: PlanTier → Stripe Price ID
+TIER_TO_STRIPE_PRICE: Dict[PlanTier, str] = {v: k for k, v in STRIPE_PRICE_TO_TIER.items()}
+
 
 # ============================================================================
 # User Profile Model
