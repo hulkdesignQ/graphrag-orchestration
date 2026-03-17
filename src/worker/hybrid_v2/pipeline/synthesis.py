@@ -2088,7 +2088,8 @@ Response:"""
                 or meta.get("document_source", "")
             ).strip()
             if source:
-                name = source.rsplit("/", 1)[-1]
+                from urllib.parse import unquote
+                name = unquote(source.rsplit("/", 1)[-1])
                 name = name.rsplit(".", 1)[0]
                 name = name.replace("_", " ").replace("-", " ").strip()
                 if name:

@@ -2348,9 +2348,11 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
             merged_ids = r.get("_merged_ids", [cid])
             best_score = max(scores.get(mid, 0.0) for mid in merged_ids) if scores else 0.0
 
+            _doc_title = r.get("document_title", "Unknown")
             chunks_list.append({
                 "id": cid,
-                "source": r.get("document_title", "Unknown"),
+                "source": _doc_title,
+                "document_title": _doc_title,
                 "text": r.get("text", ""),
                 "entity": "__ppr_passage__",
                 "_entity_score": 1.0,
@@ -2360,7 +2362,9 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
                 "page_number": r.get("page"),
                 "metadata": {
                     "document_id": r.get("document_id", ""),
+                    "document_title": _doc_title,
                     "section_path": r.get("section_title", ""),
+                    "page_number": r.get("page"),
                     "index_in_doc": r.get("index_in_doc", 0),
                     "hierarchical_id": r.get("hierarchical_id", ""),
                 },
