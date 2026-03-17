@@ -45,6 +45,69 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def _create_analysis_result_folder(
+    session_factory,
+    *,
+    partition_id: str,
+    source_folder_id: str,
+    source_folder_name: str,
+    neo4j_gid: str,
+    file_count: int,
+    entity_count: int,
+    community_count: int,
+):
+    """Create an 'Analysis Results' root folder (if needed) and a result subfolder.
+
+    Mirrors the logic in api_gateway/routers/folders.py but runs synchronously
+    inside the worker process.
+    """
+    # Find or create root "Analysis Results" folder
+    root_find = """
+    MATCH (r:Folder {name: 'Analysis Results', group_id: $pid, folder_type: 'analysis_result'})
+    WHERE r.parent_folder_id IS NULL
+    RETURN r.id as root_id
+    """
+    root_create = """
+    CREATE (r:Folder {
+        id: randomUUID(), name: 'Analysis Results', group_id: $pid,
+        folder_type: 'analysis_result', parent_folder_id: null,
+        created_at: datetime(), updated_at: datetime()
+    })
+    RETURN r.id as root_id
+    """
+    with session_factory() as session:
+        rec = session.run(root_find, pid=partition_id).single()
+        if not rec:
+            rec = session.run(root_create, pid=partition_id).single()
+        root_id = rec["root_id"]
+
+    result_name = f"{source_folder_name} — {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}"
+    result_query = """
+    CREATE (f:Folder {
+        id: randomUUID(), name: $name, group_id: $pid,
+        parent_folder_id: $root_id, folder_type: 'analysis_result',
+        analysis_status: 'analyzed', analysis_group_id: $neo4j_gid,
+        source_folder_id: $source_folder_id, analyzed_at: datetime(),
+        file_count: $file_count, entity_count: $entity_count,
+        community_count: $community_count,
+        created_at: datetime(), updated_at: datetime()
+    })
+    WITH f
+    MATCH (root:Folder {id: $root_id, group_id: $pid})
+    CREATE (f)-[:SUBFOLDER_OF]->(root)
+    RETURN f.id as result_id
+    """
+    with session_factory() as session:
+        session.run(
+            result_query,
+            name=result_name, pid=partition_id, root_id=root_id,
+            neo4j_gid=neo4j_gid, source_folder_id=source_folder_id,
+            file_count=file_count, entity_count=entity_count,
+            community_count=community_count,
+        )
+    logger.info(f"analysis_result_folder_created source_folder={source_folder_name} result_name={result_name}")
+
+
 class Worker:
     """Background worker that processes jobs from Redis queue."""
     
@@ -398,6 +461,21 @@ class Worker:
                     section_count=section_count, sentence_count=sentence_count,
                     relationship_count=relationship_count,
                 )
+
+            # ── Create analysis result subfolder ──
+            try:
+                _create_analysis_result_folder(
+                    _neo4j_session,
+                    partition_id=partition_id,
+                    source_folder_id=folder_id,
+                    source_folder_name=folder_name,
+                    neo4j_gid=neo4j_gid,
+                    file_count=file_count,
+                    entity_count=entity_count,
+                    community_count=community_count,
+                )
+            except Exception as arf_err:
+                logger.warning(f"analysis_result_folder_creation_failed: {arf_err}")
 
             logger.info(
                 f"index_folder_complete folder_id={folder_id} entities={entity_count} "
