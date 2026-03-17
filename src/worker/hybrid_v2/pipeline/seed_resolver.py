@@ -330,7 +330,7 @@ async def resolve_section_entities(
         folder_filter = (
             "AND EXISTS { "
             "  MATCH (chunk)-[:PART_OF|IN_DOCUMENT]->(doc2:Document)-[:IN_FOLDER]->(f:Folder) "
-            "  WHERE f.id = $folder_id AND f.group_id IN $group_ids "
+            "  WHERE f.id = $folder_id  "
             "} "
         )
         folder_params["folder_id"] = folder_id
@@ -415,7 +415,7 @@ async def resolve_signatureblock_entities(
         folder_filter = (
             "AND EXISTS { "
             "  MATCH (s)-[:IN_DOCUMENT|PART_OF*1..2]->(doc:Document)-[:IN_FOLDER]->(f:Folder) "
-            "  WHERE f.id = $folder_id AND f.group_id IN $group_ids "
+            "  WHERE f.id = $folder_id  "
             "} "
         )
         folder_params["folder_id"] = folder_id
@@ -511,7 +511,7 @@ async def resolve_thematic_seeds(
                     "  MATCH (chunk2)-[:MENTIONS]->(e) "
                     "  WHERE (chunk2:Sentence OR chunk2:Chunk OR chunk2:`__Node__`) "
                     "  MATCH (chunk2)-[:IN_DOCUMENT]->(doc2:Document)-[:IN_FOLDER]->(f:Folder) "
-                    "  WHERE f.id = $folder_id AND f.group_id IN $group_ids "
+                    "  WHERE f.id = $folder_id  "
                     "} "
                 )
                 folder_params["folder_id"] = folder_id

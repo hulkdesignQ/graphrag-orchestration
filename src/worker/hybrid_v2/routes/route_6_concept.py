@@ -983,7 +983,7 @@ class ConceptSearchHandler(BaseRouteHandler):
             "WITH s, doc, c_id\n"
             "        WHERE $folder_id IS NULL OR doc IS NULL"
             " OR EXISTS { MATCH (doc)-[:IN_FOLDER]->(f:Folder)"
-            " WHERE f.id = $folder_id AND f.group_id IN $group_ids }\n"
+            " WHERE f.id = $folder_id  }\n"
         )
 
         # Fetch entity-linked sentences via Community→Entity→MENTIONS→Sentence
@@ -1342,7 +1342,7 @@ class ConceptSearchHandler(BaseRouteHandler):
                   -[:IN_FOLDER]->(f:Folder {id: $folder_id})
             WHERE tc.group_id IN $group_ids
               AND d.group_id IN $group_ids
-              AND f.group_id IN $group_ids
+              
             RETURN DISTINCT cid
             """
             try:
@@ -1549,7 +1549,7 @@ class ConceptSearchHandler(BaseRouteHandler):
             "        WITH sent, score, doc, sec, prev_sent, next_sent\n"
             "        WHERE $folder_id IS NULL OR doc IS NULL"
             " OR EXISTS { MATCH (doc)-[:IN_FOLDER]->(f:Folder)"
-            " WHERE f.id = $folder_id AND f.group_id IN $group_ids }\n"
+            " WHERE f.id = $folder_id  }\n"
         )
 
         # 2. Vector search on Sentence nodes + collect parent context.
@@ -1755,7 +1755,7 @@ class ConceptSearchHandler(BaseRouteHandler):
             " prev_sent, next_sent\n"
             "        WHERE $folder_id IS NULL OR doc IS NULL"
             " OR EXISTS { MATCH (doc)-[:IN_FOLDER]->(f:Folder)"
-            " WHERE f.id = $folder_id AND f.group_id IN $group_ids }\n"
+            " WHERE f.id = $folder_id  }\n"
         )
 
         cypher = f"""
@@ -1927,7 +1927,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         WITH s, score, doc
         WHERE $folder_id IS NULL OR doc IS NULL
            OR EXISTS { MATCH (doc)-[:IN_FOLDER]->(f:Folder)
-                       WHERE f.id = $folder_id AND f.group_id IN $group_ids }
+                       WHERE f.id = $folder_id  }
 
         RETURN s.title AS title,
                s.summary AS summary,

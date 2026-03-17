@@ -375,7 +375,7 @@ class CommunityMatcher:
               -[:IN_FOLDER]->(f:Folder {id: $folder_id})
         WHERE tc.group_id IN $group_ids
           AND d.group_id IN $group_ids
-          AND f.group_id IN $group_ids
+          
         RETURN DISTINCT cid
         """
         try:

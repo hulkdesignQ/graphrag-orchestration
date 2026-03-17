@@ -687,7 +687,7 @@ class BaseRouteHandler:
             if folder_id:
                 folder_filter = (
                     "\n            WITH node, rrfScore, hasBM25, hasVector, d, top_k"
-                    "\n            WHERE d IS NULL OR EXISTS { MATCH (d)-[:IN_FOLDER]->(f:Folder {id: $folder_id}) WHERE f.group_id IN $group_ids }"
+                    "\n            WHERE d IS NULL OR EXISTS { MATCH (d)-[:IN_FOLDER]->(f:Folder {id: $folder_id}) }"
                 )
 
             cypher = f"""
@@ -842,7 +842,7 @@ class BaseRouteHandler:
             # Build folder filter clause
             folder_filter = ""
             if folder_id:
-                folder_filter = "AND EXISTS { MATCH (d)-[:IN_FOLDER]->(f:Folder {id: $folder_id}) WHERE f.group_id IN $group_ids }"
+                folder_filter = "AND EXISTS { MATCH (d)-[:IN_FOLDER]->(f:Folder {id: $folder_id}) }"
 
             cypher = f"""
             CALL db.index.fulltext.queryNodes('sentence_fulltext', $search_query)
@@ -957,7 +957,7 @@ class BaseRouteHandler:
             # Build folder filter clause
             folder_filter = ""
             if folder_id:
-                folder_filter = "AND EXISTS { MATCH (d)-[:IN_FOLDER]->(f:Folder {id: $folder_id}) WHERE f.group_id IN $group_ids }"
+                folder_filter = "AND EXISTS { MATCH (d)-[:IN_FOLDER]->(f:Folder {id: $folder_id}) }"
             
             cypher = f"""
             CYPHER 25

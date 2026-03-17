@@ -480,7 +480,7 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
                         WHERE d.group_id IN $group_ids
                         WITH s, d
                         WHERE $folder_id IS NULL OR d IS NULL
-                           OR EXISTS { MATCH (d)-[:IN_FOLDER]->(f:Folder) WHERE f.id = $folder_id AND f.group_id IN $group_ids }
+                           OR EXISTS { MATCH (d)-[:IN_FOLDER]->(f:Folder {id: $folder_id}) }
                         RETURN DISTINCT s.text AS text, s.sent_index AS idx
                         ORDER BY idx
                         LIMIT 20
@@ -1398,7 +1398,10 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
                     )
                     _all_docs = await _doc_result.data()
 
-                # Identify under-represented docs
+                # Supplement under-represented docs with query-relevant
+                # chunks using cosine similarity. Only targets docs below
+                # min_chunks_per_doc to avoid adding noise to docs that
+                # already have good coverage.
                 _under_rep = [
                     (d["doc_id"], d["total"])
                     for d in _all_docs
@@ -1407,8 +1410,6 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
                 ]
 
                 if _under_rep:
-                    # Fetch query-relevant sentences using cosine similarity
-                    # instead of evenly-spaced selection.
                     _supplement_ids: List[str] = []
                     _need_cypher = """
                     MATCH (s:Sentence)
@@ -1869,7 +1870,7 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
           AND d.group_id IN $group_ids
           AND e.type IN $entity_types
           AND ($folder_id IS NULL
-               OR EXISTS { MATCH (d)-[:IN_FOLDER]->(f:Folder) WHERE f.id = $folder_id AND f.group_id IN $group_ids })
+               OR EXISTS { MATCH (d)-[:IN_FOLDER]->(f:Folder {id: $folder_id}) })
         WITH e, d, count(tc) AS doc_mentions,
              collect(tc.text)[0] AS doc_sample_chunk
         OPTIONAL MATCH (e)-[r:RELATED_TO]-(e2:Entity)
@@ -2150,7 +2151,7 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
         WHERE d.group_id IN $group_ids
         WITH s, score, d
         WHERE $folder_id IS NULL OR d IS NULL
-           OR EXISTS { MATCH (d)-[:IN_FOLDER]->(f:Folder) WHERE f.id = $folder_id AND f.group_id IN $group_ids }
+           OR EXISTS { MATCH (d)-[:IN_FOLDER]->(f:Folder {id: $folder_id}) }
         RETURN s.id AS sentence_id, score
         ORDER BY score DESC
         LIMIT $top_k
@@ -2226,7 +2227,7 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
         WHERE d.group_id IN $group_ids
         WITH cid, node, d
         WHERE $folder_id IS NULL OR d IS NULL
-           OR EXISTS { MATCH (d)-[:IN_FOLDER]->(f:Folder) WHERE f.id = $folder_id AND f.group_id IN $group_ids }
+           OR EXISTS { MATCH (d)-[:IN_FOLDER]->(f:Folder {id: $folder_id}) }
         OPTIONAL MATCH (node)-[:IN_SECTION]->(s:Section)
         OPTIONAL MATCH (node)-[:NEXT_IN_SECTION]->(next_sent:Sentence)
         OPTIONAL MATCH (prev_sent:Sentence)-[:NEXT_IN_SECTION]->(node)
@@ -2536,7 +2537,7 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
                        -[:IN_FOLDER]->(f:Folder)
                  WHERE s2.group_id IN $group_ids
                    AND d.group_id IN $group_ids
-                   AND f.id = $folder_id AND f.group_id IN $group_ids
+                   AND f.id = $folder_id
                })
             RETURN e.id AS entity_id, e.name AS entity_name, c.id AS community_id
             ORDER BY e.degree DESC
@@ -2569,7 +2570,7 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
                    OR EXISTS {
                      MATCH (s)-[:IN_DOCUMENT]->(d:Document)-[:IN_FOLDER]->(f:Folder)
                      WHERE d.group_id IN $group_ids
-                       AND f.id = $folder_id AND f.group_id IN $group_ids
+                       AND f.id = $folder_id
                    })
                 RETURN DISTINCT cid AS community_id, s.id AS sentence_eid
                 """
@@ -2664,7 +2665,7 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
         WHERE doc.group_id IN $group_ids
         WITH sent, score, doc
         WHERE $folder_id IS NULL
-           OR (doc IS NOT NULL AND EXISTS { MATCH (doc)-[:IN_FOLDER]->(f:Folder) WHERE f.id = $folder_id AND f.group_id IN $group_ids })
+           OR (doc IS NOT NULL AND EXISTS { MATCH (doc)-[:IN_FOLDER]->(f:Folder {id: $folder_id}) })
 
         RETURN sent.id AS sentence_id,
                sent.text AS text,
@@ -3132,6 +3133,7 @@ Instructions:
 - Cast a WIDE net: extract any fact, detail, provision, data point, relationship, or reference that relates to the question — even tangentially.
 - Think about SYNONYMS and RELATED CONCEPTS: the question may use different terminology than the document. If the document discusses the same topic using different words, extract it.
 - Include exact numeric values, dates, names, amounts, and conditions VERBATIM.
+- Extract EACH distinct provision, condition, or requirement as a SEPARATE fact — do not merge multiple provisions into one fact.
 - Even single-sentence mentions count — do NOT skip brief references.
 - When in doubt, INCLUDE the fact. Over-extraction is better than missing relevant content.
 - Return a JSON array of objects. Each object has:
@@ -3163,6 +3165,7 @@ Instructions:
 6. Be CONCISE — state each fact once, move on.
 7. RESPECT ALL QUALIFIERS from the question.
 8. Include RELATED concepts found in the extractions even if the terminology differs from the question.
+9. COVERAGE: Every document that has relevant extracted facts MUST appear in your response. Do not skip documents.
 
 Respond using ONLY bullet points — no headers, no preamble, no summary paragraph:
 
