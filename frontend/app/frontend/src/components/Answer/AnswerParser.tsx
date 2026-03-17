@@ -239,6 +239,16 @@ const renderCitation = (detail: CitationDetail) => {
     }
 
     const path = getCitationFilePath(detail.reference, detail.documentUrl);
+    // Non-file citations (communities, graph summaries) get empty path — render as non-clickable badge
+    if (!path) {
+        return renderToStaticMarkup(
+            <span className="citationBadgeContainer">
+                <span className="supContainer" title={detail.reference}>
+                    {supElement}
+                </span>
+            </span>
+        );
+    }
     return renderToStaticMarkup(
         <span className="citationBadgeContainer">
             <a className="supContainer" title={detail.reference} href="#" data-citation-path={path} data-citation-key={detail.citationKey || ""}>

@@ -145,8 +145,13 @@ export const AnalysisPanel = ({
     const fetchCitation = async () => {
         const token = client ? await getToken(client) : undefined;
         if (activeCitation) {
-            // Strip hash from URL for fetching
+            // Skip fetch for non-file citations (empty path from getCitationFilePath)
             const urlNoHash = activeCitation.split("#")[0];
+            if (!urlNoHash || urlNoHash === "") {
+                setCitationBlob("");
+                setCitation("");
+                return;
+            }
             const originalHash = activeCitation.includes("#") ? activeCitation.split("#")[1] : "";
             const response = await fetchWithAuthRetry(urlNoHash, {
                 method: "GET",
