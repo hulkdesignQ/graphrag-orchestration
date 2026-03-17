@@ -1013,6 +1013,14 @@ class HippoRAG2Handler(BaseRouteHandler):
         if isinstance(_parallel_results[0], BaseException):
             logger.warning("route7_chunk_fetch_failed", error=str(_parallel_results[0]))
 
+        logger.info(
+            "route7_pre_fetched_chunks",
+            num_ids_sent=len(top_sentence_ids),
+            num_chunks_received=len(pre_fetched_chunks),
+            folder_id=folder_id,
+            group_ids=self.group_ids,
+        )
+
         # DEBUG: dump all fetched chunk texts for PPR output analysis
         if pre_fetched_chunks:
             _debug_texts = []
@@ -1837,6 +1845,14 @@ class HippoRAG2Handler(BaseRouteHandler):
 
         folder_id = folder_id if folder_id is not None else self.folder_id
 
+        logger.info(
+            "route7_fetch_sentences_params",
+            num_ids=len(sentence_ids),
+            group_ids=group_ids,
+            folder_id=folder_id,
+            sample_ids=sentence_ids[:3] if sentence_ids else [],
+        )
+
         try:
             def _run():
                 with retry_session(driver, read_only=True) as session:
@@ -1851,6 +1867,13 @@ class HippoRAG2Handler(BaseRouteHandler):
         except Exception as e:
             logger.warning("route7_fetch_chunks_failed", error=str(e))
             return []
+
+        logger.info(
+            "route7_fetch_sentences_result",
+            num_input=len(sentence_ids),
+            num_output=len(results),
+            folder_id=folder_id,
+        )
 
         scores = ppr_scores_map or {}
 
