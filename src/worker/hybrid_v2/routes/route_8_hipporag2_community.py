@@ -1407,15 +1407,24 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
                 ]
 
                 if _under_rep:
-                    # Fetch evenly-spaced sentences from each under-represented doc
+                    # Fetch query-relevant sentences using cosine similarity
+                    # instead of evenly-spaced selection.
                     _supplement_ids: List[str] = []
                     _need_cypher = """
                     MATCH (s:Sentence)
                     WHERE s.document_id = $doc_id
                       AND s.group_id IN $group_ids
-                    RETURN s.id AS sid, s.index_in_doc AS idx
+                    RETURN s.id AS sid, s.index_in_doc AS idx,
+                           s.sentence_embedding AS emb
                     ORDER BY s.index_in_doc
                     """
+
+                    def _cosine(a, b):
+                        dot = sum(x * y for x, y in zip(a, b))
+                        na = sum(x * x for x in a) ** 0.5
+                        nb = sum(x * x for x in b) ** 0.5
+                        return dot / (na * nb) if na and nb else 0.0
+
                     async with self._async_neo4j._get_session() as session:
                         for doc_id, total in _under_rep:
                             _have = _doc_counts.get(doc_id, 0)
@@ -1426,15 +1435,19 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
                                 group_ids=self.group_ids,
                             )
                             _rows = await _res.data()
-                            # Filter out already-fetched
                             _available = [
                                 r for r in _rows
                                 if r["sid"] not in _existing_ids
                             ]
                             if _available:
-                                # Evenly space picks across the document
-                                _step = max(1, len(_available) // _need)
-                                _picks = _available[::_step][:_need]
+                                for row in _available:
+                                    emb = row.get("emb")
+                                    row["_sim"] = (
+                                        _cosine(query_embedding, emb)
+                                        if emb else 0.0
+                                    )
+                                _available.sort(key=lambda r: -r["_sim"])
+                                _picks = _available[:_need]
                                 _supplement_ids.extend(
                                     r["sid"] for r in _picks
                                 )
@@ -3341,14 +3354,14 @@ Response:"""
         map_results = await asyncio.gather(*map_tasks)
 
         # Collect all facts with document attribution
-        all_facts = []
+        all_facts_raw: List[Dict[str, Any]] = []
         total_extracted = 0
         for mr in map_results:
             for fact in mr["facts"]:
                 if isinstance(fact, dict) and fact.get("fact"):
                     fact["_doc_title"] = mr["doc_title"]
                     fact["_doc_id"] = mr["doc_id"]
-                    all_facts.append(fact)
+                    all_facts_raw.append(fact)
                     total_extracted += 1
 
         logger.info(
@@ -3357,6 +3370,58 @@ Response:"""
             total_facts_extracted=total_extracted,
             facts_per_doc={mr["doc_title"][:40]: len(mr["facts"]) for mr in map_results},
         )
+
+        # ── Dedup + cap facts per document title ─────────────────────
+        # Duplicate doc copies (same title, different IDs) produce
+        # redundant facts that overwhelm the REDUCE step.
+        # Cap keeps the most query-relevant facts (by keyword overlap).
+        max_facts_per_doc = 15
+        title_groups: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+        for fact in all_facts_raw:
+            title_groups[fact["_doc_title"]].append(fact)
+
+        # Build query keywords for relevance ranking
+        _q_words_cap = set(
+            w for w in re.findall(r'[a-z]{3,}', query.lower())
+        ) - {"the", "and", "for", "are", "all", "what", "which",
+             "from", "this", "that", "with", "how", "across",
+             "documents", "document", "list", "summarize", "describe"}
+
+        all_facts: List[Dict[str, Any]] = []
+        for title, facts_list in title_groups.items():
+            seen_keys: set = set()
+            unique_facts: List[Dict[str, Any]] = []
+            for f in facts_list:
+                key = f["fact"].lower().strip()[:60]
+                if key in seen_keys:
+                    continue
+                seen_keys.add(key)
+                unique_facts.append(f)
+            if len(unique_facts) > max_facts_per_doc:
+                # Rank by keyword overlap with query before capping
+                for f in unique_facts:
+                    f_words = set(re.findall(r'[a-z]{3,}', f["fact"].lower()))
+                    f["_relevance"] = len(f_words & _q_words_cap)
+                unique_facts.sort(key=lambda f: -f.get("_relevance", 0))
+                capped = unique_facts[:max_facts_per_doc]
+                logger.info(
+                    "map_reduce_facts_capped",
+                    doc_title=title[:40],
+                    original=len(facts_list),
+                    unique=len(unique_facts),
+                    capped=len(capped),
+                )
+            else:
+                capped = unique_facts
+            all_facts.extend(capped)
+        if len(all_facts) < total_extracted:
+            logger.info(
+                "map_reduce_dedup_summary",
+                before=total_extracted,
+                after=len(all_facts),
+                per_doc={t[:40]: len([f for f in all_facts if f["_doc_title"] == t])
+                         for t in title_groups},
+            )
 
         # ── REDUCE phase: merge + deduplicate ────────────────────────
         if not all_facts:
