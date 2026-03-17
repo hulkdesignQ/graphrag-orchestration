@@ -133,3 +133,68 @@ You are a completeness checker. Identify key points with importance ≥ 85 that 
 
 **Missing items (or ALL_COMPLETE)**:
 """
+
+
+# ─────────────────────────────────────────────────────────────────
+# MAP-REDUCE SYNTHESIS PROMPTS
+# ─────────────────────────────────────────────────────────────────
+# MAP phase: per-community focused mini-answer from key points.
+# REDUCE phase: merge all mini-answers + sentence evidence into final answer.
+# Enabled by ROUTE6_MAP_REDUCE_SYNTHESIS=1 (default ON).
+
+COMMUNITY_MAP_SYNTHESIS_PROMPT = """\
+You are a document analysis assistant. Write a focused response for ONE thematic area.
+
+**Query**: {query}
+
+**Theme**: {community_title}
+
+**Key Points** (extracted from source documents for this theme):
+{community_key_points}
+
+**Instructions**:
+1. Write a response covering ALL key points listed above. Every key point with importance ≥ 70 MUST appear.
+2. Preserve specific details: names, amounts, dates, conditions, legal terms, section references.
+3. Do not add information beyond what the key points provide.
+4. Be comprehensive but concise — a well-structured paragraph or short bullet list.
+5. Do not mention methodology or how information was retrieved.
+
+**Response**:
+"""
+
+REDUCE_SYNTHESIS_PROMPT = """\
+You are a document analysis assistant. Merge thematic responses into a final comprehensive answer.
+
+**Query**: {query}
+
+**Thematic Responses** (each covers a different topic area — include ALL items from ALL responses):
+{community_responses}
+
+**Document Structure** (section headings found in source documents):
+{section_headings}
+
+**Document Evidence** (additional passages from source documents, labelled [Document > Section Header]):
+{sentence_evidence}
+
+**Rules**:
+1. Include ALL items from ALL thematic responses. Do NOT drop any item. Each thematic response was independently verified for relevance — trust their content.
+2. Use document evidence to add specific details, quotes, or facts not already covered by thematic responses.
+3. Organize findings under clear headings grouped by theme.
+4. Deduplicate: if the same item appears in multiple responses, include it once with the most detail.
+5. Keep specific details: names, amounts, dates, conditions, section references.
+6. Response length — choose based on query type:
+   - R6-VIII: For queries asking for ALL, EVERY, COMPLETE LIST, or ENUMERATE: list EVERY item found across ALL documents without truncation. Completeness is mandatory — do not summarize or drop items.
+   - For narrative/summary queries: 3-5 focused paragraphs, prioritizing the most important findings.
+   - PRECISION OVER PADDING: When the query qualifies items with criteria such as "explicitly described as X", "specifically named", "required Y" — only include items where the source evidence EXPLICITLY uses that characterisation. Do not broaden the criteria to include tangentially related items.
+   - EXTRACTION FIDELITY: Points with importance ≥ 70 are likely relevant. Apply the category test rigorously but interpret each category broadly enough to include all substantively matching provisions.
+7. Cross-document comparison (R6-IX) — for queries asking which document has the latest/earliest/largest/smallest value:
+   a. Extract the relevant value explicitly from EACH document.
+   b. List: "[Document name]: [value found]" for every document.
+   c. Then state which is largest/latest/most based only on the extracted values.
+8. Do not mention methodology, sources, or how the evidence was retrieved.
+9. REFUSE for specific lookups where the exact data point is absent:
+   - If no thematic responses contain relevant information, say: "The requested information was not found in the available documents."
+10. DOCUMENT COVERAGE — For queries about clauses, provisions, or features across multiple documents: include findings from EVERY document represented in the thematic responses.
+
+**Answer**:
+"""

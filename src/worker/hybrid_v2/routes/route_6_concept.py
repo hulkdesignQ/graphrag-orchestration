@@ -40,6 +40,8 @@ from .route_6_prompts import (
     CONCEPT_SYNTHESIS_PROMPT,
     COMMUNITY_EXTRACT_PROMPT,
     SYNTHESIS_COMPLETENESS_CHECK_PROMPT,
+    COMMUNITY_MAP_SYNTHESIS_PROMPT,
+    REDUCE_SYNTHESIS_PROMPT,
 )
 from ..services.neo4j_retry import retry_session
 
@@ -415,13 +417,23 @@ class ConceptSearchHandler(BaseRouteHandler):
             )
 
         # ================================================================
-        # Step 3: Single LLM synthesis (communities + sentences)
+        # Step 3: LLM synthesis (MAP-REDUCE or single-call)
         # ================================================================
         t0 = time.perf_counter()
-        response_text = await self._synthesize(
-            query, community_data, section_headings, sentence_evidence,
-            language=language, folder_id=folder_id,
-        )
+        map_reduce = os.getenv(
+            "ROUTE6_MAP_REDUCE_SYNTHESIS", "0"
+        ).strip().lower() in {"1", "true", "yes"}
+
+        if map_reduce:
+            response_text = await self._map_reduce_synthesize(
+                query, community_data, section_headings, sentence_evidence,
+                language=language, folder_id=folder_id,
+            )
+        else:
+            response_text = await self._synthesize(
+                query, community_data, section_headings, sentence_evidence,
+                language=language, folder_id=folder_id,
+            )
         timings_ms["step_3_synthesis_ms"] = int(
             (time.perf_counter() - t0) * 1000
         )
@@ -461,6 +473,7 @@ class ConceptSearchHandler(BaseRouteHandler):
             "entity_expansion_enabled": expansion_enabled,
             "entity_expansion_count": expansion_count,
             "community_extract_enabled": os.getenv("ROUTE6_COMMUNITY_EXTRACT", "1").strip().lower() in {"1", "true", "yes"},
+            "map_reduce_synthesis": map_reduce,
             "dynamic_community_enabled": dynamic_community,
             "community_children_enabled": community_children_enabled,
             "community_children_count": len([c for c in community_data if c.get("_is_child")]),
@@ -636,6 +649,180 @@ class ConceptSearchHandler(BaseRouteHandler):
                 error_type=type(e).__name__,
             )
             return answer  # graceful fallback — return original answer
+
+    # ==================================================================
+    # MAP-REDUCE Synthesis (per-community MAP → merge REDUCE)
+    # ==================================================================
+
+    async def _map_reduce_synthesize(
+        self,
+        query: str,
+        communities: List[Dict[str, Any]],
+        section_headings: List[Dict[str, Any]],
+        sentence_evidence: List[Dict[str, Any]],
+        language: Optional[str] = None,
+        folder_id: Optional[str] = None,
+    ) -> str:
+        """MAP-REDUCE synthesis: per-community MAP → merge REDUCE.
+
+        MAP phase: For each community's key points, generate a focused
+        mini-answer. Each MAP call sees only 3-5 points → can't
+        non-deterministically drop items.
+
+        REDUCE phase: Merge all community mini-answers + sentence evidence
+        + section headings into the final organized response.
+
+        Falls back to single-call synthesis when extraction is disabled
+        or produces no structured points.
+        """
+        community_extract = os.getenv(
+            "ROUTE6_COMMUNITY_EXTRACT", "1"
+        ).strip().lower() in {"1", "true", "yes"}
+
+        if community_extract and communities:
+            summaries_text, points = await self._extract_community_key_points(
+                query, communities, folder_id=folder_id,
+            )
+        else:
+            return await self._synthesize(
+                query, communities, section_headings, sentence_evidence,
+                language=language, folder_id=folder_id,
+            )
+
+        if not points or "(No thematic context" in summaries_text:
+            return await self._synthesize(
+                query, communities, section_headings, sentence_evidence,
+                language=language, folder_id=folder_id,
+            )
+
+        # Group key points by community
+        by_community: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+        for p in points:
+            by_community[p.get("community", "General")].append(p)
+
+        logger.info(
+            "route6_map_reduce_synthesis_start",
+            num_communities=len(by_community),
+            total_points=len(points),
+            points_per_community={k: len(v) for k, v in by_community.items()},
+        )
+
+        # MAP phase: parallel per-community synthesis
+        max_concurrent = int(os.getenv("ROUTE6_MAP_SYNTHESIS_CONCURRENCY", "12"))
+        semaphore = asyncio.Semaphore(max_concurrent)
+
+        async def _map_one(community_title: str, community_points: List[Dict[str, Any]]) -> str:
+            kp_lines = []
+            for p in community_points:
+                desc = p.get("description", "")
+                score = p.get("score", 0)
+                kp_lines.append(f"- (importance: {score}) {desc}")
+            kp_text = "\n".join(kp_lines)
+
+            prompt = COMMUNITY_MAP_SYNTHESIS_PROMPT.format(
+                query=query,
+                community_title=community_title,
+                community_key_points=kp_text,
+            )
+            async with semaphore:
+                try:
+                    resp = await acomplete_with_retry(self.llm, prompt)
+                    return resp.text.strip()
+                except Exception as e:
+                    logger.warning(
+                        "route6_map_synthesis_one_failed",
+                        community=community_title,
+                        error=str(e),
+                    )
+                    return kp_text  # fallback: raw key points
+
+        t0 = time.perf_counter()
+        community_items = list(by_community.items())
+        tasks = [_map_one(title, pts) for title, pts in community_items]
+        map_results = await asyncio.gather(*tasks)
+        map_ms = int((time.perf_counter() - t0) * 1000)
+
+        # Format community responses for REDUCE
+        community_response_blocks = []
+        for (title, _), mini_answer in zip(community_items, map_results):
+            community_response_blocks.append(f"--- {title} ---\n{mini_answer}")
+        community_text = "\n\n".join(community_response_blocks)
+
+        # Format section headings
+        if section_headings:
+            heading_lines = []
+            for i, sec in enumerate(section_headings, 1):
+                title = sec.get("title", f"Section {i}")
+                doc_title = sec.get("document_title", "")
+                path_key = sec.get("path_key", "").strip()
+                parts = []
+                if doc_title:
+                    parts.append(f"[{doc_title}]")
+                if path_key and path_key != title:
+                    parts.append(path_key)
+                else:
+                    parts.append(title)
+                heading_lines.append(f"- {' '.join(parts)}")
+            headings_text = "\n".join(heading_lines)
+        else:
+            headings_text = "(No document structure available)"
+
+        # Format sentence evidence
+        if sentence_evidence:
+            evidence_lines = []
+            for i, ev in enumerate(sentence_evidence, 1):
+                doc = ev.get("document_title") or "Unknown"
+                section = ev.get("section_path") or ""
+                text = ev.get("text") or ""
+                if section:
+                    evidence_lines.append(f"{i}. [{doc} > {section}] {text}")
+                else:
+                    evidence_lines.append(f"{i}. [{doc}] {text}")
+            evidence_text = "\n".join(evidence_lines)
+        else:
+            evidence_text = "(No additional document evidence)"
+
+        # REDUCE: merge community responses + evidence → final answer
+        reduce_prompt = REDUCE_SYNTHESIS_PROMPT.format(
+            query=query,
+            community_responses=community_text,
+            section_headings=headings_text,
+            sentence_evidence=evidence_text,
+        )
+
+        if language:
+            reduce_prompt += f"\n\nIMPORTANT: Respond entirely in {language}."
+
+        try:
+            t1 = time.perf_counter()
+            response = await acomplete_with_retry(self.llm, reduce_prompt)
+            answer = response.text.strip()
+            reduce_ms = int((time.perf_counter() - t1) * 1000)
+        except Exception as e:
+            logger.error("route6_reduce_synthesis_failed", error=str(e))
+            return (
+                "An error occurred while synthesizing the response. "
+                f"Please try again. (Error: {type(e).__name__})"
+            )
+
+        logger.info(
+            "route6_map_reduce_synthesis_done",
+            map_calls=len(community_items),
+            map_ms=map_ms,
+            reduce_ms=reduce_ms,
+            total_ms=map_ms + reduce_ms,
+            answer_length=len(answer),
+        )
+
+        # Completeness check (same as single-call)
+        completeness_check = os.getenv(
+            "ROUTE6_COMPLETENESS_CHECK", "1"
+        ).strip().lower() in {"1", "true", "yes"}
+
+        if completeness_check and summaries_text and "(No thematic context" not in summaries_text:
+            answer = await self._completeness_check(query, summaries_text, answer)
+
+        return answer
 
     # ==================================================================
     # Feature 1: Dynamic Community Selection (LLM-rated)
@@ -867,7 +1054,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         query: str,
         communities: List[Dict[str, Any]],
         folder_id: Optional[str] = None,
-    ) -> str:
+    ) -> Tuple[str, List[Dict[str, Any]]]:
         """Extract query-relevant key points from community SOURCE TEXT.
 
         True MAP pattern (upstream-aligned):
@@ -880,6 +1067,10 @@ class ConceptSearchHandler(BaseRouteHandler):
         4. Aggregate, deduplicate, sort, and filter all key points.
 
         Falls back to raw summaries if source fetch fails.
+
+        Returns:
+            Tuple of (formatted_text, structured_points). structured_points is the
+            deduplicated/filtered list of dicts (description, score, community).
         """
         extract_top_k = int(os.getenv("ROUTE6_EXTRACT_TOP_K", "12"))
         extract_min_rating = int(os.getenv("ROUTE6_EXTRACT_MIN_RATING", "1"))
@@ -925,7 +1116,7 @@ class ConceptSearchHandler(BaseRouteHandler):
                     community_texts.append((c, f"--- Community: {title} ---\n  {summary}"))
 
         if not community_texts and not summary_communities:
-            return "(No thematic context available)"
+            return "(No thematic context available)", []
 
         logger.info(
             "route6_extract_source_stats",
@@ -980,7 +1171,7 @@ class ConceptSearchHandler(BaseRouteHandler):
 
         if not all_points:
             logger.info("route6_community_extract_no_points")
-            return self._format_raw_summaries(communities)
+            return self._format_raw_summaries(communities), []
 
         # Deduplicate by description similarity (exact match on first 60 chars)
         seen_descs: set = set()
@@ -996,7 +1187,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         min_score = int(os.getenv("ROUTE6_EXTRACT_MIN_SCORE", "20"))
         points = [p for p in unique_points if p.get("score", 0) >= min_score]
         if not points:
-            return self._format_raw_summaries(communities)
+            return self._format_raw_summaries(communities), []
 
         # Cap key points to keep synthesis prompt tractable (reduces latency)
         max_points = int(os.getenv("ROUTE6_MAX_EXTRACT_POINTS", "30"))
@@ -1034,7 +1225,7 @@ class ConceptSearchHandler(BaseRouteHandler):
             summary_appended=len(all_summary_communities),
             top_score=points[0].get("score", 0) if points else 0,
         )
-        return "\n".join(formatted)
+        return "\n".join(formatted), points
 
     @staticmethod
     def _format_raw_summaries(communities: List[Dict[str, Any]]) -> str:
@@ -1212,7 +1403,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         ).strip().lower() in {"1", "true", "yes"}
 
         if community_extract and communities:
-            summaries_text = await self._extract_community_key_points(
+            summaries_text, _ = await self._extract_community_key_points(
                 query, communities, folder_id=folder_id,
             )
         elif communities:
