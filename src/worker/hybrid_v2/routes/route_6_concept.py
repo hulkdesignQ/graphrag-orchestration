@@ -568,11 +568,11 @@ class ConceptSearchHandler(BaseRouteHandler):
         key_points: str,
         answer: str,
     ) -> str:
-        """Second LLM pass: verify all high-importance key points are in the answer.
+        """Second LLM pass: identify high-importance key points missing from the answer.
 
-        If any key points with importance ≥ 70 are missing, the LLM integrates
-        them into the answer. If the answer is already complete, it's returned
-        unchanged.
+        If any key points with importance ≥ 70 are missing, their content is
+        appended to the answer as additional details. The original answer is
+        never rewritten — only additive.
 
         Args:
             query: Original user query.
@@ -580,7 +580,7 @@ class ConceptSearchHandler(BaseRouteHandler):
             answer: Initial synthesis answer.
 
         Returns:
-            Patched answer (or original if already complete).
+            Original answer with missing items appended (or unchanged if complete).
         """
         t0 = time.perf_counter()
         prompt = SYNTHESIS_COMPLETENESS_CHECK_PROMPT.format(
@@ -591,24 +591,33 @@ class ConceptSearchHandler(BaseRouteHandler):
 
         try:
             response = await acomplete_with_retry(self.llm, prompt)
-            patched = response.text.strip()
+            result = response.text.strip()
             elapsed_ms = int((time.perf_counter() - t0) * 1000)
 
-            # If the LLM returned something meaningful, use it
-            if patched and len(patched) > 50:
-                changed = patched != answer
+            if "ALL_COMPLETE" in result and len(result) < 50:
                 logger.info(
                     "route6_completeness_check_done",
-                    changed=changed,
+                    changed=False,
+                    elapsed_ms=elapsed_ms,
+                )
+                return answer
+
+            # Append missing items to the original answer
+            if result and len(result) > 10:
+                patched = answer.rstrip() + "\n\n" + result.strip()
+                logger.info(
+                    "route6_completeness_check_done",
+                    changed=True,
                     original_len=len(answer),
+                    addendum_len=len(result),
                     patched_len=len(patched),
                     elapsed_ms=elapsed_ms,
                 )
                 return patched
             else:
-                logger.warning(
-                    "route6_completeness_check_empty",
-                    response_len=len(patched),
+                logger.info(
+                    "route6_completeness_check_done",
+                    changed=False,
                     elapsed_ms=elapsed_ms,
                 )
                 return answer

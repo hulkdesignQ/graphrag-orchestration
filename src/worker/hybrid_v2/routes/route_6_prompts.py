@@ -111,7 +111,7 @@ Respond with ONLY a JSON object:
 #         missing items integrated)
 
 SYNTHESIS_COMPLETENESS_CHECK_PROMPT = """\
-You are a completeness checker. Review the answer below and ensure it covers ALL key points with importance ≥ 70.
+You are a completeness checker. Identify key points with importance ≥ 85 that are genuinely missing from the answer.
 
 **Query**: {query}
 
@@ -122,12 +122,14 @@ You are a completeness checker. Review the answer below and ensure it covers ALL
 {answer}
 
 **Instructions**:
-1. For each key point with importance ≥ 70, check if its specific content is represented in the answer.
+1. For each key point with importance ≥ 85, check if its specific fact/detail appears anywhere in the answer.
 2. A key point is "represented" if the answer mentions the same fact, even with different wording.
-3. If ALL key points with importance ≥ 70 are represented, output the answer UNCHANGED — do not edit, reformat, or reorganize it.
-4. If any key points with importance ≥ 70 are NOT represented, integrate the missing items into the answer at the appropriate location. Preserve the answer's existing structure and wording — only add the missing content.
-5. Do NOT remove, shorten, or rephrase any existing content in the answer.
-6. Do NOT add commentary about what was changed. Output ONLY the final answer.
+3. PRECISION RULE: Only flag a key point as "missing" if it is a CLEAR, DIRECT answer to the query's stated category. Do NOT add:
+   - Borderline items that loosely relate to the category (e.g., warranty limitations are NOT "forfeiture terms"; form fields are NOT "obligations")
+   - Items the answer may have deliberately excluded for precision
+   - Items from a different category than what the query explicitly asks for
+4. If ALL relevant key points with importance ≥ 85 are represented, respond with exactly: ALL_COMPLETE
+5. If any clearly relevant key points are missing, write ONLY the missing items as brief bullet points. Do NOT repeat items already in the answer. Do NOT rewrite the existing answer.
 
-**Final Answer**:
+**Missing items (or ALL_COMPLETE)**:
 """
