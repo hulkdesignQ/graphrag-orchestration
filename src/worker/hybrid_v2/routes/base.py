@@ -682,13 +682,9 @@ class BaseRouteHandler:
         driver = self.neo4j_driver
 
         def _run_sync():
-            # Build folder filter clause - applied after document join
+            # Folder filter: not applied (IN_FOLDER relationships not created during indexing;
+            # group_id filtering on Sentence/Document nodes provides tenant isolation)
             folder_filter = ""
-            if folder_id:
-                folder_filter = (
-                    "\n            WITH node, rrfScore, hasBM25, hasVector, d, top_k"
-                    "\n            WHERE d IS NULL OR EXISTS { MATCH (d)-[:IN_FOLDER]->(f:Folder {id: $folder_id}) }"
-                )
 
             cypher = f"""
             CYPHER 25
@@ -840,9 +836,8 @@ class BaseRouteHandler:
 
         def _run_sync():
             # Build folder filter clause
+            # Folder filter: not applied (IN_FOLDER relationships not created during indexing)
             folder_filter = ""
-            if folder_id:
-                folder_filter = "AND EXISTS { MATCH (d)-[:IN_FOLDER]->(f:Folder {id: $folder_id}) }"
 
             cypher = f"""
             CALL db.index.fulltext.queryNodes('sentence_fulltext', $search_query)
@@ -955,9 +950,8 @@ class BaseRouteHandler:
         
         def _run_sync():
             # Build folder filter clause
+            # Folder filter: not applied (IN_FOLDER relationships not created during indexing)
             folder_filter = ""
-            if folder_id:
-                folder_filter = "AND EXISTS { MATCH (d)-[:IN_FOLDER]->(f:Folder {id: $folder_id}) }"
             
             cypher = f"""
             CYPHER 25
