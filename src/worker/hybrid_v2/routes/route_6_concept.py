@@ -359,10 +359,18 @@ class ConceptSearchHandler(BaseRouteHandler):
                 expanded_denoised = self._denoise_sentences(expanded)
                 if expanded_denoised:
                     seen_ids = {ev.get("sentence_id") for ev in sentence_evidence}
+                    seen_texts = {
+                        (ev.get("text") or "")[:100].lower().strip()
+                        for ev in sentence_evidence
+                    }
                     for ev in expanded_denoised:
                         if ev.get("sentence_id") not in seen_ids:
+                            txt_key = (ev.get("text") or "")[:100].lower().strip()
+                            if txt_key in seen_texts:
+                                continue
                             sentence_evidence.append(ev)
                             seen_ids.add(ev.get("sentence_id"))
+                            seen_texts.add(txt_key)
                     logger.info(
                         "route6_expansion_injected_for_rerank",
                         injected=len(expanded_denoised),
@@ -1437,6 +1445,7 @@ class ConceptSearchHandler(BaseRouteHandler):
 
         # 3. Deduplicate by sentence_id and build context passages
         seen_sentences: set = set()
+        seen_texts: set = set()
         evidence: List[Dict[str, Any]] = []
 
         for r in results:
@@ -1444,6 +1453,13 @@ class ConceptSearchHandler(BaseRouteHandler):
             if sid in seen_sentences:
                 continue
             seen_sentences.add(sid)
+
+            # Text-level dedup: different sentence_ids can share identical text
+            # (e.g., from UNION ALL across group branches or chunk overlaps).
+            text_key = (r.get("text") or "")[:100].lower().strip()
+            if text_key in seen_texts:
+                continue
+            seen_texts.add(text_key)
 
             # Build passage: prev + current + next for coherent context
             parts = []
