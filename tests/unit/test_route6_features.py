@@ -99,7 +99,7 @@ class TestTokenBudget:
         evidence = [_make_sentence("Evidence " * 50, sentence_id=f"s{i}") for i in range(10)]
         sections = [_make_section("Section A")]
 
-        with patch.dict(os.environ, {}, clear=False):
+        with patch.dict(os.environ, {"ROUTE6_COMPLETENESS_CHECK": "0"}, clear=False):
             os.environ.pop("ROUTE6_MAX_CONTEXT_TOKENS", None)
             result = await handler._synthesize(
                 "What are the risks?", communities, sections, evidence,
@@ -369,7 +369,7 @@ class TestBuildSynthesisPrompt:
         sections = [_make_section("Termination")]
         evidence = [_make_sentence("Important fact", sentence_id="s1")]
 
-        prompt = await handler._build_synthesis_prompt(
+        prompt, _summaries = await handler._build_synthesis_prompt(
             "What are the risks?", communities, sections, evidence,
         )
 
@@ -384,7 +384,7 @@ class TestBuildSynthesisPrompt:
         communities = [_make_community("c1", "Risk", "Risk summary")]
         evidence = [_make_sentence("Evidence text", sentence_id="s1")]
 
-        prompt = await handler._build_synthesis_prompt(
+        prompt, _summaries = await handler._build_synthesis_prompt(
             "Query", communities, [], evidence, language="French",
         )
 
@@ -398,14 +398,14 @@ class TestBuildSynthesisPrompt:
         evidence = [_make_sentence("word " * 500, sentence_id="s1")]
 
         with patch.dict(os.environ, {"ROUTE6_MAX_CONTEXT_TOKENS": "100"}):
-            prompt = await handler._build_synthesis_prompt(
+            prompt, _s = await handler._build_synthesis_prompt(
                 "Query", communities, [], evidence,
             )
 
         # Prompt should be shorter than if we had no budget
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("ROUTE6_MAX_CONTEXT_TOKENS", None)
-            full_prompt = await handler._build_synthesis_prompt(
+            full_prompt, _s = await handler._build_synthesis_prompt(
                 "Query", communities, [], evidence,
             )
 

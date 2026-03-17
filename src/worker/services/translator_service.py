@@ -13,6 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
+import asyncio
 import aiohttp
 import structlog
 from azure.identity.aio import DefaultAzureCredential
