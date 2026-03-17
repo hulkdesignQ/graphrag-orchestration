@@ -604,14 +604,12 @@ class LocalSearchHandler(BaseRouteHandler):
              min(anchor.hop) AS min_hop, collect(DISTINCT anchor.via)[0] AS via
         
         // EXPAND: NEXT_IN_SECTION neighbours for section-bounded context window
-        CALL {
-            WITH sent
+        CALL (sent) {
             OPTIONAL MATCH path = (sent)-[:NEXT_IN_SECTION*1..2]->(fwd:Sentence)
             WHERE fwd.group_id IN $group_ids
             RETURN collect(DISTINCT {node: fwd, hop_type: 'next'}) AS next_nodes
         }
-        CALL {
-            WITH sent
+        CALL (sent) {
             OPTIONAL MATCH path = (sent)<-[:NEXT_IN_SECTION*1..2]-(prev:Sentence)
             WHERE prev.group_id IN $group_ids
             RETURN collect(DISTINCT {node: prev, hop_type: 'prev'}) AS prev_nodes

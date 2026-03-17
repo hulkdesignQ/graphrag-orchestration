@@ -4250,6 +4250,18 @@ Output:
                 gds.graph.drop(projection_name)
                 return stats
             
+            # Build GDS nodeId → entity.id mapping for Cypher 25 compatible writeback.
+            # GDS streams return internal integer nodeIds; Cypher 25 removed id() so we
+            # resolve via the projected 'id' property (entity.id has a uniqueness constraint).
+            gds_node_id_map: Dict[int, str] = {}
+            try:
+                id_props_df = gds.graph.nodeProperties.stream(G, "id")
+                for _, row in id_props_df.iterrows():
+                    gds_node_id_map[int(row["nodeId"])] = row["propertyValue"]
+                logger.info(f"📋 Built GDS nodeId map: {len(gds_node_id_map)} entries")
+            except Exception as map_err:
+                logger.warning(f"⚠️  Could not stream 'id' property from GDS: {map_err}")
+            
             # 3. Run KNN algorithm (skip if knn_top_k is 0)
             # Helper: retry GDS algorithm calls on transient connection errors.
             # Aura Serverless can drop the session→Neo4j link mid-algorithm;
@@ -4290,11 +4302,15 @@ Output:
             # Process KNN results and create edges in Neo4j via UNWIND batch
             # Use SEMANTICALLY_SIMILAR for ALL KNN edges (consistency with GDS)
             # Only create one edge per pair (n1 < n2) to avoid bidirectional duplicates
+            # Resolve GDS nodeIds to entity.id via gds_node_id_map (Cypher 25: id() removed)
             edge_batch = []
             for _, row in knn_df.iterrows():
                 n1, n2 = int(row["node1"]), int(row["node2"])
                 if n1 < n2:  # Pre-filter dedup (symmetric similarity)
-                    edge_batch.append({"node1": n1, "node2": n2, "similarity": float(row["similarity"])})
+                    eid1 = gds_node_id_map.get(n1)
+                    eid2 = gds_node_id_map.get(n2)
+                    if eid1 and eid2:
+                        edge_batch.append({"entity_id1": eid1, "entity_id2": eid2, "similarity": float(row["similarity"])})
             
             def _write_knn_edges(session):
                 import time
@@ -4306,9 +4322,8 @@ Output:
                         if knn_config:
                             result = session.run("""
                                 UNWIND $edges AS e
-                                MATCH (n1), (n2)
-                                WHERE id(n1) = e.node1 AND id(n2) = e.node2
-                                  AND n1.group_id = $group_id AND n2.group_id = $group_id
+                                MATCH (n1:Entity {id: e.entity_id1, group_id: $group_id})
+                                MATCH (n2:Entity {id: e.entity_id2, group_id: $group_id})
                                 MERGE (n1)-[r:SEMANTICALLY_SIMILAR {knn_config: $knn_config}]->(n2)
                                 SET r.score = e.similarity, r.similarity = e.similarity,
                                     r.method = 'gds_knn', r.group_id = $group_id,
@@ -4319,9 +4334,8 @@ Output:
                         else:
                             result = session.run("""
                                 UNWIND $edges AS e
-                                MATCH (n1), (n2)
-                                WHERE id(n1) = e.node1 AND id(n2) = e.node2
-                                  AND n1.group_id = $group_id AND n2.group_id = $group_id
+                                MATCH (n1:Entity {id: e.entity_id1, group_id: $group_id})
+                                MATCH (n2:Entity {id: e.entity_id2, group_id: $group_id})
                                 MERGE (n1)-[r:SEMANTICALLY_SIMILAR]->(n2)
                                 SET r.score = e.similarity, r.similarity = e.similarity,
                                     r.method = 'gds_knn', r.group_id = $group_id,
@@ -4349,7 +4363,9 @@ Output:
             for _, row in leiden_df.iterrows():
                 node_id = int(row["nodeId"])
                 community_id = int(row["communityId"])
-                updates.append({"nodeId": node_id, "communityId": community_id})
+                entity_id = gds_node_id_map.get(node_id)
+                if entity_id:
+                    updates.append({"entity_id": entity_id, "communityId": community_id})
                 community_ids.add(community_id)
             
             def _write_leiden(session):
@@ -4359,7 +4375,7 @@ Output:
                         chunk = updates[start : start + BATCH]
                         session.run("""
                             UNWIND $updates AS u
-                            MATCH (n) WHERE id(n) = u.nodeId AND n.group_id = $group_id
+                            MATCH (n:Entity {id: u.entity_id, group_id: $group_id})
                             SET n.community_id = u.communityId
                         """, updates=chunk, group_id=group_id)
 
@@ -4375,10 +4391,12 @@ Output:
                 G, dampingFactor=0.85, maxIterations=20, concurrency=4
             )
             
-            pr_updates = [
-                {"nodeId": int(row["nodeId"]), "score": float(row["score"])}
-                for _, row in pagerank_df.iterrows()
-            ]
+            pr_updates = []
+            for _, row in pagerank_df.iterrows():
+                node_id = int(row["nodeId"])
+                entity_id = gds_node_id_map.get(node_id)
+                if entity_id:
+                    pr_updates.append({"entity_id": entity_id, "score": float(row["score"])})
             
             def _write_pagerank(session):
                 BATCH = 100
@@ -4387,7 +4405,7 @@ Output:
                         chunk = pr_updates[start : start + BATCH]
                         session.run("""
                             UNWIND $updates AS u
-                            MATCH (n) WHERE id(n) = u.nodeId AND n.group_id = $group_id
+                            MATCH (n:Entity {id: u.entity_id, group_id: $group_id})
                             SET n.pagerank = u.score
                         """, updates=chunk, group_id=group_id)
 

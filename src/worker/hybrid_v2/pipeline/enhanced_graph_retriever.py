@@ -874,7 +874,7 @@ class EnhancedGraphRetriever:
                 {folder_filter_clause}
                 WITH entity_name, c, s, d, 
                      // Prioritize chunks that mention the entity (if MENTIONS edge exists)
-                     CASE WHEN exists((e)-[:MENTIONS]->(c)) THEN 1.0 ELSE 0.5 END AS score
+                     CASE WHEN EXISTS {{ (e)-[:MENTIONS]->(c) }} THEN 1.0 ELSE 0.5 END AS score
                 ORDER BY score DESC, coalesce(c.chunk_index, 0)
                 WITH entity_name, collect({{
                     sentence_id: c.id,

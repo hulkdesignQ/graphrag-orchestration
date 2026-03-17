@@ -606,12 +606,15 @@ class GraphService:
             raise RuntimeError("Neo4j driver not initialized")
         
         # Project the graph for GDS (filtered by group_id)
+        # Uses gds.graph.project.cypher with elementId() for Cypher 25 compatibility.
+        # Note: GDS Cypher projection requires an 'id' column; we use elementId() 
+        # which GDS accepts as node identifiers in newer versions.
         project_query = """
         CALL gds.graph.project.cypher(
             $graph_name,
-            'MATCH (n) WHERE n.group_id = $group_id RETURN id(n) AS id, labels(n) AS labels',
+            'MATCH (n) WHERE n.group_id = $group_id RETURN elementId(n) AS id, labels(n) AS labels',
             'MATCH (n)-[r]->(m) WHERE n.group_id = $group_id AND m.group_id = $group_id 
-             RETURN id(n) AS source, id(m) AS target, type(r) AS type'
+             RETURN elementId(n) AS source, elementId(m) AS target, type(r) AS type'
         )
         YIELD graphName, nodeCount, relationshipCount
         RETURN graphName, nodeCount, relationshipCount

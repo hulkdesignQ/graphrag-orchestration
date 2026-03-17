@@ -793,7 +793,7 @@ class EnhancedGraphRetriever:
                 OPTIONAL MATCH (c)-[:IN_DOCUMENT]->(d:Document)
                 WITH entity_name, c, s, d, 
                      // Prioritize chunks that mention the entity (if MENTIONS edge exists)
-                     CASE WHEN exists((c)-[:MENTIONS]->(e)) THEN 1.0 ELSE 0.5 END AS score
+                     CASE WHEN EXISTS { (c)-[:MENTIONS]->(e) } THEN 1.0 ELSE 0.5 END AS score
                 ORDER BY score DESC, coalesce(c.chunk_index, 0)
                 WITH entity_name, collect({
                     chunk_id: c.id,

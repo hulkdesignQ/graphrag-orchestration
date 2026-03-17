@@ -1727,7 +1727,7 @@ class HippoRAG2Handler(BaseRouteHandler):
                 sentence_top_k = corpus_size
 
         sentence_cypher = """CYPHER 25
-        CALL {
+        CALL () {
             MATCH (s:Sentence)
             SEARCH s IN (VECTOR INDEX sentence_embedding FOR $embedding WHERE s.group_id = $group_id LIMIT $sentence_top_k)
             SCORE AS score
