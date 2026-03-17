@@ -36,7 +36,11 @@ import tiktoken
 
 from src.core.config import settings
 from .base import BaseRouteHandler, Citation, RouteResult, rerank_with_retry, make_voyage_client, acomplete_with_retry
-from .route_6_prompts import CONCEPT_SYNTHESIS_PROMPT, COMMUNITY_EXTRACT_PROMPT
+from .route_6_prompts import (
+    CONCEPT_SYNTHESIS_PROMPT,
+    COMMUNITY_EXTRACT_PROMPT,
+    SYNTHESIS_COMPLETENESS_CHECK_PROMPT,
+)
 from ..services.neo4j_retry import retry_session
 
 # Shared tiktoken encoder for token budget control (Feature 4)
@@ -515,6 +519,9 @@ class ConceptSearchHandler(BaseRouteHandler):
         Unlike Route 3's MAP-REDUCE, community summaries are passed directly
         as thematic context — no per-community claim extraction.
 
+        When ROUTE6_COMPLETENESS_CHECK is enabled, a second LLM pass verifies
+        that all high-importance key points are represented in the answer.
+
         Args:
             query: User query.
             communities: Matched community dicts with title/summary.
@@ -526,14 +533,14 @@ class ConceptSearchHandler(BaseRouteHandler):
             Synthesized response text.
         """
         # Build the synthesis prompt (shared with _stream_synthesize)
-        prompt = await self._build_synthesis_prompt(
+        prompt, summaries_text = await self._build_synthesis_prompt(
             query, communities, section_headings, sentence_evidence,
             language=language, folder_id=folder_id,
         )
 
         try:
             response = await acomplete_with_retry(self.llm, prompt)
-            return response.text.strip()
+            answer = response.text.strip()
         except Exception as e:
             logger.error(
                 "route6_synthesis_failed",
@@ -544,6 +551,74 @@ class ConceptSearchHandler(BaseRouteHandler):
                 "An error occurred while synthesizing the response. "
                 f"Please try again. (Error: {type(e).__name__})"
             )
+
+        # Two-pass completeness check
+        completeness_check = os.getenv(
+            "ROUTE6_COMPLETENESS_CHECK", "1"
+        ).strip().lower() in {"1", "true", "yes"}
+
+        if completeness_check and summaries_text and "(No thematic context" not in summaries_text:
+            answer = await self._completeness_check(query, summaries_text, answer)
+
+        return answer
+
+    async def _completeness_check(
+        self,
+        query: str,
+        key_points: str,
+        answer: str,
+    ) -> str:
+        """Second LLM pass: verify all high-importance key points are in the answer.
+
+        If any key points with importance ≥ 70 are missing, the LLM integrates
+        them into the answer. If the answer is already complete, it's returned
+        unchanged.
+
+        Args:
+            query: Original user query.
+            key_points: Formatted key-points text (from extraction).
+            answer: Initial synthesis answer.
+
+        Returns:
+            Patched answer (or original if already complete).
+        """
+        t0 = time.perf_counter()
+        prompt = SYNTHESIS_COMPLETENESS_CHECK_PROMPT.format(
+            query=query,
+            key_points=key_points,
+            answer=answer,
+        )
+
+        try:
+            response = await acomplete_with_retry(self.llm, prompt)
+            patched = response.text.strip()
+            elapsed_ms = int((time.perf_counter() - t0) * 1000)
+
+            # If the LLM returned something meaningful, use it
+            if patched and len(patched) > 50:
+                changed = patched != answer
+                logger.info(
+                    "route6_completeness_check_done",
+                    changed=changed,
+                    original_len=len(answer),
+                    patched_len=len(patched),
+                    elapsed_ms=elapsed_ms,
+                )
+                return patched
+            else:
+                logger.warning(
+                    "route6_completeness_check_empty",
+                    response_len=len(patched),
+                    elapsed_ms=elapsed_ms,
+                )
+                return answer
+        except Exception as e:
+            logger.error(
+                "route6_completeness_check_failed",
+                error=str(e),
+                error_type=type(e).__name__,
+            )
+            return answer  # graceful fallback — return original answer
 
     # ==================================================================
     # Feature 1: Dynamic Community Selection (LLM-rated)
@@ -1107,8 +1182,13 @@ class ConceptSearchHandler(BaseRouteHandler):
         sentence_evidence: List[Dict[str, Any]],
         language: Optional[str] = None,
         folder_id: Optional[str] = None,
-    ) -> str:
-        """Build the full synthesis prompt. Shared by _synthesize and _stream_synthesize."""
+    ) -> Tuple[str, str]:
+        """Build the full synthesis prompt. Shared by _synthesize and _stream_synthesize.
+
+        Returns:
+            Tuple of (prompt, summaries_text) — summaries_text is the key-points
+            text used for completeness checking.
+        """
         # Format community summaries
         community_extract = os.getenv(
             "ROUTE6_COMMUNITY_EXTRACT", "1"
@@ -1208,7 +1288,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         if language:
             prompt += f"\n\nIMPORTANT: Respond entirely in {language}."
 
-        return prompt
+        return prompt, summaries_text
 
     async def _retrieve_sentence_evidence(
         self,

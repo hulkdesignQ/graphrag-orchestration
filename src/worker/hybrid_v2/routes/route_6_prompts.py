@@ -99,3 +99,35 @@ Respond with ONLY a JSON object:
     ...
 ]}}
 """
+
+# ─────────────────────────────────────────────────────────────────
+# SYNTHESIS COMPLETENESS CHECK PROMPT
+# ─────────────────────────────────────────────────────────────────
+# Two-pass completeness: after synthesis, verify that all high-importance
+# key points are represented in the answer. If any are missing, integrate
+# them into the answer at the appropriate location.
+# Input:  {query}, {key_points}, {answer}
+# Output: the final answer (unchanged if complete, or patched with
+#         missing items integrated)
+
+SYNTHESIS_COMPLETENESS_CHECK_PROMPT = """\
+You are a completeness checker. Review the answer below and ensure it covers ALL key points with importance ≥ 70.
+
+**Query**: {query}
+
+**Key Points** (extracted from source documents):
+{key_points}
+
+**Current Answer**:
+{answer}
+
+**Instructions**:
+1. For each key point with importance ≥ 70, check if its specific content is represented in the answer.
+2. A key point is "represented" if the answer mentions the same fact, even with different wording.
+3. If ALL key points with importance ≥ 70 are represented, output the answer UNCHANGED — do not edit, reformat, or reorganize it.
+4. If any key points with importance ≥ 70 are NOT represented, integrate the missing items into the answer at the appropriate location. Preserve the answer's existing structure and wording — only add the missing content.
+5. Do NOT remove, shorten, or rephrase any existing content in the answer.
+6. Do NOT add commentary about what was changed. Output ONLY the final answer.
+
+**Final Answer**:
+"""

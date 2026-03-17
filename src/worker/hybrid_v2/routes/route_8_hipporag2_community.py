@@ -1195,9 +1195,12 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
         if entity_doc_map_enabled:
             detected_types = self._detect_exhaustive_entity_types(query)
             if detected_types:
+                # Always include CONCEPT — many indexing pipelines classify
+                # all entities as CONCEPT regardless of semantic type.
+                edm_types = list(set(detected_types + ["CONCEPT"]))
                 _parallel_tasks.append((
                     "entity_doc_map",
-                    self._query_entity_doc_map(detected_types, folder_id=folder_id),
+                    self._query_entity_doc_map(edm_types, folder_id=folder_id),
                 ))
 
         _parallel_results = await asyncio.gather(
@@ -1390,7 +1393,12 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
                 _doc_counts: Dict[str, int] = defaultdict(int)
                 _existing_ids: set = set()
                 for c in pre_fetched_chunks:
-                    did = c.get("document_id", "")
+                    _meta = c.get("metadata") or {}
+                    did = (
+                        _meta.get("document_id")
+                        or c.get("document_id")
+                        or ""
+                    )
                     if did:
                         _doc_counts[did] += 1
                     _existing_ids.add(c.get("sentence_id") or c.get("id", ""))
