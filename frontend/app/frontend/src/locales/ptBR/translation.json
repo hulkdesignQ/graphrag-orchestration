@@ -35,17 +35,17 @@
     "chatEmptyStateTitle": "Pergunte aos seus documentos. Confie em cada resposta.",
     "chatEmptyStateSubtitle": "Cada resposta é rastreada até a frase exata — clique para verificar no PDF original. Experimente com nossos documentos de exemplo ou envie os seus.",
     "defaultExamples": {
-        "1": "Quais são os termos e condições principais dos meus documentos?",
-        "2": "Resuma os pontos principais de todos os meus documentos.",
-        "3": "Quais datas e prazos importantes são mencionados nos meus documentos?",
-        "placeholder": "Faça uma pergunta sobre seus documentos (ex.: quais são as condições de pagamento?)"
+        "1": "O preço total do contrato de compra e o total da fatura coincidem?",
+        "2": "Compare as regras de rescisão e cancelamento em todos os contratos.",
+        "3": "Qual é a taxa do Agente para aluguéis de curto prazo com menos de 180 dias?",
+        "placeholder": "Faça uma pergunta sobre seus documentos (ex.: esta fatura confere com os termos do contrato?)"
     },
     "askTitle": "Pergunte aos seus documentos",
     "multimodalExamples": {
-        "1": "Quais são os termos e condições principais dos meus documentos?",
-        "2": "Resuma os pontos principais de todos os meus documentos.",
-        "3": "Quais datas e prazos importantes são mencionados nos meus documentos?",
-        "placeholder": "Faça uma pergunta sobre seus documentos (ex.: quais são as condições de pagamento?)"
+        "1": "O preço total do contrato de compra e o total da fatura coincidem?",
+        "2": "Compare as regras de rescisão e cancelamento em todos os contratos.",
+        "3": "Qual é a taxa do Agente para aluguéis de curto prazo com menos de 180 dias?",
+        "placeholder": "Faça uma pergunta sobre seus documentos (ex.: esta fatura confere com os termos do contrato?)"
     },
     "generatingAnswer": "Gerando resposta",
     "citationWithColon": "Citação:",

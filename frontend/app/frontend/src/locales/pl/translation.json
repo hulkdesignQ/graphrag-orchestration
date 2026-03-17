@@ -35,17 +35,17 @@
     "chatEmptyStateTitle": "Zapytaj swoje dokumenty. Ufaj każdej odpowiedzi.",
     "chatEmptyStateSubtitle": "Każda odpowiedź jest powiązana z dokładnym zdaniem — kliknij, aby zweryfikować w oryginalnym PDF. Wypróbuj z naszymi przykładowymi dokumentami lub prześlij własne.",
     "defaultExamples": {
-        "1": "Jakie są kluczowe warunki w moich dokumentach?",
-        "2": "Podsumuj główne punkty wszystkich moich dokumentów.",
-        "3": "Jakie ważne daty i terminy są wymienione w moich dokumentach?",
-        "placeholder": "Zadaj pytanie dotyczące swoich dokumentów (np. jakie są warunki płatności?)"
+        "1": "Czy cena całkowita umowy kupna zgadza się z sumą na fakturze?",
+        "2": "Porównaj zasady wypowiedzenia i anulowania we wszystkich umowach.",
+        "3": "Jaka jest prowizja agenta za wynajem krótkoterminowy poniżej 180 dni?",
+        "placeholder": "Zadaj pytanie dotyczące swoich dokumentów (np. czy ta faktura jest zgodna z warunkami umowy?)"
     },
     "askTitle": "Zapytaj swoje dokumenty",
     "multimodalExamples": {
-        "1": "Jakie są kluczowe warunki w moich dokumentach?",
-        "2": "Podsumuj główne punkty wszystkich moich dokumentów.",
-        "3": "Jakie ważne daty i terminy są wymienione w moich dokumentach?",
-        "placeholder": "Zadaj pytanie dotyczące swoich dokumentów (np. jakie są warunki płatności?)"
+        "1": "Czy cena całkowita umowy kupna zgadza się z sumą na fakturze?",
+        "2": "Porównaj zasady wypowiedzenia i anulowania we wszystkich umowach.",
+        "3": "Jaka jest prowizja agenta za wynajem krótkoterminowy poniżej 180 dni?",
+        "placeholder": "Zadaj pytanie dotyczące swoich dokumentów (np. czy ta faktura jest zgodna z warunkami umowy?)"
     },
     "generatingAnswer": "Generowanie odpowiedzi",
     "citationWithColon": "Cytat:",

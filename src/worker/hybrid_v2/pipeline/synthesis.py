@@ -358,6 +358,20 @@ class EvidenceSynthesizer:
         if effective_variant == "v1_concise":
             response = re.sub(r"\s*\[\d+[a-z]?\]", "", response).strip()
 
+        # Step 4c: Normalize non-numeric bracket references.
+        # Despite explicit instructions, LLMs sometimes produce descriptive
+        # citations like [document_name, section 2] instead of [1].  Strip
+        # any bracket content that isn't a valid numeric or sentence-level
+        # citation marker to keep the answer text clean.
+        if effective_variant != "v1_concise":
+            def _keep_valid_citation(m: re.Match) -> str:
+                inner = m.group(1)
+                if re.match(r'^\d+[a-z]?$', inner):
+                    return m.group(0)  # keep [1], [2], [1a], etc.
+                return ''  # strip everything else
+            response = re.sub(r'\[([^\]]+)\]', _keep_valid_citation, response)
+            response = re.sub(r'  +', ' ', response).strip()
+
         # Step 5: Build citations
         if effective_variant == "v1_concise" and citation_map:
             # v1_concise: LLM does pure extraction, no citation markup.
@@ -782,7 +796,7 @@ class EvidenceSynthesizer:
                     
                     # Format as individually-citable sentences: [1a], [1b], [1c]...
                     chunk_num = original_idx + 1
-                    entry_lines = [f"{citation_id} [Section: {section_str}] [Entity: {chunk.entity_name}]"]
+                    entry_lines = [f"{citation_id} (Section: {section_str}) (Entity: {chunk.entity_name})"]
                     for s_idx, sent in enumerate(chunk_sentences):
                         suffix = chr(ord('a') + s_idx) if s_idx < 26 else str(s_idx)
                         sent_citation_id = f"[{chunk_num}{suffix}]"
@@ -807,7 +821,7 @@ class EvidenceSynthesizer:
                     entry = "\n".join(entry_lines)
                 else:
                     # Fallback: standard chunk-level citation
-                    entry = f"{citation_id} [Section: {section_str}] [Entity: {chunk.entity_name}]\n{chunk.text}"
+                    entry = f"{citation_id} (Section: {section_str}) (Entity: {chunk.entity_name})\n{chunk.text}"
                 context_parts.append(entry)
             
             context_parts.append("")  # Blank line between documents
@@ -2169,7 +2183,7 @@ Response:"""
                         chunk_sentences = chunk_sentences[:_max_sent]
                     
                     chunk_num = original_idx + 1
-                    entry_lines = [f"{citation_id} [Section: {section_str}]"]
+                    entry_lines = [f"{citation_id} (Section: {section_str})"]
                     for s_idx, sent in enumerate(chunk_sentences):
                         suffix = chr(ord('a') + s_idx) if s_idx < 26 else str(s_idx)
                         sent_citation_id = f"[{chunk_num}{suffix}]"
@@ -2196,7 +2210,7 @@ Response:"""
                     # which section each chunk belongs to.
                     if section_str and section_str != "General":
                         context_parts.append(
-                            f"{citation_id} [Section: {section_str}] {text}"
+                            f"{citation_id} (Section: {section_str}) {text}"
                         )
                     else:
                         context_parts.append(f"{citation_id} {text}")
@@ -2441,13 +2455,13 @@ Respond using this format:
 
 ## Answer
 
-[Direct answer to the question with citations [N] for every factual claim]
+Direct answer to the question with citations [1], [2] for every factual claim.
 
 ## Details
 
-- [Specific detail with citation [N]]
-- [Connection between entities with citation [N]]
-- [Important highlights from source documents with citation [N]]
+- Specific detail with citation [1]
+- Connection between entities with citation [2]
+- Important highlights from source documents with citation [3]
 
 Response:"""
 
@@ -2577,7 +2591,7 @@ Instructions:
    - Include ONLY items matching that qualifier
    - EXCLUDE items that don't match, even if they seem related
    - If the question specifies a unit (e.g. "day-based"), do NOT include items in other units (weeks, months) even if convertible
-5. Include citations [N] for factual claims.
+5. Cite sources using ONLY the numbered markers [1], [2], [3], etc. that appear at the start of each evidence chunk. Do NOT invent citation formats — never put document names, file paths, or section names inside square brackets.
 6. **Be EXHAUSTIVE within scope.** Include every distinct fact, clause, obligation, amount, or condition from the evidence that is relevant to the question. Do not summarize multiple distinct items into one bullet — give each its own bullet.
 7. If the evidence contains explicit numeric values (e.g., dollar amounts, time periods/deadlines, percentages, counts), include them verbatim.
 8. **Completeness over brevity.** If the question characterizes a topic one way (e.g. "percentage-based fees") but the evidence shows additional dimensions (e.g. fixed charges alongside percentages), include ALL dimensions — do not limit to the question's framing.
@@ -2589,8 +2603,8 @@ Instructions:
 
 Respond using ONLY bullet points — no summary paragraph, no headers, no preamble:
 
-- [Fact with citation [N]]
-- [Fact with citation [N]]
+- Fact from evidence [1]
+- Another fact from evidence [2]
 
 Response:"""
 
@@ -2618,7 +2632,7 @@ Instructions:
    - Include ONLY items matching that qualifier
    - EXCLUDE items that don't match, even if they seem related
    - If the question specifies a unit (e.g. "day-based"), do NOT include items in other units (weeks, months) even if convertible
-5. Include citations [N] for factual claims.
+5. Cite sources using ONLY the numbered markers [1], [2], [3], etc. that appear at the start of each evidence chunk. Do NOT invent citation formats — never put document names, file paths, or section names inside square brackets.
 6. If the question asks about items **explicitly described as X**, include ONLY items the document actually LABELS or CATEGORIZES as X — not items that merely relate to X in practice.
 7. **ONE bullet = one distinct top-level answer.** If multiple passages describe the same item, MERGE them into a single bullet. Do NOT create separate bullets for supporting details of the same item.
 8. Answer ONLY what was asked — no extra items, no tangential information.
@@ -2630,8 +2644,8 @@ Instructions:
 
 Respond using ONLY bullet points — no summary paragraph, no headers, no preamble:
 
-- [Fact with citation [N]]
-- [Fact with citation [N]]
+- Fact from evidence [1]
+- Another fact from evidence [2]
 
 Response:"""
 
@@ -2659,7 +2673,7 @@ Instructions:
    - Include ONLY items matching that qualifier
    - EXCLUDE items that don't match, even if they seem related
    - If the question specifies a unit (e.g. "day-based"), do NOT include items in other units (weeks, months) even if convertible
-5. Include citations [N] for factual claims.
+5. Cite sources using ONLY the numbered markers [1], [2], [3], etc. that appear at the start of each evidence chunk. Do NOT invent citation formats — never put document names, file paths, or section names inside square brackets.
 6. If the evidence contains explicit numeric values (e.g., dollar amounts, time periods/deadlines, percentages, counts), include them verbatim.
 7. Prefer concrete obligations/thresholds over general paraphrases.
 8. Answer ONLY what was asked — no extra items, no tangential information.
@@ -2671,8 +2685,8 @@ Instructions:
 
 Respond using ONLY bullet points — no summary paragraph, no headers, no preamble:
 
-- [Fact with citation [N]]
-- [Fact with citation [N]]
+- Fact from evidence [1]
+- Another fact from evidence [2]
 
 Response:"""
 
@@ -2699,7 +2713,7 @@ Instructions:
    - Include ONLY items matching that qualifier
    - EXCLUDE items that don't match, even if they seem related
    - If the question specifies a unit (e.g. "day-based"), do NOT include items in other units (weeks, months) even if convertible
-5. Include citations [N] for factual claims (aim for every sentence that states a fact).
+5. Cite sources using ONLY the numbered markers [1], [2], [3], etc. that appear at the start of each evidence chunk. Do NOT invent citation formats — never put document names, file paths, or section names inside square brackets. Aim for a citation on every sentence that states a fact.
 6. If the evidence contains explicit numeric values (e.g., dollar amounts, time periods/deadlines, percentages, counts), include them verbatim.
 7. Prefer concrete obligations/thresholds over general paraphrases.
 8. If the question is asking for obligations, reporting/record-keeping, remedies, default/breach, or dispute-resolution: enumerate each distinct obligation/mechanism that is explicitly present in the Evidence Context; do not omit items just because another item is more prominent.
@@ -2712,13 +2726,13 @@ Respond using this format:
 
 ## Summary
 
-[Summary with citations [N] for every factual claim. Include explicit numeric values verbatim. Cover provisions from ALL source documents, not just the most prominent one.]
+Concise summary with numbered citations like [1], [2] for every factual claim. Include explicit numeric values verbatim. Cover provisions from ALL source documents, not just the most prominent one.
 
 ## Key Points
 
-- [Distinct item/obligation 1 with citation [N]]
-- [Distinct item/obligation 2 with citation [N]]
-- [Additional items from each source document as needed]
+- Distinct item/obligation with citation [1]
+- Another distinct item with citation [2]
+- Additional items from each source document as needed
 
 Response:"""
 
@@ -2736,18 +2750,18 @@ Respond using this format:
 
 ## Findings
 
-- **Finding 1:** [Statement with exact source citation [N]]
-- **Finding 2:** [Statement with exact source citation [N]]
-- [Additional findings as needed]
+- **Finding 1:** Statement with exact source citation [1]
+- **Finding 2:** Statement with exact source citation [2]
+- Additional findings as needed
 
 ## Evidence Chain
 
-[Logical chain showing how evidence connects, with citations [N]]
+Logical chain showing how evidence connects, with citations [1], [2]
 
 ## Gaps and Confidence
 
-- **Gaps:** [Any missing information or uncertainties]
-- **Confidence:** [High/Medium/Low with justification]
+- **Gaps:** Any missing information or uncertainties
+- **Confidence:** High/Medium/Low with justification
 
 Audit Trail:"""
 

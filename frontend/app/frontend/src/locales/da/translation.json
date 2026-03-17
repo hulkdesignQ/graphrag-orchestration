@@ -35,17 +35,17 @@
     "chatEmptyStateTitle": "Spørg dine dokumenter. Stol på hvert svar.",
     "chatEmptyStateSubtitle": "Hvert svar er sporbart til den præcise sætning — klik for at verificere i den originale PDF. Prøv med vores eksempeldokumenter eller upload dine egne.",
     "defaultExamples": {
-        "1": "Hvad er de vigtigste betingelser i mine dokumenter?",
-        "2": "Opsummer hovedpunkterne i alle mine dokumenter.",
-        "3": "Hvilke vigtige datoer og frister nævnes i mine dokumenter?",
-        "placeholder": "Stil et spørgsmål om dine dokumenter (f.eks. hvad er betalingsbetingelserne?)"
+        "1": "Stemmer købskontraktens totalpris overens med fakturatotalen?",
+        "2": "Sammenlign opsigelsesreglerne og afbestillingsreglerne på tværs af alle aftaler.",
+        "3": "Hvad er agentens gebyr for korttidsudlejning under 180 dage?",
+        "placeholder": "Stil et spørgsmål på tværs af dine dokumenter (f.eks. stemmer denne faktura overens med kontraktvilkårene?)"
     },
     "askTitle": "Spørg dine dokumenter",
     "multimodalExamples": {
-        "1": "Hvad er de vigtigste betingelser i mine dokumenter?",
-        "2": "Opsummer hovedpunkterne i alle mine dokumenter.",
-        "3": "Hvilke vigtige datoer og frister nævnes i mine dokumenter?",
-        "placeholder": "Stil et spørgsmål om dine dokumenter (f.eks. hvad er betalingsbetingelserne?)"
+        "1": "Stemmer købskontraktens totalpris overens med fakturatotalen?",
+        "2": "Sammenlign opsigelsesreglerne og afbestillingsreglerne på tværs af alle aftaler.",
+        "3": "Hvad er agentens gebyr for korttidsudlejning under 180 dage?",
+        "placeholder": "Stil et spørgsmål på tværs af dine dokumenter (f.eks. stemmer denne faktura overens med kontraktvilkårene?)"
     },
     "generatingAnswer": "Genererer svar",
     "citationWithColon": "Kilder:",
