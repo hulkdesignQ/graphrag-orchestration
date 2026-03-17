@@ -146,6 +146,12 @@ export const AnalysisPanel = ({
         const token = client ? await getToken(client) : undefined;
         if (activeCitation) {
             const urlNoHash = activeCitation.split("#")[0];
+            // No ?source= means no backing file (community/graph citation) — skip fetch
+            if (!urlNoHash.includes("?source=")) {
+                setCitationBlob("");
+                setCitation("");
+                return;
+            }
             const originalHash = activeCitation.includes("#") ? activeCitation.split("#")[1] : "";
             try {
                 const response = await fetchWithAuthRetry(urlNoHash, {
@@ -153,7 +159,6 @@ export const AnalysisPanel = ({
                     headers: await getHeaders(token),
                 });
                 if (!response.ok) {
-                    // 404 is expected for community/graph citations — not an error
                     if (response.status !== 404) {
                         console.error(`Citation fetch failed: ${response.status} ${response.statusText}`);
                     }
