@@ -979,12 +979,9 @@ class ConceptSearchHandler(BaseRouteHandler):
 
         group_ids = self.group_ids
 
-        folder_filter_clause = (
-            "WITH s, doc, c_id\n"
-            "        WHERE $folder_id IS NULL OR doc IS NULL"
-            " OR EXISTS { MATCH (doc)-[:IN_FOLDER]->(f:Folder)"
-            " WHERE f.id = $folder_id  }\n"
-        )
+        # IN_FOLDER relationships do not exist in Neo4j; group_id on
+        # Sentence/Document nodes already provides tenant isolation.
+        folder_filter_clause = ""
 
         # Fetch entity-linked sentences via Community→Entity→MENTIONS→Sentence
         # graph traversal.
@@ -1328,46 +1325,9 @@ class ConceptSearchHandler(BaseRouteHandler):
             }
             children.append((child_dict, synthetic_score))
 
-        # Folder-scope filter: prune children whose entities have no content
-        # in the target folder (same pattern as CommunityMatcher._filter_communities_by_folder).
-        if folder_id is not None and children:
-            child_ids = [c.get("id") for c, _ in children if c.get("id")]
-            folder_cypher = """
-            UNWIND $child_ids AS cid
-            MATCH (c:Community {id: cid})
-            WHERE c.group_id IN $group_ids
-            MATCH (c)<-[:BELONGS_TO]-(e:Entity)
-                  <-[:MENTIONS]-(tc:Sentence)
-                  -[:IN_DOCUMENT]->(d:Document)
-                  -[:IN_FOLDER]->(f:Folder {id: $folder_id})
-            WHERE tc.group_id IN $group_ids
-              AND d.group_id IN $group_ids
-              
-            RETURN DISTINCT cid
-            """
-            try:
-                def _run_folder_check():
-                    with retry_session(driver, read_only=True) as session:
-                        records = session.run(
-                            folder_cypher,
-                            child_ids=child_ids,
-                            group_ids=group_ids,
-                            folder_id=folder_id,
-                        )
-                        return {dict(r)["cid"] for r in records}
-
-                valid_ids = await loop.run_in_executor(self._executor, _run_folder_check)
-                before = len(children)
-                children = [(c, s) for c, s in children if c.get("id") in valid_ids]
-                if len(children) < before:
-                    logger.info(
-                        "route6_community_children_folder_filter",
-                        folder_id=folder_id,
-                        before=before,
-                        after=len(children),
-                    )
-            except Exception as e:
-                logger.warning("route6_community_children_folder_filter_failed", error=str(e))
+        # IN_FOLDER relationships do not exist in Neo4j; group_id on
+        # Sentence/Document nodes already provides tenant isolation.
+        # Folder-scope filter block removed (was always returning 0 rows).
 
         logger.info(
             "route6_community_children_fetched",
@@ -1542,15 +1502,9 @@ class ConceptSearchHandler(BaseRouteHandler):
         fetch_k = top_k * 3
         group_ids = self.group_ids
 
-        # R6-1: Build folder filter clause — applied AFTER OPTIONAL MATCH for doc.
-        # Uses Cypher's IS NULL test so the WHERE is a no-op when no folder scope is set.
-        folder_filter_clause = (
-            "// R6-1: folder scope filter (no-op when $folder_id IS NULL)\n"
-            "        WITH sent, score, doc, sec, prev_sent, next_sent\n"
-            "        WHERE $folder_id IS NULL OR doc IS NULL"
-            " OR EXISTS { MATCH (doc)-[:IN_FOLDER]->(f:Folder)"
-            " WHERE f.id = $folder_id  }\n"
-        )
+        # IN_FOLDER relationships do not exist in Neo4j; group_id on
+        # Sentence/Document nodes already provides tenant isolation.
+        folder_filter_clause = ""
 
         # 2. Vector search on Sentence nodes + collect parent context.
         # sentence_embedding index has group_id as a filterable property
@@ -1748,15 +1702,9 @@ class ConceptSearchHandler(BaseRouteHandler):
 
         group_ids = self.group_ids
 
-        # R6-1: folder scope filter (same pattern as sentence vector search)
-        folder_filter_clause = (
-            "// R6-1: folder scope filter (no-op when $folder_id IS NULL)\n"
-            "        WITH expanded, shared_entity_count, doc, sec,"
-            " prev_sent, next_sent\n"
-            "        WHERE $folder_id IS NULL OR doc IS NULL"
-            " OR EXISTS { MATCH (doc)-[:IN_FOLDER]->(f:Folder)"
-            " WHERE f.id = $folder_id  }\n"
-        )
+        # IN_FOLDER relationships do not exist in Neo4j; group_id on
+        # Sentence/Document nodes already provides tenant isolation.
+        folder_filter_clause = ""
 
         cypher = f"""
         UNWIND $seed_ids AS seed_id
@@ -1922,12 +1870,6 @@ class ConceptSearchHandler(BaseRouteHandler):
 
         // Get parent document title
         OPTIONAL MATCH (s)<-[:HAS_SECTION]-(doc:Document)
-
-        // R6-2: Folder scope filter (no-op when $folder_id IS NULL)
-        WITH s, score, doc
-        WHERE $folder_id IS NULL OR doc IS NULL
-           OR EXISTS { MATCH (doc)-[:IN_FOLDER]->(f:Folder)
-                       WHERE f.id = $folder_id  }
 
         RETURN s.title AS title,
                s.summary AS summary,

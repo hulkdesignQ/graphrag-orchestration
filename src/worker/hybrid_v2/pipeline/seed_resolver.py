@@ -324,16 +324,9 @@ async def resolve_section_entities(
 
     effective_group_ids = group_ids or build_group_ids(group_id)
 
+    # IN_FOLDER relationships not created during indexing; group_id provides isolation
     folder_filter = ""
     folder_params: Dict[str, Any] = {}
-    if folder_id is not None:
-        folder_filter = (
-            "AND EXISTS { "
-            "  MATCH (chunk)-[:PART_OF|IN_DOCUMENT]->(doc2:Document)-[:IN_FOLDER]->(f:Folder) "
-            "  WHERE f.id = $folder_id  "
-            "} "
-        )
-        folder_params["folder_id"] = folder_id
 
     cypher = f"""
     UNWIND $paths AS path
@@ -409,16 +402,9 @@ async def resolve_signatureblock_entities(
     """
     effective_group_ids = group_ids or build_group_ids(group_id)
 
+    # IN_FOLDER relationships not created during indexing; group_id provides isolation
     folder_filter = ""
     folder_params: Dict[str, Any] = {}
-    if folder_id is not None:
-        folder_filter = (
-            "AND EXISTS { "
-            "  MATCH (s)-[:IN_DOCUMENT|PART_OF*1..2]->(doc:Document)-[:IN_FOLDER]->(f:Folder) "
-            "  WHERE f.id = $folder_id  "
-            "} "
-        )
-        folder_params["folder_id"] = folder_id
 
     cypher = f"""
     MATCH (s:Sentence)
@@ -503,18 +489,9 @@ async def resolve_thematic_seeds(
 
     if community_ids and async_neo4j:
         try:
+            # IN_FOLDER relationships not created during indexing; group_id provides isolation
             folder_filter = ""
             folder_params: Dict[str, Any] = {}
-            if folder_id is not None:
-                folder_filter = (
-                    "AND EXISTS { "
-                    "  MATCH (chunk2)-[:MENTIONS]->(e) "
-                    "  WHERE (chunk2:Sentence OR chunk2:Chunk OR chunk2:`__Node__`) "
-                    "  MATCH (chunk2)-[:IN_DOCUMENT]->(doc2:Document)-[:IN_FOLDER]->(f:Folder) "
-                    "  WHERE f.id = $folder_id  "
-                    "} "
-                )
-                folder_params["folder_id"] = folder_id
 
             cypher = f"""
             UNWIND $community_ids AS cid

@@ -708,8 +708,6 @@ class UnifiedSearchHandler(BaseRouteHandler):
 
         OPTIONAL MATCH (sent)-[:IN_DOCUMENT]->(doc:Document)
         WITH sent, score, doc
-        WHERE $folder_id IS NULL
-           OR (doc IS NOT NULL AND EXISTS { (doc)-[:IN_FOLDER]->(f:Folder {id: $folder_id})  })
         OPTIONAL MATCH (sent)-[:NEXT_IN_SECTION]->(next_sent:Sentence)
         OPTIONAL MATCH (prev_sent:Sentence)-[:NEXT_IN_SECTION]->(sent)
 
@@ -959,7 +957,6 @@ class UnifiedSearchHandler(BaseRouteHandler):
            OR sent.text CONTAINS 'Authorized Representative'
            OR sent.text CONTAINS 'Signed this')
         WITH sent, doc
-        WHERE $folder_id IS NULL OR EXISTS { (doc)-[:IN_FOLDER]->(f:Folder {id: $folder_id})  }
         RETURN DISTINCT sent.id AS sentence_id,
                sent.text AS text,
                doc.title AS document_title,

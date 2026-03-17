@@ -420,8 +420,6 @@ class GlobalSearchHandler(BaseRouteHandler):
         // Get document context
         OPTIONAL MATCH (sent)-[:IN_DOCUMENT]->(doc:Document)
         WITH sent, score, doc
-        WHERE $folder_id IS NULL
-           OR (doc IS NOT NULL AND (doc)-[:IN_FOLDER]->(:Folder WHERE .id = $folder_id ))
 
         // Expand via NEXT for local context (1 hop each direction)
         OPTIONAL MATCH (sent)-[:NEXT]->(next_sent:Sentence)

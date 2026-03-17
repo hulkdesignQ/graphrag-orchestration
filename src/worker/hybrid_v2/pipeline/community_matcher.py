@@ -365,6 +365,7 @@ class CommunityMatcher:
         if not community_ids:
             return candidates
 
+        # IN_FOLDER relationships not created during indexing; group_id provides isolation
         query = """
         UNWIND $community_ids AS cid
         MATCH (c:Community {id: cid})
@@ -372,7 +373,6 @@ class CommunityMatcher:
         MATCH (c)<-[:BELONGS_TO]-(e:Entity)
               <-[:MENTIONS]-(tc:Sentence)
               -[:IN_DOCUMENT]->(d:Document)
-              -[:IN_FOLDER]->(f:Folder {id: $folder_id})
         WHERE tc.group_id IN $group_ids
           AND d.group_id IN $group_ids
           

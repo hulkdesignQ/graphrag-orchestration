@@ -1222,11 +1222,6 @@ Sub-questions:"""
         // Get document context
         OPTIONAL MATCH (sent)-[:IN_DOCUMENT]->(doc:Document)
         WITH sent, score, doc
-        WHERE $folder_id IS NULL
-           OR (doc IS NOT NULL AND EXISTS {
-               MATCH (doc)-[:IN_FOLDER]->(f:Folder {id: $folder_id})
-               WHERE f.group_id IN $group_ids
-           })
 
         // Expand via NEXT_IN_SECTION for section-bounded context (1 hop each direction)
         OPTIONAL MATCH (sent)-[:NEXT_IN_SECTION]->(next_sent:Sentence)
