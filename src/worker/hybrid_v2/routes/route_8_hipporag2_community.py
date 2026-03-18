@@ -845,6 +845,77 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
             except Exception as e:
                 logger.warning("step_3e_entity_embedding_seeds_failed", error=str(e))
 
+        # ------------------------------------------------------------------
+        # Step 3f: Entity seed expansion — expand entity seeds 1-hop via
+        # SEMANTICALLY_SIMILAR edges to bridge semantic gaps.
+        # E.g. "dispute" → "claim for loss or injury" (cosine 0.60) brings
+        # PMA hold-harmless sentences into PPR reach.
+        # ------------------------------------------------------------------
+        entity_seed_expansion_enabled = _ov(
+            "entity_seed_expansion", "ROUTE8_ENTITY_SEED_EXPANSION", "0"
+        ).strip().lower() in {"1", "true", "yes"}
+        expansion_min_sim = float(_ov(
+            "entity_seed_expansion_min_sim", "ROUTE8_ENTITY_SEED_EXPANSION_MIN_SIM", "0.60"
+        ))
+        expansion_max_per_seed = int(_ov(
+            "entity_seed_expansion_max_per_seed", "ROUTE8_ENTITY_SEED_EXPANSION_MAX_PER_SEED", "3"
+        ))
+        expansion_base_weight = float(_ov(
+            "entity_seed_expansion_weight", "ROUTE8_ENTITY_SEED_EXPANSION_WEIGHT", "0.10"
+        ))
+        expansion_seeds_added = 0
+
+        if entity_seed_expansion_enabled and entity_seeds and self._async_neo4j:
+            try:
+                seed_ids = list(entity_seeds.keys())
+                async with self._async_neo4j._get_session() as session:
+                    # Per-seed top-N expansion: for each seed, take its N
+                    # most-similar unseen neighbors. This avoids flooding PPR
+                    # with 100+ low-relevance expansions.
+                    result = await session.run(
+                        """
+                        UNWIND $seed_ids AS sid
+                        MATCH (e1:Entity {id: sid})-[r:SEMANTICALLY_SIMILAR]-(e2:Entity)
+                        WHERE e2.group_id IN $group_ids
+                        AND r.similarity >= $min_sim
+                        AND NOT e2.id IN $seed_ids
+                        WITH sid, e2, r.similarity AS sim
+                        ORDER BY sim DESC
+                        WITH sid, collect({eid: e2.id, name: e2.name, sim: sim})[0..$max_per_seed] AS top_neighbors
+                        UNWIND top_neighbors AS nb
+                        RETURN DISTINCT nb.eid AS eid, nb.name AS name,
+                               max(nb.sim) AS best_sim
+                        ORDER BY best_sim DESC
+                        """,
+                        seed_ids=seed_ids,
+                        group_ids=self.group_ids,
+                        min_sim=expansion_min_sim,
+                        max_per_seed=expansion_max_per_seed,
+                    )
+                    expansion_records = await result.data()
+
+                expansion_names = []
+                for rec in expansion_records:
+                    eid = rec["eid"]
+                    if eid not in entity_seeds:
+                        # Similarity-proportional weight
+                        weight = expansion_base_weight * rec["best_sim"]
+                        entity_seeds[eid] = weight
+                        expansion_seeds_added += 1
+                        expansion_names.append(f"{rec['name']}({rec['best_sim']:.2f})")
+
+                logger.info(
+                    "step_3f_entity_seed_expansion",
+                    min_sim=expansion_min_sim,
+                    max_per_seed=expansion_max_per_seed,
+                    candidates=len(expansion_records),
+                    new_seeds=expansion_seeds_added,
+                    weight_base=expansion_base_weight,
+                    entities=expansion_names[:15],
+                )
+            except Exception as e:
+                logger.warning("step_3f_entity_seed_expansion_failed", error=str(e))
+
         timings_ms["step_3_seed_build_ms"] = int((time.perf_counter() - t0) * 1000)
 
         logger.info(
@@ -854,6 +925,7 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
             semantic_seeds_added=semantic_seeds_added,
             community_seeds_added=community_seeds_added,
             entity_emb_seeds_added=entity_emb_seeds_added,
+            expansion_seeds_added=expansion_seeds_added,
             entity_seed_names=[k for k in list(entity_seeds.keys())[:15]],
         )
 
