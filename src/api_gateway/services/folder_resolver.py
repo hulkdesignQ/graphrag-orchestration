@@ -34,16 +34,15 @@ async def resolve_neo4j_group_id(
         ValueError: If the folder doesn't exist or doesn't belong to auth_group_id.
     """
     if not folder_id:
-        # No folder selected — find the first root folder partition
+        # No folder selected — find the first user root folder partition
         # so queries hit actual indexed data instead of the empty auth partition.
-        partition_ids = await get_valid_partition_ids(auth_group_id)
-        root_ids = [pid for pid in partition_ids if pid != auth_group_id]
-        if root_ids:
+        partition_ids = await _get_user_root_folder_ids(auth_group_id)
+        if partition_ids:
             logger.info(
                 "no_folder_selected_using_first_partition",
-                extra={"auth_group_id": auth_group_id, "partition": root_ids[0]},
+                extra={"auth_group_id": auth_group_id, "partition": partition_ids[0]},
             )
-            return root_ids[0]
+            return partition_ids[0]
         return auth_group_id
 
     from src.worker.services import GraphService
@@ -82,6 +81,32 @@ async def resolve_neo4j_group_id(
             },
         )
         return root_id
+
+
+async def _get_user_root_folder_ids(auth_group_id: str) -> list:
+    """Get root user-folder IDs for a given auth_group_id.
+
+    Only returns folder_type='user' roots that have been analyzed,
+    skipping 'analysis_result' container folders which have no indexed data.
+    """
+    from src.worker.services import GraphService
+
+    driver = GraphService().driver
+    if not driver:
+        return []
+
+    with driver.session() as session:
+        result = session.run(
+            """
+            MATCH (f:Folder {group_id: $auth_gid, folder_type: 'user'})
+            WHERE f.parent_folder_id IS NULL
+              AND f.analysis_status IN ['analyzed', 'stale']
+            RETURN f.id AS root_folder_id
+            ORDER BY f.name
+            """,
+            auth_gid=auth_group_id,
+        )
+        return [r["root_folder_id"] for r in result]
 
 
 async def get_valid_partition_ids(auth_group_id: str) -> list:
