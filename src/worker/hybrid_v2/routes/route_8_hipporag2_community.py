@@ -3366,21 +3366,11 @@ Response:"""
             facts_per_doc={mr["doc_title"][:40]: len(mr["facts"]) for mr in map_results},
         )
 
-        # ── DEBUG: log all extracted facts per document ──────────
-        for mr in map_results:
-            for fi, f in enumerate(mr["facts"]):
-                logger.info(
-                    "map_fact_detail",
-                    doc_title=mr["doc_title"][:40],
-                    idx=fi,
-                    fact=f.get("fact", "")[:200],
-                )
-
         # ── Dedup + cap facts per document title ─────────────────────
         # Duplicate doc copies (same title, different IDs) produce
         # redundant facts that overwhelm the REDUCE step.
         # Cap keeps the most query-relevant facts (by keyword overlap).
-        max_facts_per_doc = 20
+        max_facts_per_doc = 15
         title_groups: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
         for fact in all_facts_raw:
             title_groups[fact["_doc_title"]].append(fact)
@@ -3425,8 +3415,6 @@ Response:"""
                     original=len(facts_list),
                     unique=len(unique_facts),
                     capped=len(capped),
-                    dropped_facts=[f["fact"][:80] for f in dropped],
-                    kept_relevance=[f.get("_relevance",0) for f in capped],
                 )
             else:
                 capped = unique_facts
@@ -3462,12 +3450,6 @@ Response:"""
                 line += f' (Quote: "{quote[:150]}")'
             facts_lines.append(line)
         facts_block = "\n".join(facts_lines)
-
-        logger.info(
-            "map_reduce_facts_block",
-            n_facts=len(facts_lines),
-            block_preview=facts_block[:5000],
-        )
 
         reduce_prompt = self._REDUCE_MERGE_PROMPT.format(
             query=query,
