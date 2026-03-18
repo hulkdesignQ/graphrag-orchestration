@@ -1555,6 +1555,7 @@ class ConceptSearchHandler(BaseRouteHandler):
                sent.parent_text AS chunk_text,
                doc.title AS document_title,
                doc.id AS document_id,
+               doc.source AS document_source,
                score,
                prev_sent.text AS prev_text,
                next_sent.text AS next_text
@@ -1629,6 +1630,7 @@ class ConceptSearchHandler(BaseRouteHandler):
                 "score": r.get("score", 0),
                 "document_title": r.get("document_title", "Unknown"),
                 "document_id": r.get("document_id", ""),
+                "document_source": r.get("document_source", ""),
                 "section_path": r.get("section_key") or r.get("section_path", ""),
                 "page": r.get("page"),
                 "sentence_id": sid,
@@ -2123,31 +2125,15 @@ class ConceptSearchHandler(BaseRouteHandler):
         scores: List[float],
         sentence_evidence: List[Dict[str, Any]],
     ) -> List[Citation]:
-        """Build citations from communities and sentence evidence.
+        """Build citations from sentence evidence (document-backed only).
 
-        Community citations come first (thematic sources), followed by
-        sentence-level citations (direct document evidence).
+        Community summaries are excluded from citations because they have no
+        backing PDF file — clicking them would produce a 404.  Sentence-level
+        citations carry document_url from the Neo4j Document.source property.
         """
         citations: List[Citation] = []
 
-        # Community-level citations (all matched communities, not just those with claims)
-        for i, (community, score) in enumerate(zip(communities, scores), 1):
-            title = community.get("title", "Untitled")
-            summary = community.get("summary", "")
-            if summary.strip():
-                citations.append(
-                    Citation(
-                        index=i,
-                        sentence_id=f"community_{community.get('id', i)}",
-                        document_id="",
-                        document_title=title,
-                        score=round(score, 4),
-                        text_preview=summary[:200],
-                    )
-                )
-
-        # Sentence-level citations (top 5 documents to avoid overload)
-        offset = len(citations)
+        # Sentence-level citations only (document-backed, clickable)
         seen_docs: set = set()
         for ev in sentence_evidence:
             doc_id = ev.get("document_id", "")
@@ -2156,14 +2142,15 @@ class ConceptSearchHandler(BaseRouteHandler):
             if dedup_key in seen_docs:
                 continue
             seen_docs.add(dedup_key)
-            offset += 1
+            idx = len(citations) + 1
             sent_text = ev.get("sentence_text", "")
             citations.append(
                 Citation(
-                    index=offset,
-                    sentence_id=ev.get("sentence_id", f"sentence_{offset}"),
+                    index=idx,
+                    sentence_id=ev.get("sentence_id", f"sentence_{idx}"),
                     document_id=ev.get("document_id", ""),
                     document_title=doc_title,
+                    document_url=ev.get("document_source", ""),
                     score=round(ev.get("score", 0), 4),
                     text_preview=sent_text[:200],
                     page_number=ev.get("page"),
