@@ -3366,21 +3366,41 @@ Response:"""
             facts_per_doc={mr["doc_title"][:40]: len(mr["facts"]) for mr in map_results},
         )
 
+        # ── DEBUG: log all extracted facts per document ──────────
+        for mr in map_results:
+            for fi, f in enumerate(mr["facts"]):
+                logger.info(
+                    "map_fact_detail",
+                    doc_title=mr["doc_title"][:40],
+                    idx=fi,
+                    fact=f.get("fact", "")[:200],
+                )
+
         # ── Dedup + cap facts per document title ─────────────────────
         # Duplicate doc copies (same title, different IDs) produce
         # redundant facts that overwhelm the REDUCE step.
         # Cap keeps the most query-relevant facts (by keyword overlap).
-        max_facts_per_doc = 15
+        max_facts_per_doc = 20
         title_groups: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
         for fact in all_facts_raw:
             title_groups[fact["_doc_title"]].append(fact)
 
-        # Build query keywords for relevance ranking
-        _q_words_cap = set(
+        # Build query keywords for relevance ranking (using prefix
+        # matching so "disputes" ≈ "dispute", "remedies" ≈ "remedy")
+        _q_words_raw = set(
             w for w in re.findall(r'[a-z]{3,}', query.lower())
         ) - {"the", "and", "for", "are", "all", "what", "which",
              "from", "this", "that", "with", "how", "across",
              "documents", "document", "list", "summarize", "describe"}
+        # Use 5-char prefixes for fuzzy matching across morphological variants
+        _PREFIX_LEN = 5
+        _q_prefixes = set(w[:_PREFIX_LEN] for w in _q_words_raw if len(w) >= _PREFIX_LEN)
+
+        def _prefix_overlap(fact_text: str) -> int:
+            """Count how many query prefixes match any word in the fact."""
+            f_words = set(re.findall(r'[a-z]{3,}', fact_text.lower()))
+            f_prefixes = set(w[:_PREFIX_LEN] for w in f_words if len(w) >= _PREFIX_LEN)
+            return len(f_prefixes & _q_prefixes)
 
         all_facts: List[Dict[str, Any]] = []
         for title, facts_list in title_groups.items():
@@ -3393,18 +3413,20 @@ Response:"""
                 seen_keys.add(key)
                 unique_facts.append(f)
             if len(unique_facts) > max_facts_per_doc:
-                # Rank by keyword overlap with query before capping
+                # Rank by prefix overlap with query before capping
                 for f in unique_facts:
-                    f_words = set(re.findall(r'[a-z]{3,}', f["fact"].lower()))
-                    f["_relevance"] = len(f_words & _q_words_cap)
+                    f["_relevance"] = _prefix_overlap(f["fact"])
                 unique_facts.sort(key=lambda f: -f.get("_relevance", 0))
                 capped = unique_facts[:max_facts_per_doc]
+                dropped = unique_facts[max_facts_per_doc:]
                 logger.info(
                     "map_reduce_facts_capped",
                     doc_title=title[:40],
                     original=len(facts_list),
                     unique=len(unique_facts),
                     capped=len(capped),
+                    dropped_facts=[f["fact"][:80] for f in dropped],
+                    kept_relevance=[f.get("_relevance",0) for f in capped],
                 )
             else:
                 capped = unique_facts
@@ -3440,6 +3462,12 @@ Response:"""
                 line += f' (Quote: "{quote[:150]}")'
             facts_lines.append(line)
         facts_block = "\n".join(facts_lines)
+
+        logger.info(
+            "map_reduce_facts_block",
+            n_facts=len(facts_lines),
+            block_preview=facts_block[:5000],
+        )
 
         reduce_prompt = self._REDUCE_MERGE_PROMPT.format(
             query=query,

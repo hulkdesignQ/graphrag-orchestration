@@ -389,7 +389,7 @@ class ConceptSearchHandler(BaseRouteHandler):
             rerank_enabled = os.getenv(
                 "ROUTE6_SENTENCE_RERANK", "1"
             ).strip().lower() in {"1", "true", "yes"}
-            rerank_top_k = int(os.getenv("ROUTE6_RERANK_TOP_K", "15"))
+            rerank_top_k = int(os.getenv("ROUTE6_RERANK_TOP_K", "20"))
             diversity_enabled = os.getenv(
                 "ROUTE6_SENTENCE_DIVERSITY", "1"
             ).strip().lower() in {"1", "true", "yes"}
