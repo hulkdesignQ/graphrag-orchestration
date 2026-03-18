@@ -3122,18 +3122,25 @@ Instructions:
 1. REFUSAL CHECK — apply this for SPECIFIC LOOKUP questions:
    - If the question asks for a SINGLE specific data point, term, clause, or identifier:
      a. Identify the KEY TERM in the question (e.g., "mold damage", "routing number", "IBAN").
-     b. Check if ANY extracted fact contains that key term or a direct equivalent.
-     c. If NO fact mentions it, respond ONLY with: "The requested information was not found in the available documents."
-     d. Do NOT infer or generalize — if the question asks about "mold damage" and facts only mention "implied warranties", that is NOT a match.
+     b. Check if ANY extracted fact DIRECTLY and EXPLICITLY addresses that key term.
+     c. If NO fact explicitly addresses it, respond ONLY with: "The requested information was not found in the available documents."
+     d. Do NOT infer or generalize. "Environmental pollutants" is NOT a match for "mold damage." A clause that COULD THEORETICALLY apply to the key term is NOT a match — the key term must be explicitly named.
+     e. If facts only describe general exclusions, disclaimers, or related topics WITHOUT naming the exact key term from the question, that is NOT a match — REFUSE.
    - This refusal does NOT apply to questions that ask to "summarize", "list", "compare", or "identify" across documents — those are enumeration questions and should always be answered from the extracted facts.
-2. Deduplicate: if multiple documents state the same fact, keep ONE bullet citing all source documents.
-3. One bullet per UNIQUE item — do not repeat or paraphrase the same fact.
-4. Include the exact values from the extractions (numbers, timeframes, names).
-5. Cite document sources in parentheses, e.g. (Source: Document Title).
-6. Be CONCISE — state each fact once, move on.
-7. RESPECT ALL QUALIFIERS from the question.
-8. Include RELATED concepts found in the extractions even if the terminology differs from the question.
-9. COVERAGE: Every document that has relevant extracted facts MUST appear in your response. Do not skip documents.
+2. SCOPE FILTER — read the question carefully and identify its SPECIFIC TOPIC:
+   - ONLY include facts that DIRECTLY answer or fall within the question's requested scope/category.
+   - DISCARD facts about other topics, even if they were extracted from the same document.
+   - Example: if the question asks about "reporting obligations," do NOT include insurance requirements, payment terms, or contact details.
+   - Example: if the question asks about "named parties/organizations," do NOT include jurisdictions, statutes, or non-organization entities.
+   - Raw contact details (phone numbers, fax, email addresses) are NOT "notice/delivery mechanisms" — only include them if they are part of a contractual notice REQUIREMENT.
+3. Deduplicate: if multiple documents state the same fact, keep ONE bullet citing all source documents.
+4. One bullet per UNIQUE item — do not repeat or paraphrase the same fact.
+5. Include the exact values from the extractions (numbers, timeframes, names).
+6. Cite document sources in parentheses, e.g. (Source: Document Title).
+7. Be CONCISE — state each fact once, move on. Do not add commentary or explanation.
+8. RESPECT ALL QUALIFIERS from the question.
+9. Include facts that address the question's topic using DIFFERENT TERMINOLOGY — but only if they truly answer the question, not merely because they come from a relevant document.
+10. COVERAGE: Every document that has relevant extracted facts MUST appear in your response. Do not skip documents.
 
 Respond using ONLY bullet points — no headers, no preamble, no summary paragraph:
 
@@ -3297,14 +3304,25 @@ Response:"""
                     fact_lower = f["fact"].lower()
                     hallucinated = False
                     for kp in _key_phrases:
+                        # Check the full phrase
                         if kp in fact_lower and kp not in content_lower:
+                            hallucinated = True
+                        # For multi-word phrases, also check each distinctive
+                        # word (4+ chars) — LLM may inject just part of the
+                        # phrase (e.g., "mold" from "mold damage").
+                        if not hallucinated and " " in kp:
+                            for w in kp.split():
+                                if len(w) >= 4 and w not in _stopwords:
+                                    if w in fact_lower and w not in content_lower:
+                                        hallucinated = True
+                                        break
+                        if hallucinated:
                             logger.debug(
                                 "map_fact_keyphrase_hallucination",
                                 doc_id=doc_id,
                                 fact=f["fact"][:100],
                                 hallucinated_phrase=kp,
                             )
-                            hallucinated = True
                             break
                     if hallucinated:
                         continue
