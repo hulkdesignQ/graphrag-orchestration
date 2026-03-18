@@ -337,6 +337,7 @@
         "label": "Base de conhecimento:",
         "placeholder": "Selecionar uma base de conhecimento…",
         "noFolders": "Nenhuma pasta analisada ainda",
-        "loadError": "Não foi possível carregar as pastas"
+        "loadError": "Could not load folders",
+        "demo": "Demo"
     }
 }

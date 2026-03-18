@@ -14,6 +14,8 @@ interface FolderSelectorProps {
     onFolderChange: (folderId: string | undefined) => void;
 }
 
+const DEMO_VALUE = "__demo__";
+
 export const FolderSelector = ({ selectedFolderId, onFolderChange }: FolderSelectorProps) => {
     const { t } = useTranslation();
     const client = useLogin ? useMsal().instance : undefined;
@@ -22,7 +24,6 @@ export const FolderSelector = ({ selectedFolderId, onFolderChange }: FolderSelec
     const [error, setError] = useState<string | null>(null);
 
     // Only show top-level user folders that have been analyzed
-    // (subfolders inherit analysis_status but are part of the parent's knowledge base)
     const analyzedFolders = folders.filter(
         f =>
             f.folder_type === "user" &&
@@ -49,17 +50,18 @@ export const FolderSelector = ({ selectedFolderId, onFolderChange }: FolderSelec
         loadFolders();
     }, [loadFolders]);
 
-    // Auto-select the first analyzed folder when none is pre-selected
+    // Default to "Demo" when nothing is pre-selected
     useEffect(() => {
         if (!selectedFolderId && analyzedFolders.length > 0) {
-            const folder = analyzedFolders[0];
-            onFolderChange(folder.analysis_group_id || folder.id);
+            onFolderChange(DEMO_VALUE);
         }
     }, [analyzedFolders.length, selectedFolderId]);
 
     const handleSelect = (_ev: SelectionEvents, data: OptionOnSelectData) => {
         const value = data.optionValue;
-        if (value) {
+        if (value === DEMO_VALUE) {
+            onFolderChange(DEMO_VALUE);
+        } else if (value) {
             onFolderChange(value);
         }
     };
@@ -91,10 +93,15 @@ export const FolderSelector = ({ selectedFolderId, onFolderChange }: FolderSelec
         );
     }
 
-    const selectedFolder = analyzedFolders.find(
+    const isDemo = selectedFolderId === DEMO_VALUE;
+    const selectedFolder = isDemo ? undefined : analyzedFolders.find(
         f => (f.analysis_group_id || f.id) === selectedFolderId
     );
-    const displayValue = selectedFolder ? `📁 ${selectedFolder.name}` : t("folderSelector.placeholder");
+    const displayValue = isDemo
+        ? `🎯 ${t("folderSelector.demo")}`
+        : selectedFolder
+            ? `📁 ${selectedFolder.name}`
+            : t("folderSelector.placeholder");
     const selectedOption = selectedFolderId || "";
 
     return (
@@ -108,6 +115,9 @@ export const FolderSelector = ({ selectedFolderId, onFolderChange }: FolderSelec
                 onOptionSelect={handleSelect}
                 size="small"
             >
+                <Option key="__demo__" value={DEMO_VALUE} text={`🎯 ${t("folderSelector.demo")}`}>
+                    🎯 {t("folderSelector.demo")}
+                </Option>
                 {analyzedFolders.map(folder => {
                     const label = `📁 ${folder.name}${folder.analysis_status === "stale" ? " ⚠" : ""}`;
                     return (
@@ -120,3 +130,5 @@ export const FolderSelector = ({ selectedFolderId, onFolderChange }: FolderSelec
         </div>
     );
 };
+
+export { DEMO_VALUE };

@@ -336,6 +336,7 @@
         "label": "知識庫：",
         "placeholder": "選擇知識庫…",
         "noFolders": "尚無已分析的資料夾",
-        "loadError": "無法載入資料夾"
+        "loadError": "Could not load folders",
+        "demo": "Demo"
     }
 }

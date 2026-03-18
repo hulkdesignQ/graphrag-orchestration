@@ -35,7 +35,8 @@
         "label": "Wissensdatenbank:",
         "placeholder": "Wissensdatenbank auswählen…",
         "noFolders": "Noch keine analysierten Ordner",
-        "loadError": "Ordner konnten nicht geladen werden"
+        "loadError": "Could not load folders",
+        "demo": "Demo"
     },
     "developerSettings": "Entwicklereinstellungen",
     "chatEmptyStateTitle": "Fragen Sie Ihre Dokumente. Vertrauen Sie jeder Antwort.",

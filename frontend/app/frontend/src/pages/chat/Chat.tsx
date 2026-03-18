@@ -19,7 +19,7 @@ import { HistoryPanel } from "../../components/HistoryPanel";
 import { HistoryProviderOptions, useHistoryManager } from "../../components/HistoryProviders";
 import { HistoryButton } from "../../components/HistoryButton";
 import { ClearChatButton } from "../../components/ClearChatButton";
-import { FolderSelector } from "../../components/FolderSelector";
+import { FolderSelector, DEMO_VALUE } from "../../components/FolderSelector";
 import { useLogin, getToken, requireAccessControl } from "../../authConfig";
 import { useMsal } from "@azure/msal-react";
 import { LoginContext } from "../../loginContext";
@@ -321,7 +321,7 @@ const Chat = () => {
                         use_sharepoint_source: sharePointSourceSupported ? sharePointSourceEnabled : false,
                         ...(seed !== null ? { seed: seed } : {}),
                         ...(speechDetectedLanguage ? { speech_detected_language: speechDetectedLanguage } : {}),
-                        ...(selectedFolderId ? { folder_id: selectedFolderId } : {})
+                        ...(selectedFolderId && selectedFolderId !== DEMO_VALUE ? { folder_id: selectedFolderId } : {})
                     }
                 },
                 // AI Chat Protocol: Client must pass on any session state received from the server
@@ -557,7 +557,9 @@ const Chat = () => {
 
                             <h1 className={styles.chatEmptyStateTitle}>{t("chatEmptyStateTitle")}</h1>
                             <h2 className={styles.chatEmptyStateSubtitle}>{t("chatEmptyStateSubtitle")}</h2>
-                            <ExampleList onExampleClicked={onExampleClicked} useMultimodalAnswering={showMultimodalOptions} />
+                            {selectedFolderId === DEMO_VALUE && (
+                                <ExampleList onExampleClicked={onExampleClicked} useMultimodalAnswering={showMultimodalOptions} />
+                            )}
                         </div>
                     ) : (
                         <div className={styles.chatMessageStream}>

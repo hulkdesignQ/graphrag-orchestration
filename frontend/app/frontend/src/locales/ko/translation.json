@@ -336,6 +336,7 @@
         "label": "지식 베이스:",
         "placeholder": "지식 베이스 선택…",
         "noFolders": "아직 분석된 폴더가 없습니다",
-        "loadError": "폴더를 불러올 수 없습니다"
+        "loadError": "Could not load folders",
+        "demo": "Demo"
     }
 }

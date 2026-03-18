@@ -1,1 +1,1 @@
-export { FolderSelector } from "./FolderSelector";
+export { FolderSelector, DEMO_VALUE } from "./FolderSelector";

@@ -337,6 +337,7 @@
         "label": "Kennisbank:",
         "placeholder": "Selecteer een kennisbank…",
         "noFolders": "Nog geen geanalyseerde mappen",
-        "loadError": "Kan mappen niet laden"
+        "loadError": "Could not load folders",
+        "demo": "Demo"
     }
 }

@@ -340,6 +340,7 @@
         "label": "Baza wiedzy:",
         "placeholder": "Wybierz bazę wiedzy…",
         "noFolders": "Brak przeanalizowanych folderów",
-        "loadError": "Nie można załadować folderów"
+        "loadError": "Could not load folders",
+        "demo": "Demo"
     }
 }

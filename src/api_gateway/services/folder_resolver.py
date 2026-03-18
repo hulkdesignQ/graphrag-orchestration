@@ -34,6 +34,16 @@ async def resolve_neo4j_group_id(
         ValueError: If the folder doesn't exist or doesn't belong to auth_group_id.
     """
     if not folder_id:
+        # No folder selected — find the first root folder partition
+        # so queries hit actual indexed data instead of the empty auth partition.
+        partition_ids = await get_valid_partition_ids(auth_group_id)
+        root_ids = [pid for pid in partition_ids if pid != auth_group_id]
+        if root_ids:
+            logger.info(
+                "no_folder_selected_using_first_partition",
+                extra={"auth_group_id": auth_group_id, "partition": root_ids[0]},
+            )
+            return root_ids[0]
         return auth_group_id
 
     from src.worker.services import GraphService

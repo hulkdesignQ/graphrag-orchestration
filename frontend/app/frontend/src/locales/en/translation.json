@@ -35,7 +35,8 @@
         "label": "Knowledge base:",
         "placeholder": "Select a knowledge base…",
         "noFolders": "No analyzed folders yet",
-        "loadError": "Could not load folders"
+        "loadError": "Could not load folders",
+        "demo": "Demo"
     },
     "developerSettings": "Developer settings",
     "chatEmptyStateTitle": "Ask your documents. Trust every answer.",

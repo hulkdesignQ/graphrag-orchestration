@@ -35,7 +35,8 @@
         "label": "ฐานความรู้:",
         "placeholder": "เลือกฐานความรู้…",
         "noFolders": "ยังไม่มีโฟลเดอร์ที่วิเคราะห์แล้ว",
-        "loadError": "ไม่สามารถโหลดโฟลเดอร์ได้"
+        "loadError": "Could not load folders",
+        "demo": "Demo"
     },
     "developerSettings": "ตั้งค่านักพัฒนา",
     "chatEmptyStateTitle": "ถามเอกสารของคุณ เชื่อมั่นทุกคำตอบ",

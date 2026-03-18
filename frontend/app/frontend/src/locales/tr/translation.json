@@ -337,6 +337,7 @@
         "label": "Bilgi tabanı:",
         "placeholder": "Bir bilgi tabanı seçin…",
         "noFolders": "Henüz analiz edilmiş klasör yok",
-        "loadError": "Klasörler yüklenemedi"
+        "loadError": "Could not load folders",
+        "demo": "Demo"
     }
 }

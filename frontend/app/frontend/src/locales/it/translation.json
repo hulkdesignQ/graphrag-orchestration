@@ -337,6 +337,7 @@
         "label": "Base di conoscenza:",
         "placeholder": "Seleziona una base di conoscenza…",
         "noFolders": "Nessuna cartella analizzata ancora",
-        "loadError": "Impossibile caricare le cartelle"
+        "loadError": "Could not load folders",
+        "demo": "Demo"
     }
 }
