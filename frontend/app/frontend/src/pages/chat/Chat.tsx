@@ -49,7 +49,7 @@ function getUserFriendlyError(error: unknown, t: (key: string) => string): strin
 
 const Chat = () => {
     const [searchParams] = useSearchParams();
-    const folderId = searchParams.get("folder") || undefined;
+    const folderId = searchParams.get("folder") || sessionStorage.getItem("selectedFolderId") || undefined;
     const [selectedFolderId, setSelectedFolderId] = useState<string | undefined>(folderId);
 
     const [isHistoryPanelOpen, setIsHistoryPanelOpen] = useState(false);
@@ -357,7 +357,7 @@ const Chat = () => {
                     setAnswers([...answers, [question, parsedResponse]]);
                     if (typeof parsedResponse.session_state === "string" && parsedResponse.session_state !== "") {
                         const token = client ? await getToken(client) : undefined;
-                        historyManager.addItem(parsedResponse.session_state, [...answers, [question, parsedResponse]], token);
+                        historyManager.addItem(parsedResponse.session_state, [...answers, [question, parsedResponse]], token, selectedFolderId);
                     }
                 } else {
                     // Stopped before any content arrived - restore question to input
@@ -372,7 +372,7 @@ const Chat = () => {
                 setAnswers([...answers, [question, parsedResponse as ChatAppResponse]]);
                 if (typeof parsedResponse.session_state === "string" && parsedResponse.session_state !== "") {
                     const token = client ? await getToken(client) : undefined;
-                    historyManager.addItem(parsedResponse.session_state, [...answers, [question, parsedResponse as ChatAppResponse]], token);
+                    historyManager.addItem(parsedResponse.session_state, [...answers, [question, parsedResponse as ChatAppResponse]], token, selectedFolderId);
                 }
             }
             setSpeechUrls([...speechUrls, null]);
@@ -409,6 +409,11 @@ const Chat = () => {
         (newFolderId: string | undefined) => {
             if (newFolderId !== selectedFolderId) {
                 setSelectedFolderId(newFolderId);
+                if (newFolderId) {
+                    sessionStorage.setItem("selectedFolderId", newFolderId);
+                } else {
+                    sessionStorage.removeItem("selectedFolderId");
+                }
                 clearChat();
             }
         },
@@ -654,10 +659,14 @@ const Chat = () => {
                         isOpen={isHistoryPanelOpen}
                         notify={!isStreaming && !isLoading}
                         onClose={() => setIsHistoryPanelOpen(false)}
-                        onChatSelected={answers => {
-                            if (answers.length === 0) return;
-                            setAnswers(answers);
-                            lastQuestionRef.current = answers[answers.length - 1][0];
+                        onChatSelected={data => {
+                            if (data.answers.length === 0) return;
+                            setAnswers(data.answers);
+                            lastQuestionRef.current = data.answers[data.answers.length - 1][0];
+                            if (data.folder_id) {
+                                setSelectedFolderId(data.folder_id);
+                                sessionStorage.setItem("selectedFolderId", data.folder_id);
+                            }
                         }}
                     />
                 )}

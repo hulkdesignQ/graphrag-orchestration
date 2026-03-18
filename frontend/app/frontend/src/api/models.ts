@@ -186,4 +186,5 @@ export type HistoryApiResponse = {
     id: string;
     entra_oid: string;
     answers: any;
+    folder_id?: string;
 };
