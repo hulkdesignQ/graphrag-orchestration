@@ -179,11 +179,12 @@ export const Answer = ({
                             {uniqueCitations.map((sc, idx) => {
                                 const rawName = sc.document_title || sc.source || "Unknown";
                                 const docName = (() => { try { return decodeURIComponent(rawName); } catch { return rawName; } })();
-                                let path = getCitationFilePath(docName, sc.document_url);
+                                const hasFile = Boolean(sc.document_url);
+                                let path = hasFile ? getCitationFilePath(docName, sc.document_url) : "";
                                 const hashParts: string[] = [];
                                 if (sc.page_number) hashParts.push(`page=${sc.page_number}`);
                                 if (sc.citation) hashParts.push(`ck=${encodeURIComponent(sc.citation)}`);
-                                if (hashParts.length) path += `#${hashParts.join("&")}`;
+                                if (hashParts.length && path) path += `#${hashParts.join("&")}`;
                                 const pageInfo = sc.page_number ? ` p.${sc.page_number}` : "";
                                 const sectionInfo = sc.section_path && sc.section_path !== "General" ? ` §${sc.section_path}` : "";
                                 const sentencePreview = sc.sentence_text || sc.text_preview || "";
@@ -193,16 +194,22 @@ export const Answer = ({
 
                                 return (
                                     <span key={`${sc.citation || docName}-${idx}`} className={styles.citationEntry}>
-                                        <a
-                                            className={styles.citation}
-                                            title={sentencePreview || docName}
-                                            onClick={e => {
-                                                e.preventDefault();
-                                                onCitationClicked(path);
-                                            }}
-                                        >
-                                            {`${idx + 1}. ${label}`}
-                                        </a>
+                                        {hasFile ? (
+                                            <a
+                                                className={styles.citation}
+                                                title={sentencePreview || docName}
+                                                onClick={e => {
+                                                    e.preventDefault();
+                                                    onCitationClicked(path);
+                                                }}
+                                            >
+                                                {`${idx + 1}. ${label}`}
+                                            </a>
+                                        ) : (
+                                            <span className={styles.citation} title={sentencePreview || docName} style={{ cursor: "default", opacity: 0.8 }}>
+                                                {`${idx + 1}. ${label}`}
+                                            </span>
+                                        )}
                                     </span>
                                 );
                             })}
