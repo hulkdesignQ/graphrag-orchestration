@@ -378,6 +378,79 @@ class ConceptSearchHandler(BaseRouteHandler):
             )
 
         # ================================================================
+        # Step 1d: Community → Entity → Sentence graph traversal
+        # Deterministic retrieval via the knowledge graph. Unlike vector
+        # search (Steps 1/1c), this follows entity MENTIONS edges so it
+        # finds sentences that are topically connected to matched
+        # communities regardless of vocabulary overlap.
+        # Example: query "dispute resolution" → community "Construction
+        # Defects" → entity "full refund" → sentence "Customer may cancel
+        # within 3 business days for full refund."
+        # ================================================================
+        graph_source_enabled = os.getenv(
+            "ROUTE6_GRAPH_SOURCE_SENTENCES", "1"
+        ).strip().lower() in {"1", "true", "yes"}
+        graph_source_sentences: List[Dict[str, Any]] = []
+
+        if graph_source_enabled and community_data:
+            t_gs = time.perf_counter()
+            try:
+                source_map = await self._fetch_community_source_sentences(
+                    community_data, folder_id=folder_id,
+                )
+                if source_map:
+                    # Dedup against original + community-guided evidence
+                    seen_ids = {
+                        s.get("sentence_id") for s in sentence_evidence
+                    }
+                    seen_ids.update(
+                        s.get("sentence_id") for s in community_guided_sentences
+                    )
+                    seen_texts = {
+                        (s.get("text") or "")[:100].lower().strip()
+                        for s in sentence_evidence
+                    }
+                    seen_texts.update(
+                        (s.get("text") or "")[:100].lower().strip()
+                        for s in community_guided_sentences
+                    )
+                    for cid, sents in source_map.items():
+                        for s in sents:
+                            sid = s.get("sentence_id")
+                            if sid and sid not in seen_ids:
+                                txt_key = (
+                                    (s.get("text") or "")[:100].lower().strip()
+                                )
+                                if txt_key not in seen_texts:
+                                    graph_source_sentences.append({
+                                        "sentence_id": sid,
+                                        "text": s.get("text", ""),
+                                        "source": s.get("document_title", ""),
+                                        "section_path": s.get("section_path", ""),
+                                        "page": s.get("page"),
+                                        "document_title": s.get("document_title", ""),
+                                        "score": 0.1,
+                                        "_graph_source": True,
+                                    })
+                                    seen_ids.add(sid)
+                                    seen_texts.add(txt_key)
+                    logger.info(
+                        "route6_graph_source_sentences",
+                        communities_with_sources=len(source_map),
+                        total_graph_sentences=sum(
+                            len(v) for v in source_map.values()
+                        ),
+                        new_unique=len(graph_source_sentences),
+                    )
+            except Exception as e:
+                logger.warning(
+                    "route6_graph_source_sentences_failed", error=str(e),
+                )
+            timings_ms["step_1d_graph_source_ms"] = int(
+                (time.perf_counter() - t_gs) * 1000
+            )
+
+        # ================================================================
         # Step 2: Denoise + Rerank sentence evidence
         # ================================================================
         if sentence_evidence:
@@ -389,7 +462,7 @@ class ConceptSearchHandler(BaseRouteHandler):
             rerank_enabled = os.getenv(
                 "ROUTE6_SENTENCE_RERANK", "1"
             ).strip().lower() in {"1", "true", "yes"}
-            rerank_top_k = int(os.getenv("ROUTE6_RERANK_TOP_K", "20"))
+            rerank_top_k = int(os.getenv("ROUTE6_RERANK_TOP_K", "25"))
             diversity_enabled = os.getenv(
                 "ROUTE6_SENTENCE_DIVERSITY", "1"
             ).strip().lower() in {"1", "true", "yes"}
@@ -471,6 +544,34 @@ class ConceptSearchHandler(BaseRouteHandler):
                     logger.info(
                         "route6_community_guided_injected_for_rerank",
                         injected=cg_injected,
+                        rerank_pool=len(sentence_evidence),
+                    )
+
+            # Inject graph-sourced sentences AFTER diversity + community-guided,
+            # BEFORE reranking.  These come from deterministic graph traversal
+            # (Community→Entity→Sentence) and may be very distant from the
+            # query in embedding space, but topically relevant via entity links.
+            if graph_source_sentences:
+                gs_denoised = self._denoise_sentences(graph_source_sentences)
+                if gs_denoised:
+                    seen_ids = {ev.get("sentence_id") for ev in sentence_evidence}
+                    seen_texts = {
+                        (ev.get("text") or "")[:100].lower().strip()
+                        for ev in sentence_evidence
+                    }
+                    gs_injected = 0
+                    for ev in gs_denoised:
+                        if ev.get("sentence_id") not in seen_ids:
+                            txt_key = (ev.get("text") or "")[:100].lower().strip()
+                            if txt_key in seen_texts:
+                                continue
+                            sentence_evidence.append(ev)
+                            seen_ids.add(ev.get("sentence_id"))
+                            seen_texts.add(txt_key)
+                            gs_injected += 1
+                    logger.info(
+                        "route6_graph_source_injected_for_rerank",
+                        injected=gs_injected,
                         rerank_pool=len(sentence_evidence),
                     )
 
