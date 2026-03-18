@@ -49,9 +49,13 @@ export const FolderSelector = ({ selectedFolderId, onFolderChange }: FolderSelec
         loadFolders();
     }, [loadFolders]);
 
-    // Don't auto-select — let users explicitly pick a folder so that
-    // demo/example questions work against the global (unscoped) knowledge base.
-    // useEffect(() => { ... auto-select removed ... }, [...])
+    // Auto-select the first analyzed folder when none is pre-selected
+    useEffect(() => {
+        if (!selectedFolderId && analyzedFolders.length > 0) {
+            const folder = analyzedFolders[0];
+            onFolderChange(folder.analysis_group_id || folder.id);
+        }
+    }, [analyzedFolders.length, selectedFolderId]);
 
     const handleSelect = (_ev: SelectionEvents, data: OptionOnSelectData) => {
         const value = data.optionValue;
