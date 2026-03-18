@@ -3393,6 +3393,7 @@ Response:"""
             return len(f_prefixes & _q_prefixes)
 
         all_facts: List[Dict[str, Any]] = []
+        all_overflow: List[Dict[str, Any]] = []
         for title, facts_list in title_groups.items():
             seen_keys: set = set()
             unique_facts: List[Dict[str, Any]] = []
@@ -3418,7 +3419,9 @@ Response:"""
                 )
             else:
                 capped = unique_facts
+                dropped = []
             all_facts.extend(capped)
+            all_overflow.extend(dropped)
         if len(all_facts) < total_extracted:
             logger.info(
                 "map_reduce_dedup_summary",
@@ -3450,6 +3453,23 @@ Response:"""
                 line += f' (Quote: "{quote[:150]}")'
             facts_lines.append(line)
         facts_block = "\n".join(facts_lines)
+
+        # Append overflow facts as supplementary context
+        if all_overflow:
+            overflow_lines = []
+            for i, fact in enumerate(all_overflow, 1):
+                overflow_lines.append(
+                    f'{i}. [{fact["_doc_title"]}] {fact["fact"]}'
+                )
+            facts_block += (
+                "\n\n--- ADDITIONAL EXTRACTED FACTS (lower priority, "
+                "include if they add unique information not covered above) ---\n"
+                + "\n".join(overflow_lines)
+            )
+            logger.info(
+                "map_reduce_overflow_appended",
+                overflow_count=len(all_overflow),
+            )
 
         reduce_prompt = self._REDUCE_MERGE_PROMPT.format(
             query=query,
