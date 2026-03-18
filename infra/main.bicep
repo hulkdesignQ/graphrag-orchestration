@@ -184,6 +184,9 @@ param neo4jDatabase string = 'neo4j'
 @description('Group ID override for shared demo tenant (empty = per-user isolation)')
 param groupIdOverride string = ''
 
+@description('Group ID for demo/sample documents shown with the Demo dropdown option')
+param demoGroupId string = ''
+
 @description('Deployment timestamp for cache busting — auto-generated on each deploy')
 param deployTimestamp string = utcNow()
 
@@ -406,6 +409,10 @@ var apiSpecificEnvVars = [
   {
     name: 'GROUP_ID_OVERRIDE'
     value: groupIdOverride
+  }
+  {
+    name: 'DEMO_GROUP_ID'
+    value: demoGroupId
   }
   {
     name: 'ALLOW_LEGACY_GROUP_HEADER'

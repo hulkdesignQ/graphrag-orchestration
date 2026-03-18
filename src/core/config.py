@@ -247,6 +247,7 @@ class Settings(BaseSettings):
     ALLOW_LEGACY_GROUP_HEADER: bool = False  # Allow X-Group-ID header (deprecated, only for local dev)
     GROUP_ID_OVERRIDE: Optional[str] = Field(default=None)  # Optional fixed group_id override for auth testing
     GLOBAL_GROUP_ID: str = "__global__"  # Sentinel group_id for shared/public documents
+    DEMO_GROUP_ID: Optional[str] = Field(default=None)  # Group_id for demo/sample documents (shown with Demo option)
     
     # Performance & Rate Limiting
     # Set to 1 for serial processing (10K TPM), 4 for parallel (50K+ TPM)

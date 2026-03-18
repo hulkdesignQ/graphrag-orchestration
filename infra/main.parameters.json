@@ -109,6 +109,9 @@
     },
     "groupIdOverride": {
       "value": "${GROUP_ID_OVERRIDE}"
+    },
+    "demoGroupId": {
+      "value": "${DEMO_GROUP_ID}"
     }
   }
 }
