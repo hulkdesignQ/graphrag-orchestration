@@ -271,7 +271,7 @@ const Chat = () => {
         });
     };
 
-    const makeApiRequest = async (question: string) => {
+    const makeApiRequest = async (question: string, skipFolderScope: boolean = false) => {
         const controller = new AbortController();
         setAbortController(controller);
         lastQuestionRef.current = question;
@@ -321,7 +321,7 @@ const Chat = () => {
                         use_sharepoint_source: sharePointSourceSupported ? sharePointSourceEnabled : false,
                         ...(seed !== null ? { seed: seed } : {}),
                         ...(speechDetectedLanguage ? { speech_detected_language: speechDetectedLanguage } : {}),
-                        ...(selectedFolderId ? { folder_id: selectedFolderId } : {})
+                        ...(selectedFolderId && !skipFolderScope ? { folder_id: selectedFolderId } : {})
                     }
                 },
                 // AI Chat Protocol: Client must pass on any session state received from the server
@@ -432,7 +432,7 @@ const Chat = () => {
     }, [streamingDisabledByOverrides, streamingEnabled]);
 
     const onExampleClicked = (example: string) => {
-        makeApiRequest(example);
+        makeApiRequest(example, true);
     };
 
     const onShowCitation = (citation: string, index: number) => {
