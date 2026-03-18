@@ -828,6 +828,11 @@ async def analyze_folder(
     folder_path = await _resolve_folder_path(partition_id, folder_id)
     blobs = await blob_manager.list_blobs_recursive(partition_id, folder_path or folder_name)
 
+    logger.info("folder_analysis_blobs_found",
+                folder_id=folder_id,
+                blob_count=len(blobs),
+                blob_names=[b["name"] for b in blobs])
+
     if not blobs:
         # Revert status since there's nothing to analyze
         revert_query = """
@@ -1122,13 +1127,16 @@ async def _run_folder_analysis(
             nonlocal _processed_count
             async with _extract_sem:
                 logger.info(f"folder_analysis_file_start: {blob['name']} ({idx+1}/{file_count})")
-                await doc_sync.on_file_uploaded(
+                success = await doc_sync.on_file_uploaded(
                     group_id=neo4j_gid,
                     filename=blob["name"],
                     blob_url=blob["url"],
                     user_id=partition_id,
                     extraction_only=True,
                 )
+                if not success:
+                    logger.error(f"folder_analysis_file_failed: {blob['name']} ({idx+1}/{file_count})")
+                    return
                 _processed_count += 1
                 progress_query = """
                 MATCH (f:Folder {id: $folder_id, group_id: $partition_id})

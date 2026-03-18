@@ -347,13 +347,16 @@ class Worker:
                 async def _extract_one(blob: dict) -> None:
                     async with _extract_sem:
                         logger.info(f"index_file_start: {blob['name']}")
-                        await doc_sync.on_file_uploaded(
+                        success = await doc_sync.on_file_uploaded(
                             group_id=neo4j_gid,
                             filename=blob["name"],
                             blob_url=blob["url"],
                             user_id=partition_id,
                             extraction_only=True,
                         )
+                        if not success:
+                            logger.error(f"index_file_failed: {blob['name']}")
+                            return
                         async with _progress_lock:
                             files_done.add(blob["name"])
                             with _neo4j_session() as session:

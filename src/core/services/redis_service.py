@@ -650,7 +650,9 @@ class RedisService:
         self,
         key: str,
         ttl_seconds: int = 60,
-        heartbeat_interval: int = 20
+        heartbeat_interval: int = 20,
+        retry_attempts: int = 3,
+        retry_delay: float = 1.0,
     ) -> AsyncIterator[DistributedLock]:
         """
         Acquire a distributed lock.
@@ -663,7 +665,9 @@ class RedisService:
             self._redis,
             key,
             ttl_seconds=ttl_seconds,
-            heartbeat_interval=heartbeat_interval
+            heartbeat_interval=heartbeat_interval,
+            retry_attempts=retry_attempts,
+            retry_delay=retry_delay,
         )
         
         try:

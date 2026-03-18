@@ -148,7 +148,7 @@ class DocumentSyncService:
     async def on_file_uploaded(
         self, group_id: str, filename: str, blob_url: str, user_id: str = "",
         extraction_only: bool = False,
-    ) -> None:
+    ) -> bool:
         """Trigger indexing for a newly uploaded file.
 
         If a document with the same source URL already exists (overwrite),
@@ -159,17 +159,27 @@ class DocumentSyncService:
 
         Acquires a Redis distributed lock to prevent concurrent indexing
         for the same group_id (matching the /hybrid/index/documents path).
+
+        Returns True on success, False on failure.
         """
         try:
             # Acquire distributed lock — same key as hybrid.py uses — to
             # prevent two concurrent uploads from racing on the same group.
+            # Use long retry (15 min) so concurrent files in folder analysis
+            # wait for each other instead of silently failing.
             from src.core.services.redis_service import get_redis_service
             redis_svc = await get_redis_service()
             lock_key = f"lock:{group_id}:indexing"
-            async with redis_svc.lock(lock_key, ttl_seconds=600):
+            async with redis_svc.lock(
+                lock_key,
+                ttl_seconds=600,
+                retry_attempts=180,
+                retry_delay=5.0,
+            ):
                 await self._on_file_uploaded_locked(
                     group_id, filename, blob_url, user_id, extraction_only,
                 )
+            return True
         except Exception as e:
             logger.error(
                 "doc_sync_upload_failed",
@@ -180,6 +190,7 @@ class DocumentSyncService:
                 },
                 exc_info=True,
             )
+            return False
 
     async def _on_file_uploaded_locked(
         self, group_id: str, filename: str, blob_url: str, user_id: str = "",
