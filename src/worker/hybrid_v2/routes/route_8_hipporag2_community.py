@@ -1438,14 +1438,20 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
                                 if r["sid"] not in _existing_ids
                             ]
                             if _available:
-                                for row in _available:
-                                    emb = row.get("emb")
-                                    row["_sim"] = (
-                                        _cosine(query_embedding, emb)
-                                        if emb else 0.0
-                                    )
-                                _available.sort(key=lambda r: -r["_sim"])
-                                _picks = _available[:_need]
+                                # For small docs, include ALL sentences
+                                # rather than cosine-selecting (avoids
+                                # missing topically diverse content).
+                                if len(_available) <= min_chunks_per_doc * 2:
+                                    _picks = _available
+                                else:
+                                    for row in _available:
+                                        emb = row.get("emb")
+                                        row["_sim"] = (
+                                            _cosine(query_embedding, emb)
+                                            if emb else 0.0
+                                        )
+                                    _available.sort(key=lambda r: -r["_sim"])
+                                    _picks = _available[:_need]
                                 _supplement_ids.extend(
                                     r["sid"] for r in _picks
                                 )
