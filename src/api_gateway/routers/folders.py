@@ -1119,41 +1119,31 @@ async def _run_folder_analysis(
                         total=file_count,
                         processed=resume_from)
 
-        import asyncio as _aio
-        _extract_sem = _aio.Semaphore(int(os.environ.get("INDEX_PARALLEL_DOCS", "3")))
-        _processed_count = resume_from
+        # ── Phase 1: Batch extraction (DI runs in parallel internally) ──
+        pending_blobs = blobs[resume_from:]
+        if pending_blobs:
+            logger.info(f"folder_analysis_batch_start: {len(pending_blobs)} files, skip={resume_from}")
+            stats = await doc_sync.on_batch_uploaded(
+                group_id=neo4j_gid,
+                files=[{"name": b["name"], "url": b["url"]} for b in pending_blobs],
+                user_id=partition_id,
+            )
+            if not stats:
+                raise RuntimeError(f"Batch extraction failed for {len(pending_blobs)} files")
 
-        async def _extract_one(idx: int, blob: dict) -> None:
-            nonlocal _processed_count
-            async with _extract_sem:
-                logger.info(f"folder_analysis_file_start: {blob['name']} ({idx+1}/{file_count})")
-                success = await doc_sync.on_file_uploaded(
-                    group_id=neo4j_gid,
-                    filename=blob["name"],
-                    blob_url=blob["url"],
-                    user_id=partition_id,
-                    extraction_only=True,
-                )
-                if not success:
-                    logger.error(f"folder_analysis_file_failed: {blob['name']} ({idx+1}/{file_count})")
-                    return
-                _processed_count += 1
-                progress_query = """
-                MATCH (f:Folder {id: $folder_id, group_id: $partition_id})
-                SET f.analysis_files_processed = $processed
-                """
-                with _get_session() as session:
-                    session.run(progress_query,
-                                folder_id=folder_id,
-                                partition_id=partition_id,
-                                processed=_processed_count)
-
-        tasks = [
-            _extract_one(idx, blob)
-            for idx, blob in enumerate(blobs)
-            if idx >= resume_from
-        ]
-        await _aio.gather(*tasks)
+            # Mark all files as processed
+            progress_query = """
+            MATCH (f:Folder {id: $folder_id, group_id: $partition_id})
+            SET f.analysis_files_processed = $processed
+            """
+            with _get_session() as session:
+                session.run(progress_query,
+                            folder_id=folder_id,
+                            partition_id=partition_id,
+                            processed=file_count)
+            logger.info(f"folder_analysis_batch_done: {len(pending_blobs)} files extracted")
+        else:
+            logger.info("folder_analysis_all_files_already_processed, skipping Phase 1")
 
         # ── Graph algorithms (steps 7.5-9) — run ONCE on full graph ──
         logger.info(f"folder_analysis_graph_algorithms group={neo4j_gid} files={file_count}")

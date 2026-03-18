@@ -330,48 +330,34 @@ class Worker:
                     fid=folder_id, pid=partition_id, total=file_count, processed=len(files_done),
                 )
 
-            # ── Parallel per-file extraction (steps 1-7 only) ──
-            # Graph-wide steps (7.5-9: triple embeddings, synonymy edges,
-            # KNN, Louvain, communities) are deferred to after all docs are
-            # extracted — running them per-doc is wasted work since each
-            # subsequent doc deletes and rebuilds them.
-            import asyncio as _aio
+            # ── Phase 1: Batch extraction (DI runs in parallel internally) ──
             import json as _json
-            _extract_sem = _aio.Semaphore(int(os.environ.get("INDEX_PARALLEL_DOCS", "3")))
-            _progress_lock = _aio.Lock()
 
             pending_blobs = [b for b in blobs if b["name"] not in files_done]
             if pending_blobs:
-                logger.info(f"index_folder_extract pending={len(pending_blobs)} skip={len(files_done)}")
+                logger.info(f"index_folder_batch_start pending={len(pending_blobs)} skip={len(files_done)}")
 
-                async def _extract_one(blob: dict) -> None:
-                    async with _extract_sem:
-                        logger.info(f"index_file_start: {blob['name']}")
-                        success = await doc_sync.on_file_uploaded(
-                            group_id=neo4j_gid,
-                            filename=blob["name"],
-                            blob_url=blob["url"],
-                            user_id=partition_id,
-                            extraction_only=True,
-                        )
-                        if not success:
-                            logger.error(f"index_file_failed: {blob['name']}")
-                            return
-                        async with _progress_lock:
-                            files_done.add(blob["name"])
-                            with _neo4j_session() as session:
-                                session.run(
-                                    "MATCH (f:Folder {id: $fid, group_id: $pid}) "
-                                    "SET f.analysis_files_processed = $processed, "
-                                    "    f.analysis_files_done = $done",
-                                    fid=folder_id, pid=partition_id,
-                                    processed=len(files_done),
-                                    done=_json.dumps(sorted(files_done)),
-                                )
-                        logger.info(f"index_file_done {len(files_done)}/{file_count}: {blob['name']}")
+                stats = await doc_sync.on_batch_uploaded(
+                    group_id=neo4j_gid,
+                    files=[{"name": b["name"], "url": b["url"]} for b in pending_blobs],
+                    user_id=partition_id,
+                )
+                if not stats:
+                    raise RuntimeError(f"Batch extraction failed for {len(pending_blobs)} files")
 
-                tasks = [_extract_one(blob) for blob in pending_blobs]
-                await _aio.gather(*tasks)
+                # Mark all files as done
+                for b in pending_blobs:
+                    files_done.add(b["name"])
+                with _neo4j_session() as session:
+                    session.run(
+                        "MATCH (f:Folder {id: $fid, group_id: $pid}) "
+                        "SET f.analysis_files_processed = $processed, "
+                        "    f.analysis_files_done = $done",
+                        fid=folder_id, pid=partition_id,
+                        processed=len(files_done),
+                        done=_json.dumps(sorted(files_done)),
+                    )
+                logger.info(f"index_folder_batch_done {len(files_done)}/{file_count}")
             else:
                 logger.info("index_folder_extract all files already done, skipping Phase 1")
 

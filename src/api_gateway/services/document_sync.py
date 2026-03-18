@@ -241,7 +241,80 @@ class DocumentSyncService:
                 },
             )
 
-    async def on_file_deleted(self, group_id: str, filename: str) -> None:
+    async def on_batch_uploaded(
+        self, group_id: str, files: List[Dict[str, str]], user_id: str = "",
+    ) -> Dict[str, Any]:
+        """Batch-index multiple files in a single pipeline call.
+
+        Acquires one Redis lock, deletes existing docs, then runs
+        index_documents with all files — DI extraction runs in parallel
+        internally (Semaphore(DI_CONCURRENCY)).
+
+        Args:
+            files: list of {"name": filename, "url": blob_url}
+
+        Returns pipeline stats dict on success, empty dict on failure.
+        """
+        file_names = [f["name"] for f in files]
+        try:
+            from src.core.services.redis_service import get_redis_service
+            redis_svc = await get_redis_service()
+            lock_key = f"lock:{group_id}:indexing"
+            async with redis_svc.lock(
+                lock_key,
+                ttl_seconds=600,
+                retry_attempts=180,
+                retry_delay=5.0,
+            ):
+                # Clean previous versions (sequential — fast Cypher lookups)
+                for f in files:
+                    await self._delete_existing_document(group_id, f["url"])
+
+                # Single batch pipeline call — DI runs in parallel internally
+                documents = [
+                    {"content": "", "title": f["name"], "source": f["url"], "metadata": {}}
+                    for f in files
+                ]
+                stats = await self.pipeline.index_documents(
+                    group_id=group_id,
+                    documents=documents,
+                    ingestion="document-intelligence",
+                    extraction_only=True,
+                    user_id=user_id,
+                )
+
+            # Write usage records (outside lock — non-critical)
+            per_file_sentences = stats.get("sentences", 0) // max(len(files), 1)
+            for f in files:
+                await self._write_document_usage(
+                    user_id=user_id or group_id,
+                    group_id=group_id,
+                    filename=f["name"],
+                    sentences=per_file_sentences,
+                )
+
+            logger.info(
+                "doc_sync_batch_indexed",
+                extra={
+                    "group_id": group_id,
+                    "file_count": len(files),
+                    "file_names": file_names,
+                    "stats": stats,
+                },
+            )
+            return stats
+        except Exception as e:
+            logger.error(
+                "doc_sync_batch_failed",
+                extra={
+                    "group_id": group_id,
+                    "file_count": len(files),
+                    "file_names": file_names,
+                    "error": str(e),
+                },
+                exc_info=True,
+            )
+            return {}
         """Hard-delete document and all children from Neo4j.
 
         Sets gds_stale=true on GroupMeta. The next index_documents() call
