@@ -33,10 +33,20 @@ async def resolve_neo4j_group_id(
     Raises:
         ValueError: If the folder doesn't exist or doesn't belong to auth_group_id.
     """
+    from src.core.config import settings
+
+    if folder_id == "__demo__":
+        if settings.DEMO_GROUP_ID:
+            logger.info(
+                "demo_folder_selected_using_demo_group",
+                extra={"auth_group_id": auth_group_id, "demo_group": settings.DEMO_GROUP_ID},
+            )
+            return settings.DEMO_GROUP_ID
+        return auth_group_id
+
     if not folder_id:
         # No folder selected — use DEMO_GROUP_ID if configured,
         # otherwise fall back to first user root folder partition.
-        from src.core.config import settings
 
         if settings.DEMO_GROUP_ID:
             logger.info(

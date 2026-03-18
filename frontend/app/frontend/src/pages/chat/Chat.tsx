@@ -321,7 +321,7 @@ const Chat = () => {
                         use_sharepoint_source: sharePointSourceSupported ? sharePointSourceEnabled : false,
                         ...(seed !== null ? { seed: seed } : {}),
                         ...(speechDetectedLanguage ? { speech_detected_language: speechDetectedLanguage } : {}),
-                        ...(selectedFolderId && selectedFolderId !== DEMO_VALUE ? { folder_id: selectedFolderId } : {})
+                        ...(selectedFolderId ? { folder_id: selectedFolderId } : {})
                     }
                 },
                 // AI Chat Protocol: Client must pass on any session state received from the server
