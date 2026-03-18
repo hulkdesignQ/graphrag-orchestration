@@ -381,7 +381,20 @@ async def _execute_query(
     from src.worker.hybrid_v2.router.main import QueryRoute
     from src.api_gateway.services.folder_resolver import resolve_neo4j_group_id
 
+    logger.info(
+        "execute_query_resolve_start",
+        auth_group_id=group_id,
+        folder_id_raw=folder_id,
+        folder_id_type=type(folder_id).__name__,
+        folder_id_repr=repr(folder_id),
+    )
     neo4j_gid = await resolve_neo4j_group_id(group_id, folder_id)
+    logger.info(
+        "execute_query_resolved",
+        auth_group_id=group_id,
+        folder_id_raw=folder_id,
+        neo4j_gid=neo4j_gid,
+    )
     # Demo mode: group_id is resolved but there's no real folder to scope by
     if folder_id == "__demo__":
         folder_id = None
@@ -1336,6 +1349,7 @@ async def frontend_chat_stream(
         approach=approach,
         force_route=force_route_str,
         query_preview=query[:50],
+        folder_id=overrides.folder_id if overrides else None,
     )
 
     # Generate session_state UUID so the frontend can save chat history
