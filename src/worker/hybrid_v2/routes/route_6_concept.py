@@ -42,6 +42,7 @@ from .route_6_prompts import (
     SYNTHESIS_COMPLETENESS_CHECK_PROMPT,
     COMMUNITY_MAP_SYNTHESIS_PROMPT,
     REDUCE_SYNTHESIS_PROMPT,
+    SELF_CONSISTENCY_MERGE_PROMPT,
 )
 from ..services.neo4j_retry import retry_session
 
@@ -312,6 +313,71 @@ class ConceptSearchHandler(BaseRouteHandler):
             )
 
         # ================================================================
+        # Step 1c: Community-guided sentence retrieval
+        # The original sentence search uses the user query, which may miss
+        # semantically distant but topically relevant sentences (e.g. query
+        # says "indemnification" but warranty disclaimers use "merchantability").
+        # Use matched community TITLES as supplementary search queries to
+        # bridge this vocabulary gap.
+        # Community-guided sentences are kept SEPARATE and injected after
+        # diversity (before reranking) so the score_gate doesn't filter them.
+        # ================================================================
+        community_guided = os.getenv(
+            "ROUTE6_COMMUNITY_GUIDED_RETRIEVAL", "1"
+        ).strip().lower() in {"1", "true", "yes"}
+        community_guided_sentences: List[Dict[str, Any]] = []
+
+        if community_guided and community_data:
+            t_cg = time.perf_counter()
+            community_titles = [
+                c.get("title", "") for c in community_data if c.get("title")
+            ]
+            if community_titles:
+                # Single supplementary query combining all community titles
+                supplementary_query = " | ".join(community_titles)
+                # Trim to keep embedding input reasonable
+                supplementary_query = supplementary_query[:500]
+                try:
+                    additional = await self._retrieve_sentence_evidence(
+                        supplementary_query,
+                        top_k=sentence_top_k,
+                        folder_id=folder_id,
+                    )
+                    if additional:
+                        # Dedup against original sentence evidence
+                        seen_ids = {
+                            s.get("sentence_id") for s in sentence_evidence
+                        }
+                        seen_texts = {
+                            (s.get("text") or "")[:100].lower().strip()
+                            for s in sentence_evidence
+                        }
+                        for s in additional:
+                            if s.get("sentence_id") not in seen_ids:
+                                txt_key = (
+                                    (s.get("text") or "")[:100].lower().strip()
+                                )
+                                if txt_key not in seen_texts:
+                                    s["_community_guided"] = True
+                                    community_guided_sentences.append(s)
+                                    seen_ids.add(s.get("sentence_id"))
+                                    seen_texts.add(txt_key)
+                        logger.info(
+                            "route6_community_guided_retrieval",
+                            community_titles=len(community_titles),
+                            additional_found=len(additional),
+                            new_unique=len(community_guided_sentences),
+                        )
+                except Exception as e:
+                    logger.warning(
+                        "route6_community_guided_retrieval_failed",
+                        error=str(e),
+                    )
+            timings_ms["step_1c_community_guided_ms"] = int(
+                (time.perf_counter() - t_cg) * 1000
+            )
+
+        # ================================================================
         # Step 2: Denoise + Rerank sentence evidence
         # ================================================================
         if sentence_evidence:
@@ -376,6 +442,35 @@ class ConceptSearchHandler(BaseRouteHandler):
                     logger.info(
                         "route6_expansion_injected_for_rerank",
                         injected=len(expanded_denoised),
+                        rerank_pool=len(sentence_evidence),
+                    )
+
+            # Inject community-guided sentences AFTER diversity, BEFORE reranking.
+            # These sentences were found using community titles as queries and may
+            # be semantically distant from the original user query. The diversity
+            # score_gate would filter them out, but the cross-encoder reranker
+            # can recognise topical relevance (e.g. "merchantability" → "liability").
+            if community_guided_sentences:
+                cg_denoised = self._denoise_sentences(community_guided_sentences)
+                if cg_denoised:
+                    seen_ids = {ev.get("sentence_id") for ev in sentence_evidence}
+                    seen_texts = {
+                        (ev.get("text") or "")[:100].lower().strip()
+                        for ev in sentence_evidence
+                    }
+                    cg_injected = 0
+                    for ev in cg_denoised:
+                        if ev.get("sentence_id") not in seen_ids:
+                            txt_key = (ev.get("text") or "")[:100].lower().strip()
+                            if txt_key in seen_texts:
+                                continue
+                            sentence_evidence.append(ev)
+                            seen_ids.add(ev.get("sentence_id"))
+                            seen_texts.add(txt_key)
+                            cg_injected += 1
+                    logger.info(
+                        "route6_community_guided_injected_for_rerank",
+                        injected=cg_injected,
                         rerank_pool=len(sentence_evidence),
                     )
 
@@ -559,21 +654,32 @@ class ConceptSearchHandler(BaseRouteHandler):
             language=language, folder_id=folder_id,
         )
 
-        try:
-            response = await acomplete_with_retry(self.llm, prompt)
-            answer = response.text.strip()
-        except Exception as e:
-            logger.error(
-                "route6_synthesis_failed",
-                error=str(e),
-                error_type=type(e).__name__,
-            )
-            return (
-                "An error occurred while synthesizing the response. "
-                f"Please try again. (Error: {type(e).__name__})"
-            )
+        # Self-consistency: run synthesis N times in parallel, merge results
+        self_consistency = os.getenv(
+            "ROUTE6_SELF_CONSISTENCY", "0"
+        ).strip().lower() in {"1", "true", "yes"}
+        sc_count = int(os.getenv("ROUTE6_SELF_CONSISTENCY_N", "2"))
 
-        # Two-pass completeness check
+        if self_consistency and sc_count >= 2:
+            answer = await self._self_consistent_synthesize(
+                query, prompt, summaries_text, n=sc_count, language=language,
+            )
+        else:
+            try:
+                response = await acomplete_with_retry(self.llm, prompt)
+                answer = response.text.strip()
+            except Exception as e:
+                logger.error(
+                    "route6_synthesis_failed",
+                    error=str(e),
+                    error_type=type(e).__name__,
+                )
+                return (
+                    "An error occurred while synthesizing the response. "
+                    f"Please try again. (Error: {type(e).__name__})"
+                )
+
+        # Two-pass completeness check (works on both single-call and merged answers)
         completeness_check = os.getenv(
             "ROUTE6_COMPLETENESS_CHECK", "1"
         ).strip().lower() in {"1", "true", "yes"}
@@ -582,6 +688,77 @@ class ConceptSearchHandler(BaseRouteHandler):
             answer = await self._completeness_check(query, summaries_text, answer)
 
         return answer
+
+    async def _self_consistent_synthesize(
+        self,
+        query: str,
+        prompt: str,
+        summaries_text: str,
+        n: int = 2,
+        language: Optional[str] = None,
+    ) -> str:
+        """Run synthesis N times in parallel, then merge answers.
+
+        Each call sees the same prompt but LLM non-determinism produces
+        different item selections. The merge step takes the UNION of
+        items from all answers, reducing the chance of dropping any item.
+
+        Falls back to single answer if merge fails.
+        """
+        t0 = time.perf_counter()
+
+        # Run N synthesis calls in parallel
+        async def _one_synthesis() -> str:
+            try:
+                resp = await acomplete_with_retry(self.llm, prompt)
+                return resp.text.strip()
+            except Exception as e:
+                logger.warning("route6_sc_synthesis_one_failed", error=str(e))
+                return ""
+
+        tasks = [_one_synthesis() for _ in range(n)]
+        answers = await asyncio.gather(*tasks)
+        answers = [a for a in answers if a and len(a) > 50]
+        synthesis_ms = int((time.perf_counter() - t0) * 1000)
+
+        if not answers:
+            return "An error occurred while synthesizing the response. Please try again."
+
+        if len(answers) == 1:
+            logger.info("route6_sc_only_one_answer", synthesis_ms=synthesis_ms)
+            return answers[0]
+
+        # Merge: combine Answer A + Answer B via merge prompt
+        t1 = time.perf_counter()
+        merge_prompt = SELF_CONSISTENCY_MERGE_PROMPT.format(
+            query=query,
+            answer_a=answers[0],
+            answer_b=answers[1],
+        )
+        if language:
+            merge_prompt += f"\n\nIMPORTANT: Respond entirely in {language}."
+
+        try:
+            merge_resp = await acomplete_with_retry(self.llm, merge_prompt)
+            merged = merge_resp.text.strip()
+            merge_ms = int((time.perf_counter() - t1) * 1000)
+        except Exception as e:
+            logger.warning("route6_sc_merge_failed", error=str(e))
+            # Fallback: return the longer answer
+            merged = max(answers, key=len)
+            merge_ms = 0
+
+        logger.info(
+            "route6_self_consistency_done",
+            n=n,
+            answer_lengths=[len(a) for a in answers],
+            merged_length=len(merged),
+            synthesis_ms=synthesis_ms,
+            merge_ms=merge_ms,
+            total_ms=synthesis_ms + merge_ms,
+        )
+
+        return merged
 
     async def _completeness_check(
         self,

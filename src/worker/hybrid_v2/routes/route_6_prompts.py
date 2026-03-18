@@ -198,3 +198,36 @@ You are a document analysis assistant. Merge thematic responses into a final com
 
 **Answer**:
 """
+
+
+# ─────────────────────────────────────────────────────────────────
+# SELF-CONSISTENCY MERGE PROMPT
+# ─────────────────────────────────────────────────────────────────
+# Two parallel synthesis calls produce Answer A and Answer B.
+# This prompt merges them into a single answer that preserves the
+# UNION of all items from both, reducing variance from LLM non-determinism.
+
+SELF_CONSISTENCY_MERGE_PROMPT = """\
+You are merging two answers to the same query. Both answers were generated from identical evidence — they differ only due to LLM non-determinism.
+
+**Query**: {query}
+
+**Answer A**:
+{answer_a}
+
+**Answer B**:
+{answer_b}
+
+**Instructions**:
+1. Produce a SINGLE merged answer that includes EVERY distinct item from BOTH answers.
+2. If an item appears in only one answer, INCLUDE it — the other answer dropped it by accident.
+3. If an item appears in both, include it ONCE with the most detailed version.
+4. Do NOT add new information beyond what appears in Answer A or Answer B.
+5. PRECISION: If one answer includes an item and the other explicitly states that category has no relevant content, trust the answer that INCLUDES the item (it found something the other missed).
+6. However, if one answer includes a borderline item that is NOT a clear match for the query's stated category, OMIT it. For example: warranty coverage expiration is NOT a "non-refundable/forfeiture term"; general boilerplate is NOT a specific provision.
+7. Preserve the organizational structure (headings, grouping by document) from whichever answer is better structured.
+8. Keep specific details: names, amounts, dates, conditions, section references.
+9. Do not mention that this is a merged answer or reference "Answer A" or "Answer B".
+
+**Merged Answer**:
+"""
