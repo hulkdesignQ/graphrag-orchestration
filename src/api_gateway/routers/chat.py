@@ -1015,7 +1015,7 @@ class FrontendChatOverrides(BaseModel):
     reasoning_effort: Optional[str] = None
     temperature: Optional[float] = None
     top: Optional[int] = None
-    suggest_followup_questions: Optional[bool] = True
+    suggest_followup_questions: Optional[bool] = False
     send_text_sources: Optional[bool] = True
     send_image_sources: Optional[bool] = False
     search_text_embeddings: Optional[bool] = True
