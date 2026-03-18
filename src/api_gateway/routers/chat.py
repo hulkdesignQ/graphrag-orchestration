@@ -382,6 +382,9 @@ async def _execute_query(
     from src.api_gateway.services.folder_resolver import resolve_neo4j_group_id
 
     neo4j_gid = await resolve_neo4j_group_id(group_id, folder_id)
+    # Demo mode: group_id is resolved but there's no real folder to scope by
+    if folder_id == "__demo__":
+        folder_id = None
     pipeline = await _get_hybrid_pipeline(neo4j_gid, folder_id)
 
     # Resolve route: direct force_route string takes priority over approach mapping
