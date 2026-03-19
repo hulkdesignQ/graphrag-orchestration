@@ -11,8 +11,10 @@ Architecture:
 
 import logging
 from typing import Optional
+import structlog
 
 logger = logging.getLogger(__name__)
+slogger = structlog.get_logger(__name__)
 
 
 async def resolve_neo4j_group_id(
@@ -35,13 +37,26 @@ async def resolve_neo4j_group_id(
     """
     from src.core.config import settings
 
+    slogger.info(
+        "resolve_neo4j_group_id_entry",
+        folder_id=folder_id,
+        auth_group_id=auth_group_id,
+        demo_group_id=settings.DEMO_GROUP_ID,
+        demo_group_id_bool=bool(settings.DEMO_GROUP_ID) if settings.DEMO_GROUP_ID is not None else False,
+        settings_id=id(settings),
+    )
+
     if folder_id == "__demo__":
         if settings.DEMO_GROUP_ID:
-            logger.info(
-                "demo_folder_selected_using_demo_group",
-                extra={"auth_group_id": auth_group_id, "demo_group": settings.DEMO_GROUP_ID},
+            slogger.info(
+                "demo_folder_resolved",
+                result=settings.DEMO_GROUP_ID,
             )
             return settings.DEMO_GROUP_ID
+        slogger.warning(
+            "demo_folder_no_demo_group_id",
+            falling_back_to=auth_group_id,
+        )
         return auth_group_id
 
     if not folder_id:
