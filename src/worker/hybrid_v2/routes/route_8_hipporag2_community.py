@@ -1653,13 +1653,26 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
                                     for s in sec_sents
                                 )
                                 if not has_rep and sec_sents:
-                                    _sec_candidates.append(sec_sents[0])
+                                    # Small sections (≤3 sentences): add all
+                                    # so reranker can pick the most relevant.
+                                    # Larger sections: just the first sentence.
+                                    if len(sec_sents) <= 3:
+                                        _sec_candidates.extend(sec_sents)
+                                    else:
+                                        _sec_candidates.append(sec_sents[0])
+                                elif has_rep and len(sec_sents) <= 3:
+                                    # Section completion: tiny sections that
+                                    # are partially represented — add missing
+                                    # sentences so MAP sees full context.
+                                    for s in sec_sents:
+                                        if s["sid"] not in _sec_existing:
+                                            _sec_candidates.append(s)
 
                     # Reranker filter: keep only sections the reranker
                     # scores above threshold (semantic relevance to query).
                     _sec_supplement: List[str] = []
                     _sec_rerank_threshold = 0.30
-                    _sec_max_add = 3
+                    _sec_max_add = 5
                     if _sec_candidates:
                         try:
                             _sec_vc = make_voyage_client()
@@ -3377,6 +3390,7 @@ Instructions:
    - DISCARD facts about other topics, even if they were extracted from the same document.
    - Example: if the question asks about "reporting obligations," do NOT include insurance requirements, payment terms, or contact details.
    - Example: if the question asks about "named parties/organizations," do NOT include jurisdictions, statutes, or non-organization entities.
+   - When a question uses a term with multiple senses (e.g., "forfeiture"), stay within the question's context. Financial/payment forfeiture ≠ procedural loss of legal rights; product warranty ≠ service warranty.
    - Raw contact details (phone numbers, fax, email addresses) are NOT "notice/delivery mechanisms" — only include them if they are part of a contractual notice REQUIREMENT.
 3. Deduplicate: if multiple documents state the same fact, keep ONE bullet citing all source documents.
 4. One bullet per UNIQUE item — do not repeat or paraphrase the same fact.
