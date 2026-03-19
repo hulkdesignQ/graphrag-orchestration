@@ -1483,7 +1483,7 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
                     WHERE s.document_id = $doc_id
                       AND s.group_id IN $group_ids
                     RETURN s.id AS sid, s.index_in_doc AS idx,
-                           s.sentence_embedding AS emb
+                           s.sentence_embedding AS emb, s.text AS text
                     ORDER BY s.index_in_doc
                     """
 
@@ -1492,6 +1492,9 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
                         na = sum(x * x for x in a) ** 0.5
                         nb = sum(x * x for x in b) ** 0.5
                         return dot / (na * nb) if na and nb else 0.0
+
+                    # Collect docs needing reranker-based selection
+                    _rerank_batches: List[tuple] = []  # (doc_id, _need, _available)
 
                     async with self._async_neo4j._get_session() as session:
                         for doc_id, total in _target_docs:
@@ -1511,21 +1514,67 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
                             ]
                             if _available:
                                 # For small docs, include ALL sentences
-                                # rather than cosine-selecting (avoids
-                                # missing topically diverse content).
                                 if len(_available) <= min_chunks_per_doc * 2:
-                                    _picks = _available
+                                    _supplement_ids.extend(
+                                        r["sid"] for r in _available
+                                    )
                                 else:
-                                    for row in _available:
-                                        emb = row.get("emb")
-                                        row["_sim"] = (
-                                            _cosine(query_embedding, emb)
-                                            if emb else 0.0
-                                        )
-                                    _available.sort(key=lambda r: -r["_sim"])
-                                    _picks = _available[:_need]
+                                    _rerank_batches.append(
+                                        (doc_id, _need, _available)
+                                    )
+
+                    # Use reranker for larger docs — it bridges semantic
+                    # gaps that cosine misses (e.g. "cancel for refund"
+                    # as a "remedy").  Falls back to cosine on failure.
+                    if _rerank_batches:
+                        try:
+                            _vc = make_voyage_client()
+                            for _doc_id, _need, _avail in _rerank_batches:
+                                _texts = [
+                                    r.get("text") or "" for r in _avail
+                                ]
+                                _rr = await rerank_with_retry(
+                                    _vc,
+                                    query=query,
+                                    documents=_texts,
+                                    model="rerank-2.5",
+                                    top_k=min(
+                                        _need + min_chunks_per_doc,
+                                        len(_texts),
+                                    ),
+                                )
+                                _picks = [
+                                    _avail[rr_item.index]
+                                    for rr_item in _rr.results
+                                ][:_need + min_chunks_per_doc]
                                 _supplement_ids.extend(
                                     r["sid"] for r in _picks
+                                )
+                                logger.info(
+                                    "step_45d_rerank_supplement",
+                                    doc_id=_doc_id[:12],
+                                    candidates=len(_avail),
+                                    selected=len(_picks),
+                                    top_score=round(
+                                        _rr.results[0].relevance_score, 3
+                                    ) if _rr.results else 0,
+                                )
+                        except Exception as _rr_err:
+                            logger.warning(
+                                "step_45d_rerank_fallback_to_cosine",
+                                error=str(_rr_err),
+                            )
+                            # Fallback: cosine selection
+                            for _doc_id, _need, _avail in _rerank_batches:
+                                for row in _avail:
+                                    emb = row.get("emb")
+                                    row["_sim"] = (
+                                        _cosine(query_embedding, emb)
+                                        if emb else 0.0
+                                    )
+                                _avail.sort(key=lambda r: -r["_sim"])
+                                _supplement_ids.extend(
+                                    r["sid"] for r in _avail[:_need]
                                 )
 
                     if _supplement_ids:
@@ -1548,6 +1597,114 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
                             )
             except Exception as e:
                 logger.warning("step_45d_min_chunks_per_doc_failed", error=str(e))
+
+        # ── Step 45e: Section-coverage guarantee ──────────────────────
+        # Ensure query-relevant sections from represented documents are
+        # not silently dropped.  PPR may retrieve many sentences from
+        # high-entity sections while missing isolated sections with
+        # few/no entities (e.g., "Right to Cancel").  We collect one
+        # sentence from each unrepresented section, then use the
+        # reranker to keep only those relevant to the query.
+        if min_chunks_per_doc > 0 and pre_fetched_chunks is not None and self._async_neo4j:
+            try:
+                _sec_doc_ids: set = set()
+                _sec_existing: set = set()
+                for c in pre_fetched_chunks:
+                    _meta = c.get("metadata") or {}
+                    did = _meta.get("document_id") or c.get("document_id") or ""
+                    if did:
+                        _sec_doc_ids.add(did)
+                    _sec_existing.add(c.get("sentence_id") or c.get("id", ""))
+
+                if _sec_doc_ids:
+                    _sec_cypher = """
+                    MATCH (sent:Sentence)-[:IN_SECTION]->(sec:Section)
+                    WHERE sent.document_id = $doc_id
+                      AND sent.group_id IN $group_ids
+                    RETURN sec.title AS section, sent.id AS sid,
+                           sent.text AS text
+                    ORDER BY sec.title, sent.index_in_section
+                    """
+                    # Candidate sentences (one per missing section)
+                    _sec_candidates: List[Dict] = []
+                    async with self._async_neo4j._get_session() as session:
+                        for did in _sec_doc_ids:
+                            _res = await session.run(
+                                _sec_cypher, doc_id=did,
+                                group_ids=self.group_ids,
+                            )
+                            _rows = await _res.data()
+                            _by_sec: Dict[str, List[Dict]] = defaultdict(list)
+                            for r in _rows:
+                                _by_sec[r["section"]].append(r)
+                            for sec_title, sec_sents in _by_sec.items():
+                                has_rep = any(
+                                    s["sid"] in _sec_existing
+                                    for s in sec_sents
+                                )
+                                if not has_rep and sec_sents:
+                                    _sec_candidates.append(sec_sents[0])
+
+                    # Reranker filter: keep only sections the reranker
+                    # scores above threshold (semantic relevance to query).
+                    _sec_supplement: List[str] = []
+                    _sec_rerank_threshold = 0.30
+                    _sec_max_add = 3
+                    if _sec_candidates:
+                        try:
+                            _sec_vc = make_voyage_client()
+                            _sec_texts = [
+                                c.get("text") or "" for c in _sec_candidates
+                            ]
+                            _sec_rr = await rerank_with_retry(
+                                _sec_vc,
+                                query=query,
+                                documents=_sec_texts,
+                                model="rerank-2.5",
+                                top_k=len(_sec_texts),
+                            )
+                            for rr_item in _sec_rr.results:
+                                if (rr_item.relevance_score >= _sec_rerank_threshold
+                                        and len(_sec_supplement) < _sec_max_add):
+                                    _sec_supplement.append(
+                                        _sec_candidates[rr_item.index]["sid"]
+                                    )
+                            logger.info(
+                                "step_45e_rerank_filter",
+                                candidates=len(_sec_candidates),
+                                kept=len(_sec_supplement),
+                                threshold=_sec_rerank_threshold,
+                                top_score=round(
+                                    _sec_rr.results[0].relevance_score, 3
+                                ) if _sec_rr.results else 0,
+                            )
+                        except Exception as _rr_err:
+                            logger.warning(
+                                "step_45e_rerank_failed_adding_all",
+                                error=str(_rr_err),
+                            )
+                            _sec_supplement = [
+                                c["sid"] for c in _sec_candidates
+                            ]
+
+                    if _sec_supplement:
+                        _sec_chunks = await self._fetch_sentences_by_ids(
+                            _sec_supplement,
+                            ppr_scores_map={
+                                sid: 0.004 for sid in _sec_supplement
+                            },
+                            sentence_window_enabled=False,
+                            folder_id=folder_id,
+                        )
+                        if _sec_chunks:
+                            pre_fetched_chunks = list(pre_fetched_chunks) + _sec_chunks
+                            logger.info(
+                                "step_45e_section_coverage",
+                                sections_added=len(_sec_chunks),
+                                total_chunks=len(pre_fetched_chunks),
+                            )
+            except Exception as e:
+                logger.warning("step_45e_section_coverage_failed", error=str(e))
 
         # Convert sentence evidence to coverage_chunks format
         sentence_chunks: List[Dict[str, Any]] = []
