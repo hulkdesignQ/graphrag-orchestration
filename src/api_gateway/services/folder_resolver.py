@@ -35,40 +35,28 @@ async def resolve_neo4j_group_id(
     Raises:
         ValueError: If the folder doesn't exist or doesn't belong to auth_group_id.
     """
+    import os
     from src.core.config import settings
 
-    slogger.info(
-        "resolve_neo4j_group_id_entry",
-        folder_id=folder_id,
-        auth_group_id=auth_group_id,
-        demo_group_id=settings.DEMO_GROUP_ID,
-        demo_group_id_bool=bool(settings.DEMO_GROUP_ID) if settings.DEMO_GROUP_ID is not None else False,
-        settings_id=id(settings),
-    )
+    # Read DEMO_GROUP_ID with env-var fallback.  Pydantic BaseSettings is
+    # mutable (not frozen) and the singleton value can drift from the real
+    # environment variable in long-running processes.
+    demo_group_id = settings.DEMO_GROUP_ID or os.environ.get("DEMO_GROUP_ID") or None
 
     if folder_id == "__demo__":
-        if settings.DEMO_GROUP_ID:
-            slogger.info(
-                "demo_folder_resolved",
-                result=settings.DEMO_GROUP_ID,
-            )
-            return settings.DEMO_GROUP_ID
-        slogger.warning(
-            "demo_folder_no_demo_group_id",
-            falling_back_to=auth_group_id,
-        )
+        if demo_group_id:
+            slogger.info("demo_folder_resolved", result=demo_group_id)
+            return demo_group_id
+        slogger.warning("demo_folder_no_demo_group_id", falling_back_to=auth_group_id)
         return auth_group_id
 
     if not folder_id:
         # No folder selected — use DEMO_GROUP_ID if configured,
         # otherwise fall back to first user root folder partition.
 
-        if settings.DEMO_GROUP_ID:
-            logger.info(
-                "no_folder_selected_using_demo_group",
-                extra={"auth_group_id": auth_group_id, "demo_group": settings.DEMO_GROUP_ID},
-            )
-            return settings.DEMO_GROUP_ID
+        if demo_group_id:
+            slogger.info("no_folder_using_demo_group", demo_group=demo_group_id)
+            return demo_group_id
 
         partition_ids = await _get_user_root_folder_ids(auth_group_id)
         if partition_ids:
