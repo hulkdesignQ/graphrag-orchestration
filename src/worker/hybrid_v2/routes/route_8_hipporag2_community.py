@@ -184,8 +184,12 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
             "max_tokens": None,
             "community_passage_seeds": True,   # inject Community→Entity→Sentence into passage seeds
             "community_guided_instruction": True,  # guide embed + reranker with community summaries
-            "rerank_dynamic_cutoff": True,  # relevance-score threshold instead of fixed top-K
+            "rerank_dynamic_cutoff": False,  # fixed top-K gives MAP more data for cross-doc synthesis
+            "rerank_top_k": 260,  # wide net — MAP-REDUCE handles volume
             "min_chunks_per_doc": 5,  # guarantee every doc gets at least 5 chunks for global questions
+            "max_chunks_per_doc": 5,  # cap per doc to balance coverage across documents
+            "map_reduce_synthesis": True,  # per-document MAP extraction → cross-doc REDUCE merge
+            "section_graph": True,  # load Section nodes + SHARES_ENTITY edges in PPR
         },
     }
 
@@ -213,7 +217,7 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
                 raise RuntimeError("Voyage API key required for Route 7")
 
             include_section_graph = os.getenv(
-                "ROUTE7_SECTION_GRAPH", "0"
+                "ROUTE7_SECTION_GRAPH", "1"
             ).strip().lower() in {"1", "true", "yes"}
 
             passage_node_weight = float(
@@ -295,7 +299,10 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
         ))
         # Reranker: enabled by default — cross-encoder on PPR output improves Q-D10 accuracy
         rerank_enabled = _ov("rerank", "ROUTE7_RERANK", "1").strip().lower() in {"1", "true", "yes"}
-        rerank_top_k = int(_ov("rerank_top_k", "ROUTE7_RERANK_TOP_K", "30"))
+        rerank_top_k = int(_ov(
+            "rerank_top_k", "ROUTE7_RERANK_TOP_K",
+            str(preset.get("rerank_top_k", 30))
+        ))
         # Corpus-wide reranker: cross-encoder on ALL passages as parallel retrieval channel
         rerank_all_enabled = _ov("rerank_all", "ROUTE7_RERANK_ALL", "0").strip().lower() in {"1", "true", "yes"}
         rerank_all_top_k = int(_ov("rerank_all_top_k", "ROUTE7_RERANK_ALL_TOP_K", "50"))
@@ -1195,7 +1202,10 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
         # (e.g., warranty docs getting 40 of 55 slots). Interleave
         # top passages from each document in round-robin to guarantee
         # every document with relevant content gets representation.
-        max_per_doc = int(_ov("max_chunks_per_doc", "ROUTE8_MAX_CHUNKS_PER_DOC", "0"))
+        max_per_doc = int(_ov(
+            "max_chunks_per_doc", "ROUTE8_MAX_CHUNKS_PER_DOC",
+            str(preset.get("max_chunks_per_doc", 0))
+        ))
         if max_per_doc > 0 and passage_scores:
             from collections import defaultdict as _dd, OrderedDict as _OD
             doc_buckets: Dict[str, List[Tuple[str, float]]] = _dd(list)
