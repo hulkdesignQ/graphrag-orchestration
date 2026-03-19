@@ -411,10 +411,6 @@ var apiSpecificEnvVars = [
     value: groupIdOverride
   }
   {
-    name: 'DEMO_GROUP_ID'
-    value: demoGroupId
-  }
-  {
     name: 'ALLOW_LEGACY_GROUP_HEADER'
     value: 'false'
   }
@@ -484,6 +480,10 @@ var conditionalSecretEnvVars = concat(
 
 // Shared environment variables for both API and Worker
 var sharedEnvVars = concat([
+  {
+    name: 'DEMO_GROUP_ID'
+    value: demoGroupId
+  }
   {
     name: 'RUNNING_IN_PRODUCTION'
     value: 'true'
