@@ -403,6 +403,31 @@ class HippoRAG2PPR:
                     decay = 1.0 / (1.0 + ordinal_distance * 0.2)
                     self._add_edge(src_idx, tgt_idx, base_weight * decay)
 
+        # Section <-> Section via SHARES_ENTITY — cross-document bridge.
+        # Sections sharing entities across documents form thematic bridges
+        # that PPR can traverse to reach sentences in related sections.
+        shares_entity_count = 0
+        result = session.run(
+            "MATCH (s1:Section)-[r:SHARES_ENTITY]->(s2:Section) "
+            "WHERE s1.group_id IN $group_ids "
+            "AND s2.group_id IN $group_ids "
+            "RETURN s1.id AS src, s2.id AS tgt, "
+            "r.shared_count AS shared_count",
+            group_ids=group_ids,
+        )
+        for record in result:
+            src_idx = self._node_to_idx.get(record["src"])
+            tgt_idx = self._node_to_idx.get(record["tgt"])
+            if src_idx is not None and tgt_idx is not None:
+                edge_key = (min(src_idx, tgt_idx), max(src_idx, tgt_idx))
+                if edge_key not in seen_section_sim_edges:
+                    seen_section_sim_edges.add(edge_key)
+                    # Weight proportional to shared entity count, capped
+                    shared = record["shared_count"] or 1
+                    weight = min(shared * 0.05, section_edge_weight)
+                    self._add_edge(src_idx, tgt_idx, weight)
+                    shares_entity_count += 1
+
     def run_ppr(
         self,
         entity_seeds: Dict[str, float],
