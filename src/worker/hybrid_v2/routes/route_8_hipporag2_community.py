@@ -191,9 +191,12 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
             "map_reduce_synthesis": True,  # per-document MAP extraction → cross-doc REDUCE merge
             "section_graph": True,  # load Section nodes + SHARES_ENTITY edges in PPR
             # Unified PPR modifiers — available via config_overrides for A/B testing:
-            #   hub_penalty_mode: "log"  (1/log(2+degree) hub tax)
-            #   symmetric_norm: "1"      (D^(-½)·A·D^(-½))
-            #   community_balanced_seeds: "1" (seed / log(2+community_size))
+            #   hub_penalty_mode: "log"           (1/log(B+degree)^alpha hub tax)
+            #   hub_penalty_alpha: "1.5"          (exponent — 1.0 mild, 2.0 strong)
+            #   hub_penalty_base: "2.0"           (base — lower = sharper differentiation)
+            #   symmetric_norm: "all"|"entity_only" ("all" or entity↔entity only)
+            #   community_balanced_seeds: "1"     (boost sparse communities)
+            #   community_balance_alpha: "0.3"    (0=log formula, >0=power-law 1/size^alpha)
         },
     }
 
@@ -411,14 +414,31 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
             "hub_penalty_mode", "ROUTE8_HUB_PENALTY_MODE",
             preset.get("hub_penalty_mode", "none")
         ).strip().lower()
+        ppr_hub_penalty_alpha = float(_ov(
+            "hub_penalty_alpha", "ROUTE8_HUB_PENALTY_ALPHA",
+            str(preset.get("hub_penalty_alpha", 1.0))
+        ))
+        ppr_hub_penalty_base = float(_ov(
+            "hub_penalty_base", "ROUTE8_HUB_PENALTY_BASE",
+            str(preset.get("hub_penalty_base", 2.0))
+        ))
         ppr_symmetric_norm = _ov(
             "symmetric_norm", "ROUTE8_SYMMETRIC_NORM",
-            "1" if preset.get("symmetric_norm", False) else "0"
-        ).strip().lower() in {"1", "true", "yes"}
+            preset.get("symmetric_norm", "off")
+        ).strip().lower()
+        # Backward compat: "1"/"true" → "all", "0"/"false" → "off"
+        if ppr_symmetric_norm in ("1", "true", "yes"):
+            ppr_symmetric_norm = "all"
+        elif ppr_symmetric_norm in ("0", "false", "no"):
+            ppr_symmetric_norm = "off"
         ppr_community_balance = _ov(
             "community_balanced_seeds", "ROUTE8_COMMUNITY_BALANCED_SEEDS",
             "1" if preset.get("community_balanced_seeds", False) else "0"
         ).strip().lower() in {"1", "true", "yes"}
+        ppr_community_balance_alpha = float(_ov(
+            "community_balance_alpha", "ROUTE8_COMMUNITY_BALANCE_ALPHA",
+            str(preset.get("community_balance_alpha", 0.0))
+        ))
 
         # Sentence window: preset provides the default; config_overrides / env
         # can still override (e.g. re-enable windowing for local_search).
@@ -976,8 +996,11 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
             passage_self_loops=ppr_self_loops,
             hub_devaluation=ppr_hub_deval,
             hub_penalty_mode=ppr_hub_penalty_mode,
+            hub_penalty_alpha=ppr_hub_penalty_alpha,
+            hub_penalty_base=ppr_hub_penalty_base,
             symmetric_norm=ppr_symmetric_norm,
             community_balance=ppr_community_balance,
+            community_balance_alpha=ppr_community_balance_alpha,
         )
 
         # Bug 3 fix: if PPR produced no passage scores, fall back to raw DPR order
@@ -987,6 +1010,9 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
             entity_scores = []
 
         timings_ms["step_4_ppr_ms"] = int((time.perf_counter() - t0) * 1000)
+
+        # Capture raw PPR output before reranker overwrites passage_scores
+        raw_ppr_passage_scores = list(passage_scores)
 
         logger.info(
             "step_4_ppr_complete",
@@ -1931,9 +1957,14 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
         ]
 
         if include_context:
+            _ppr_text_map = self._ppr_engine.get_all_passage_texts()
             metadata["ppr_top_passages"] = [
-                {"sentence_id": cid, "score": round(s, 6)}
-                for cid, s in passage_scores[:10]
+                {
+                    "sentence_id": cid,
+                    "score": round(s, 6),
+                    "text": (_ppr_text_map.get(cid, ""))[:250],
+                }
+                for cid, s in raw_ppr_passage_scores[:ppr_passage_top_k]
             ]
             metadata["ppr_top_entities"] = [
                 {"entity": name, "score": round(s, 6)}

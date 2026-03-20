@@ -452,8 +452,11 @@ class HippoRAG2PPR:
         passage_self_loops: float = 0.0,
         hub_devaluation: bool = False,
         hub_penalty_mode: str = "none",
-        symmetric_norm: bool = False,
+        hub_penalty_alpha: float = 1.0,
+        hub_penalty_base: float = 2.0,
+        symmetric_norm: str = "off",
         community_balance: bool = False,
+        community_balance_alpha: float = 0.0,
     ) -> Tuple[List[Tuple[str, float]], List[Tuple[str, float]]]:
         """Run Personalized PageRank with weighted seeds.
 
@@ -477,13 +480,22 @@ class HippoRAG2PPR:
                 Prefer hub_penalty_mode="log" instead.
             hub_penalty_mode: Hub penalty strategy for entity nodes.
                 "none" = no penalty (default, backward compat).
-                "log"  = 1/log(2+degree) — industry-standard hub tax.
-            symmetric_norm: If True, use symmetric normalization
-                D^(-½)·A·D^(-½) instead of row normalization D⁻¹·A.
-                Prevents high-degree nodes from acting as mass sinks.
+                "log"  = 1/log(B+degree)^alpha — tunable hub tax.
+            hub_penalty_alpha: Exponent for log hub penalty (default 1.0).
+                Higher values (1.5, 2.0) create stronger hub suppression.
+            hub_penalty_base: Base for log hub penalty (default 2.0).
+                Lower values (1.1) create sharper differentiation.
+            symmetric_norm: Symmetric normalization mode.
+                "off" = standard row normalization D⁻¹·A (default).
+                "all" = D^(-½)·A·D^(-½) on all edges.
+                "entity_only" = symmetric norm only for entity↔entity
+                    edges, standard norm for MENTIONS (passage↔entity).
             community_balance: If True, weight entity seeds inversely
-                by community density: seed *= 1/log(2+community_size).
-                Boosts seeds from sparse communities.
+                by community density.
+            community_balance_alpha: Exponent for community balance.
+                0.0 (default) = use log formula: seed /= log(2+size).
+                >0  = use power-law: seed /= size^alpha.
+                E.g. 0.3 gives 1.87x ratio, 0.5 gives 2.83x ratio.
 
         Returns:
             Tuple of:
@@ -512,7 +524,12 @@ class HippoRAG2PPR:
                 if personalization[idx] > 0 and idx in self._community_id:
                     cid = self._community_id[idx]
                     c_size = self._community_sizes.get(cid, 1)
-                    personalization[idx] /= math.log(2 + c_size)
+                    if community_balance_alpha > 0:
+                        # Power-law: 1/size^alpha — sharper differentiation
+                        personalization[idx] /= c_size ** community_balance_alpha
+                    else:
+                        # Log formula (legacy default): 1/log(2+size)
+                        personalization[idx] /= math.log(2 + c_size)
 
         # Normalize personalization to sum to 1
         total_p = sum(personalization)
@@ -538,13 +555,14 @@ class HippoRAG2PPR:
                 if self._node_types.get(idx) == "entity":
                     degree = max(len(self._adj.get(idx, [])), 1)
                     if effective_hub_mode == "log":
-                        hub_factor[idx] = 1.0 / math.log(2 + degree)
+                        hub_factor[idx] = 1.0 / math.log(hub_penalty_base + degree) ** hub_penalty_alpha
                     elif effective_hub_mode == "raw":
                         hub_factor[idx] = 1.0 / degree
 
         # Precompute sqrt of out-weight sums for symmetric normalization
         sqrt_out: Dict[int, float] = {}
-        if symmetric_norm:
+        use_symmetric = symmetric_norm in ("all", "entity_only")
+        if use_symmetric:
             for idx in range(self._node_count):
                 s = effective_out_sum.get(idx, 0.0)
                 sqrt_out[idx] = math.sqrt(s) if s > 0 else 0.0
@@ -576,7 +594,19 @@ class HippoRAG2PPR:
                     new_rank[src] += self_share
 
                 for tgt, edge_weight in self._adj[src]:
-                    if symmetric_norm:
+                    # Determine if symmetric norm applies to this edge
+                    apply_sym = False
+                    if use_symmetric:
+                        if symmetric_norm == "all":
+                            apply_sym = True
+                        elif symmetric_norm == "entity_only":
+                            # Only entity↔entity edges get symmetric norm
+                            apply_sym = (
+                                self._node_types.get(src) == "entity"
+                                and self._node_types.get(tgt) == "entity"
+                            )
+
+                    if apply_sym:
                         # D^(-½)·A·D^(-½): divide by sqrt(deg_src * deg_tgt)
                         sqrt_src = sqrt_out.get(src, 0.0)
                         sqrt_tgt = sqrt_out.get(tgt, 0.0)
@@ -636,8 +666,11 @@ class HippoRAG2PPR:
             entity_seeds=len(entity_seeds),
             passage_seeds=len(passage_seeds),
             hub_penalty=effective_hub_mode,
+            hub_penalty_alpha=hub_penalty_alpha,
+            hub_penalty_base=hub_penalty_base,
             symmetric_norm=symmetric_norm,
             community_balance=community_balance,
+            community_balance_alpha=community_balance_alpha,
             community_count=len(self._community_sizes),
             top_passage_score=passage_scores[0][1] if passage_scores else 0.0,
             top_entity_score=entity_scores[0][1] if entity_scores else 0.0,
