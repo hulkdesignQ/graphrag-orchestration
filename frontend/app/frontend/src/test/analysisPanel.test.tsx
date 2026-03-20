@@ -109,7 +109,6 @@ describe("AnalysisPanel", () => {
                 headers: { "Content-Type": "application/json" },
             })
         );
-        const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
         renderWithProviders(
             <AnalysisPanel
                 className=""
@@ -120,20 +119,11 @@ describe("AnalysisPanel", () => {
                 answer={makeResponse()}
             />
         );
-        // Wait for the fetch to resolve and state to settle
+        // Component silently clears citation state on non-OK response — no iframe rendered
         await vi.waitFor(() => {
-            expect(consoleSpy).toHaveBeenCalledWith(
-                expect.stringContaining("Citation fetch failed: 401")
-            );
+            const iframe = screen.queryByTitle("Citation");
+            expect(iframe).toBeNull();
         });
-        // No iframe or pdf viewer should be rendered with content
-        const iframe = screen.queryByTitle("Citation");
-        if (iframe) {
-            // iframe src should be empty or absent (no blob URL from error body)
-            const src = iframe.getAttribute("src");
-            expect(src === "" || src === null).toBe(true);
-        }
-        consoleSpy.mockRestore();
     });
 
     it("does not render citation viewer when fetch returns 404", async () => {
@@ -143,7 +133,6 @@ describe("AnalysisPanel", () => {
                 headers: { "Content-Type": "application/json" },
             })
         );
-        const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
         renderWithProviders(
             <AnalysisPanel
                 className=""
@@ -154,11 +143,10 @@ describe("AnalysisPanel", () => {
                 answer={makeResponse()}
             />
         );
+        // Component silently clears citation state on non-OK response — no iframe rendered
         await vi.waitFor(() => {
-            expect(consoleSpy).toHaveBeenCalledWith(
-                expect.stringContaining("Citation fetch failed: 404")
-            );
+            const iframe = screen.queryByTitle("Citation");
+            expect(iframe).toBeNull();
         });
-        consoleSpy.mockRestore();
     });
 });

@@ -253,7 +253,7 @@ describe("extractCitationDetails", () => {
 
     it("emits data-citation-key attribute in rendered HTML", () => {
         const sc: StructuredCitation[] = [
-            { citation: "[1]", document_title: "report.pdf", sentence_text: "Finding A" }
+            { citation: "[1]", document_title: "report.pdf", sentence_text: "Finding A", document_url: "https://storage.blob.core.windows.net/docs/report.pdf" }
         ];
         const response = makeResponse("See [1].", [], {
             data_points: { text: [], images: [], citations: [], structured_citations: sc }
