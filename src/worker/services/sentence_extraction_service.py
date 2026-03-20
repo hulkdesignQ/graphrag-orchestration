@@ -454,42 +454,56 @@ def _llm_detect_section_headers(
                 client_kwargs["azure_ad_token"] = token.token
 
         client = OpenAIClient(timeout=60, **client_kwargs)
-        response = client.chat.completions.create(
-            model=deployment,
-            temperature=0,
-            messages=[
-                {"role": "system", "content": (
-                    "You are a document structure analyst. Given numbered sentences "
-                    "from a document section, identify which are section/subsection "
-                    "headers (not body content). Return ONLY a JSON array: "
-                    '[{"index": N, "title": "header text"}]. '
-                    "If none, return []."
-                )},
-                {"role": "user", "content": f"Identify section headers:\n\n{numbered}"},
-            ],
-        )
-        text = (response.choices[0].message.content or "").strip()
 
-        # Strip markdown fences
-        if text.startswith("```"):
-            text = text.split("\n", 1)[1] if "\n" in text else text[3:]
-        if text.endswith("```"):
-            text = text[:-3].rstrip()
-        if text.startswith("json"):
-            text = text[4:].lstrip()
+        last_exc: Optional[Exception] = None
+        for attempt in range(3):
+            try:
+                response = client.chat.completions.create(
+                    model=deployment,
+                    temperature=0,
+                    messages=[
+                        {"role": "system", "content": (
+                            "You are a document structure analyst. Given numbered sentences "
+                            "from a document section, identify which are section/subsection "
+                            "headers (not body content). Return ONLY a JSON array: "
+                            '[{"index": N, "title": "header text"}]. '
+                            "If none, return []."
+                        )},
+                        {"role": "user", "content": f"Identify section headers:\n\n{numbered}"},
+                    ],
+                )
+                text = (response.choices[0].message.content or "").strip()
 
-        headers = json_mod.loads(text)
-        indices = [h["index"] for h in headers if isinstance(h.get("index"), int)]
-        logger.info(
-            "section_split_llm_detected",
-            section=section_path,
-            headers_found=len(indices),
-            headers=[h.get("title", "") for h in headers],
-        )
-        return indices
+                # Strip markdown fences
+                if text.startswith("```"):
+                    text = text.split("\n", 1)[1] if "\n" in text else text[3:]
+                if text.endswith("```"):
+                    text = text[:-3].rstrip()
+                if text.startswith("json"):
+                    text = text[4:].lstrip()
+
+                headers = json_mod.loads(text)
+                indices = [h["index"] for h in headers if isinstance(h.get("index"), int)]
+                logger.info(
+                    "section_split_llm_detected",
+                    section=section_path,
+                    headers_found=len(indices),
+                    headers=[h.get("title", "") for h in headers],
+                )
+                return indices
+            except Exception as exc:
+                last_exc = exc
+                if attempt < 2:
+                    import time as _time
+                    wait = 2 ** attempt  # 1s, 2s
+                    logger.warning("section_split_llm_retry", attempt=attempt + 1, error=str(exc), wait=wait)
+                    _time.sleep(wait)
+
+        logger.warning("section_split_llm_failed", error=str(last_exc), attempts=3)
+        return []
 
     except Exception as exc:
-        logger.warning("section_split_llm_failed", error=str(exc))
+        logger.warning("section_split_llm_setup_failed", error=str(exc))
         return []
 
 
