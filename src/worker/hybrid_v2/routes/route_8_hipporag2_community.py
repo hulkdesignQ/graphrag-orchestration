@@ -3298,11 +3298,18 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
         # Stage 1: Embedding pre-filter (optional)
         prefiltered_ids: Optional[set] = None
         if prefilter_top_k > 0 and self._ppr_engine.get_all_passage_embeddings():
-            # Get query embedding via Voyage (input_type="query")
             from ..embeddings.voyage_embed import get_voyage_embed_service
             try:
                 voyage_svc = get_voyage_embed_service()
-                q_emb = voyage_svc.embed_query(query, group_id=self.group_id, user_id=user_id)
+                # Instructed embedding steers cosine toward retrieval intent
+                instruction = os.getenv(
+                    "ROUTE7_RERANK_PREFILTER_INSTRUCTION",
+                    "Retrieve all document passages relevant to answering this query: ",
+                )
+                instructed_query = f"{instruction}{query}" if instruction else query
+                q_emb = voyage_svc.embed_query(
+                    instructed_query, group_id=self.group_id, user_id=user_id,
+                )
                 prefiltered = self._ppr_engine.cosine_prefilter(
                     q_emb, top_k=prefilter_top_k,
                 )
