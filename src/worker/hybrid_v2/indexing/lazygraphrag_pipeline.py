@@ -1673,7 +1673,7 @@ class LazyGraphRAGIndexingPipeline:
                     "hierarchical_id": "",
                 })
 
-            async def _write_orphans(session):
+            def _write_orphans(session):
                 # Create the missing Section nodes
                 session.run(
                     """

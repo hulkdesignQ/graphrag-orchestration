@@ -420,6 +420,12 @@ def _llm_detect_section_headers(
     )
 
     endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+    if not endpoint:
+        try:
+            from src.core.config import settings as _cfg
+            endpoint = _cfg.AZURE_OPENAI_ENDPOINT
+        except Exception:
+            pass
     deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4.1")
     api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-12-01-preview")
     if not endpoint:
