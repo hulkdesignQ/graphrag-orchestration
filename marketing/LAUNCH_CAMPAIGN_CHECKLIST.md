@@ -43,7 +43,7 @@
 | 23 | B2C/B2B plan filtering in dashboard | ✅ Done | B2C sees Free/Pro/Pro+, B2B sees Business/Enterprise |
 | 24 | Rate limit UX (429 → upgrade prompt) | ✅ Done | Chat shows plan + link to dashboard |
 | 25 | Payment integration (Stripe/Paddle) | 🔴 Pending | No checkout, no subscription management |
-| 26 | Plan upgrade/downgrade API | 🔴 Pending | Dashboard button exists but is non-functional |
+| 26 | Plan upgrade/downgrade API | ✅ Done | `POST /billing/change-plan` with Stripe proration |
 | 27 | Billing portal | 🔴 Pending | Stripe Customer Portal or equivalent |
 
 ## Marketing Materials
@@ -77,7 +77,7 @@
 |---|---|---|---|
 | 43 | Onboarding flow (welcome + tutorial) | 🔴 Pending | No first-time UX |
 | 44 | Sample/demo documents | 🔴 Pending | Pre-loaded docs for new users to try |
-| 45 | Getting Started guide | 🔴 Pending | In-app or docs |
+| 45 | Getting Started guide | ✅ Done | `docs/GETTING_STARTED.md` + in-app `/getting-started` page |
 | 46 | Error messages (user-friendly) | ✅ Done | Network, timeout, rate limit, server errors |
 | 47 | Session expiry handling | ✅ Done | Auto-refresh + re-login prompt |
 
@@ -94,9 +94,9 @@
 
 | # | Item | Status | Notes |
 |---|---|---|---|
-| 52 | Terms of Service | 🔴 Pending | — |
-| 53 | Privacy Policy | 🔴 Pending | — |
-| 54 | Cookie consent banner | 🔴 Pending | Required for EU users |
+| 52 | Terms of Service | 🟡 Draft | `docs/legal/TERMS_OF_SERVICE.md` — needs legal review |
+| 53 | Privacy Policy | 🟡 Draft | `docs/legal/PRIVACY_POLICY.md` — needs legal review |
+| 54 | Cookie consent banner | 🟡 Draft | `docs/legal/COOKIE_POLICY.md` — needs legal review + frontend implementation |
 | 55 | Data Processing Agreement (B2B) | 🟡 Later | Phase 2 |
 | 56 | GDPR data deletion flow | 🟡 Later | Phase 2 |
 
@@ -104,7 +104,7 @@
 
 | # | Item | Status | Notes |
 |---|---|---|---|
-| 57 | Cypher 25 `id()` migration (17 calls) | 🔴 Pending | Safe now (Cypher 5 default), breaks on Aura upgrade |
+| 57 | Cypher 25 `id()` migration (17 calls) | ✅ Done | All migrated to `elementId()`, `CYPHER 25` prefix on vector queries |
 | 58 | Load testing (Locust) | 🔴 Pending | Current locustfile is upstream template with sample data |
 | 59 | Autoscaling validation | 🔴 Pending | No concurrency/OOM testing |
 
@@ -116,14 +116,14 @@
 |---|---|---|---|
 | Product Core | 9 | 0 | 0 |
 | Infrastructure | 11 | 0 | 0 |
-| Pricing & Billing | 4 | 3 | 0 |
+| Pricing & Billing | 5 | 2 | 0 |
 | Marketing Materials | 7 | 0 | 0 |
 | Public Website | 0 | 5 | 2 |
-| User Experience | 2 | 3 | 0 |
+| User Experience | 3 | 2 | 0 |
 | Analytics & Monitoring | 4 | 0 | 0 |
-| Legal & Compliance | 0 | 3 | 2 |
-| Technical Debt | 0 | 3 | 0 |
-| **Total** | **37** | **17** | **4** |
+| Legal & Compliance | 0 | 0 | 2 |
+| Technical Debt | 1 | 2 | 0 |
+| **Total** | **40** | **11** | **4** |
 
 ---
 
