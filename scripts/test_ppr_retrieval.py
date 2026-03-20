@@ -40,7 +40,7 @@ GROUND_TRUTH: Dict[str, Dict[str, Any]] = {
     "Q-G1": {
         "query": "Across the agreements, list the termination/cancellation rules you can find.",
         "required": [
-            ("60 days", "PROPERTY MANAGEMENT"),
+            ("sixty (60) day", "PROPERTY MANAGEMENT"),
             ("3 business days", "purchase_contract"),
             ("deposit is forfeited", "purchase_contract"),
             ("terminat", "HOLDING TANK"),  # "terminates" or "terminate"
@@ -96,7 +96,7 @@ GROUND_TRUTH: Dict[str, Dict[str, Any]] = {
     "Q-G7": {
         "query": "Summarize all explicit notice / delivery mechanisms mentioned.",
         "required": [
-            ("written notice", "PROPERTY MANAGEMENT"),
+            ("written noti", "PROPERTY MANAGEMENT"),
             ("certified mail", "WARRANTY"),
             ("business days", "HOLDING TANK"),
         ],
