@@ -1978,7 +1978,7 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
                 {
                     "sentence_id": cid,
                     "score": round(s, 6),
-                    "text": (_ppr_text_map.get(cid, ""))[:250],
+                    "text": (_ppr_text_map.get(cid, ""))[:400],
                 }
                 for cid, s in raw_ppr_passage_scores[:ppr_passage_top_k]
             ]

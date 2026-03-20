@@ -106,7 +106,7 @@ GROUND_TRUTH: Dict[str, Dict[str, Any]] = {
         "required": [
             ("300,000", "PROPERTY MANAGEMENT"),
             ("25,000", "PROPERTY MANAGEMENT"),
-            ("harmless", "PROPERTY MANAGEMENT"),
+            ("indemnify", "PROPERTY MANAGEMENT"),
             ("negligence", "PROPERTY MANAGEMENT"),
         ],
     },
