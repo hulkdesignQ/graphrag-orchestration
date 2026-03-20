@@ -399,6 +399,128 @@ _LIST_JOIN_GROUP_MAX_TOKENS = 120
 # Preamble merge: colon-terminated stubs and very short fragments
 _PREAMBLE_RE = re.compile(r"[:\.][\s.]*$")  # ends with : or :. (possibly trailing spaces/dots)
 
+# Section header detection for oversized section splitting.
+# Matches patterns like "3. Exclusions from Coverage." or "A. Binding Arbitration."
+_SECTION_HEADER_RE = re.compile(
+    r'^(?:'
+    r'(?:[A-Z]\.?\s)|'           # "A. " or "A "
+    r'(?:\d{1,2}\.?\s)|'         # "3. " or "3 "
+    r'(?:[IVXLC]+\.?\s)'         # "IV. " (roman numerals)
+    r')'
+    r'.{2,60}$'                  # 2-60 chars total (short heading text)
+)
+_SECTION_SPLIT_THRESHOLD = int(os.getenv("SECTION_SPLIT_THRESHOLD", "20"))
+
+
+def _is_section_header(text: str, source: str) -> bool:
+    """Detect if a sentence is an inline section header.
+
+    Two patterns:
+    1. Numbered/lettered prefix: "A. Binding Arbitration.", "3. Exclusions."
+    2. Title-case short phrase: "Notification of Defects.", "No Other Warranties."
+       (≤6 words, ≥50% capitalized content words, paragraph source)
+    """
+    if source != "paragraph":
+        return False
+    words = text.split()
+    if len(words) > 8:
+        return False
+
+    # Pattern 1: numbered/lettered prefix
+    if _SECTION_HEADER_RE.match(text) and len(words) <= 8:
+        return True
+
+    # Pattern 2: title-case short phrase (≤6 words, mostly capitalized)
+    # Exclude data-like patterns (e.g., "Contract Date: 2024-06-15.")
+    if len(words) <= 6 and ":" not in text:
+        content_words = [w for w in words if len(w) > 2 and not w[0].isdigit()]
+        if content_words:
+            cap_ratio = sum(1 for w in content_words if w[0].isupper()) / len(content_words)
+            if cap_ratio >= 0.5:
+                return True
+
+    return False
+
+
+def _split_oversized_sections(sentences: List[Dict]) -> List[Dict]:
+    """Split oversized sections by detecting inline subsection headers.
+
+    When Azure DI assigns many sentences to one section (e.g., 76 sentences
+    under "2. Term."), this function detects header-like sentences (short,
+    numbered/lettered text like "3. Exclusions from Coverage.") and creates
+    new subsection paths for the sentences that follow them.
+
+    Only processes sections exceeding SECTION_SPLIT_THRESHOLD (default 20).
+    """
+    if _SECTION_SPLIT_THRESHOLD <= 0:
+        return sentences
+
+    # Group by section_path
+    from collections import defaultdict, OrderedDict
+    section_groups: Dict[str, List[int]] = OrderedDict()
+    for i, sent in enumerate(sentences):
+        sp = sent.get("section_path") or ""
+        section_groups.setdefault(sp, []).append(i)
+
+    # Only process oversized sections
+    oversized = {sp: idxs for sp, idxs in section_groups.items()
+                 if len(idxs) > _SECTION_SPLIT_THRESHOLD and sp}
+    if not oversized:
+        return sentences
+
+    for section_path, indices in oversized.items():
+        current_subsection: Optional[str] = None
+        sub_idx = 0
+        for pos, sent_idx in enumerate(indices):
+            sent = sentences[sent_idx]
+            text = sent.get("text", "").strip()
+            words = text.split()
+
+            # Detect header: short, matches pattern, source=paragraph
+            is_header = _is_section_header(text, sent.get("source", ""))
+
+            if is_header:
+                # Clean title: strip trailing period
+                title = text.rstrip(".")
+                current_subsection = f"{section_path} > {title}"
+                sub_idx = 0
+                logger.debug(
+                    "section_split_header_detected",
+                    parent=section_path,
+                    subsection=title,
+                    position=pos,
+                )
+
+            if current_subsection:
+                sent["section_path"] = current_subsection
+                sent["index_in_section"] = sub_idx
+                sub_idx += 1
+
+    # Recount total_in_section
+    section_counts: Dict[str, int] = defaultdict(int)
+    for sent in sentences:
+        sp = sent.get("section_path") or "[Document Root]"
+        section_counts[sp] += 1
+    for sent in sentences:
+        sp = sent.get("section_path") or "[Document Root]"
+        sent["total_in_section"] = section_counts[sp]
+
+    # Log splits
+    for section_path in oversized:
+        new_sections = {
+            sent.get("section_path") for i in oversized[section_path]
+            if (sent := sentences[i]).get("section_path") != section_path
+        }
+        if new_sections:
+            logger.info(
+                "section_split_applied",
+                parent=section_path,
+                original_count=len(oversized[section_path]),
+                new_subsections=len(new_sections),
+            )
+
+    return sentences
+
 
 def _join_preamble_sentences(sentences: List[Dict]) -> List[Dict]:
     """Merge stub/preamble sentences with the sentence that follows them.
@@ -1414,6 +1536,9 @@ def extract_sentences_from_di_units(
         all_sentences = _join_preamble_sentences(all_sentences)
     # Join consecutive short spec-list sentences (Fix A7)
     all_sentences = _join_spec_list_sentences(all_sentences)
+
+    # Split oversized sections by detecting inline subsection headers
+    all_sentences = _split_oversized_sections(all_sentences)
 
     # Backfill total_in_section from section_counters
     for sent in all_sentences:
