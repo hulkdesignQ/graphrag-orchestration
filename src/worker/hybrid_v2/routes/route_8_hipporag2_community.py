@@ -414,6 +414,12 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
         # 0 = disabled (rerank all passages). >0 = cosine pre-filter to this many.
         rerank_prefilter_k = int(_ov("rerank_prefilter_k", "ROUTE7_RERANK_PREFILTER_K", "0"))
 
+        # Neural PPR: query-conditioned teleportation.
+        # Blends cosine(query, passage_emb) into PPR personalization vector
+        # so every passage gets teleportation mass proportional to query relevance.
+        # 0.0 = disabled (structural seeds only). >0 = blend ratio.
+        neural_weight = float(_ov("neural_weight", "ROUTE7_NEURAL_WEIGHT", "0.0"))
+
         # Triple reranking config (read early for logging)
         triple_rerank_enabled = _ov(
             "triple_rerank", "ROUTE7_TRIPLE_RERANK", "1"
@@ -1022,6 +1028,8 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
             symmetric_norm=ppr_symmetric_norm,
             community_balance=ppr_community_balance,
             community_balance_alpha=ppr_community_balance_alpha,
+            neural_teleportation=query_embedding if neural_weight > 0 else None,
+            neural_weight=neural_weight,
         )
 
         # Bug 3 fix: if PPR produced no passage scores, fall back to raw DPR order
@@ -1950,6 +1958,7 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
             "rerank_all_injected": rerank_all_injected,
             "semantic_passage_seeds_enabled": semantic_passage_seeds_enabled,
             "semantic_seeds_added": semantic_seeds_added,
+            "neural_weight": neural_weight,
             "llm_filter_enabled": llm_filter_enabled,
             "llm_filter_removed": llm_filter_removed,
             "query_mode": query_mode,

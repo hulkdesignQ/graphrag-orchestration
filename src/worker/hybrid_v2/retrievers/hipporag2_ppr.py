@@ -577,6 +577,8 @@ class HippoRAG2PPR:
         symmetric_norm: str = "off",
         community_balance: bool = False,
         community_balance_alpha: float = 0.0,
+        neural_teleportation: Optional[List[float]] = None,
+        neural_weight: float = 0.5,
     ) -> Tuple[List[Tuple[str, float]], List[Tuple[str, float]]]:
         """Run Personalized PageRank with weighted seeds.
 
@@ -616,6 +618,14 @@ class HippoRAG2PPR:
                 0.0 (default) = use log formula: seed /= log(2+size).
                 >0  = use power-law: seed /= size^alpha.
                 E.g. 0.3 gives 1.87x ratio, 0.5 gives 2.83x ratio.
+            neural_teleportation: Query embedding vector for Neural PPR.
+                When provided, every passage node gets a teleportation
+                weight proportional to cosine(query_emb, passage_emb).
+                Blended with structural seeds via neural_weight.
+            neural_weight: Blend ratio for neural teleportation [0,1].
+                0.0 = structural seeds only (original behavior).
+                1.0 = pure neural teleportation (cosine-only).
+                0.5 = equal blend (recommended starting point).
 
         Returns:
             Tuple of:
@@ -625,18 +635,70 @@ class HippoRAG2PPR:
         if self._node_count == 0:
             return [], []
 
-        # Build personalization vector
-        personalization = [0.0] * self._node_count
+        # Build structural personalization vector (entity + passage seeds)
+        structural_p = [0.0] * self._node_count
 
         for node_id, weight in entity_seeds.items():
             idx = self._node_to_idx.get(node_id)
             if idx is not None:
-                personalization[idx] += weight
+                structural_p[idx] += weight
 
         for node_id, weight in passage_seeds.items():
             idx = self._node_to_idx.get(node_id)
             if idx is not None:
-                personalization[idx] += weight
+                structural_p[idx] += weight
+
+        # Neural teleportation: cosine(query, passage_emb) for all passages
+        neural_p = [0.0] * self._node_count
+        neural_active = False
+        if neural_teleportation is not None and self._passage_embeddings and neural_weight > 0:
+            import numpy as np
+            q = np.array(neural_teleportation, dtype=np.float32)
+            q_norm = np.linalg.norm(q)
+            if q_norm > 0:
+                q = q / q_norm
+                passage_indices = []
+                passage_embs = []
+                for node_id, emb in self._passage_embeddings.items():
+                    idx = self._node_to_idx.get(node_id)
+                    if idx is not None:
+                        passage_indices.append(idx)
+                        passage_embs.append(emb)
+                if passage_embs:
+                    mat = np.array(passage_embs, dtype=np.float32)
+                    norms = np.linalg.norm(mat, axis=1, keepdims=True)
+                    norms = np.maximum(norms, 1e-10)
+                    mat = mat / norms
+                    cosines = mat @ q  # shape: (n_passages,)
+                    # ReLU: only positive similarities contribute
+                    cosines = np.maximum(cosines, 0.0)
+                    for i, idx in enumerate(passage_indices):
+                        neural_p[idx] = float(cosines[i])
+                    neural_active = True
+                    logger.info(
+                        "neural_teleportation_computed",
+                        passages=len(passage_indices),
+                        max_cosine=float(np.max(cosines)),
+                        min_cosine=float(np.min(cosines)),
+                        mean_cosine=float(np.mean(cosines)),
+                        neural_weight=neural_weight,
+                    )
+
+        # Blend structural and neural personalization
+        if neural_active:
+            # Normalize each component independently before blending
+            s_total = sum(structural_p)
+            n_total = sum(neural_p)
+            if s_total > 0:
+                structural_p = [p / s_total for p in structural_p]
+            if n_total > 0:
+                neural_p = [p / n_total for p in neural_p]
+            personalization = [
+                (1.0 - neural_weight) * structural_p[i] + neural_weight * neural_p[i]
+                for i in range(self._node_count)
+            ]
+        else:
+            personalization = structural_p
 
         # Community-balanced personalization: boost sparse communities
         if community_balance and self._community_sizes:
