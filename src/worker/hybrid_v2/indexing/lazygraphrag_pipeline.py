@@ -1634,6 +1634,94 @@ class LazyGraphRAGIndexingPipeline:
 
         sections_created = await self.neo4j_store.arun_in_session(_write)
 
+        # Create Section nodes for LLM-split subsections (section_paths that
+        # exist on Sentence nodes but have no matching Section node yet).
+        orphan_result = await self.neo4j_store.arun_query(
+            """
+            MATCH (sent:Sentence {group_id: $group_id})
+            WHERE sent.section_path IS NOT NULL AND sent.section_path <> ''
+            AND NOT EXISTS {
+                MATCH (sec:Section {group_id: $group_id})
+                WHERE sec.section_path = sent.section_path
+                AND sec.doc_id = sent.document_id
+            }
+            RETURN DISTINCT sent.section_path AS path, sent.document_id AS doc_id
+            """,
+            group_id=group_id,
+            read_only=True,
+        )
+        orphan_sections = orphan_result if orphan_result else []
+        if orphan_sections:
+            new_section_data = []
+            for rec in orphan_sections:
+                path_key = rec["path"]
+                doc_id = rec["doc_id"]
+                # Title = last segment of path
+                parts = path_key.split(" > ")
+                title = parts[-1] if parts else path_key
+                parent_path_key = " > ".join(parts[:-1]) if len(parts) > 1 else None
+                depth = len(parts) - 1
+                new_section_data.append({
+                    "id": self._stable_section_id(group_id, doc_id, path_key),
+                    "group_id": group_id,
+                    "doc_id": doc_id,
+                    "path_key": path_key,
+                    "title": title,
+                    "depth": depth,
+                    "parent_path_key": parent_path_key,
+                    "section_ordinal": 0,
+                    "hierarchical_id": "",
+                })
+
+            async def _write_orphans(session):
+                # Create the missing Section nodes
+                session.run(
+                    """
+                    UNWIND $sections AS s
+                    MERGE (sec:Section {id: s.id, group_id: s.group_id})
+                    SET sec.doc_id = s.doc_id,
+                        sec.path_key = s.path_key,
+                        sec.section_path = s.path_key,
+                        sec.title = s.title,
+                        sec.depth = s.depth,
+                        sec.section_ordinal = s.section_ordinal,
+                        sec.hierarchical_id = s.hierarchical_id,
+                        sec.updated_at = datetime()
+                    RETURN count(sec) AS count
+                    """,
+                    sections=new_section_data,
+                )
+                # SUBSECTION_OF edges to parent sections
+                sub_edges = []
+                for s in new_section_data:
+                    if s["parent_path_key"]:
+                        parent_id = self._stable_section_id(
+                            group_id, s["doc_id"], s["parent_path_key"],
+                        )
+                        sub_edges.append({
+                            "child_id": s["id"],
+                            "parent_id": parent_id,
+                        })
+                if sub_edges:
+                    session.run(
+                        """
+                        UNWIND $edges AS e
+                        MATCH (child:Section {id: e.child_id, group_id: $group_id})
+                        MATCH (parent:Section {id: e.parent_id, group_id: $group_id})
+                        MERGE (child)-[:SUBSECTION_OF]->(parent)
+                        """,
+                        edges=sub_edges,
+                        group_id=group_id,
+                    )
+
+            await self.neo4j_store.arun_in_session(_write_orphans)
+            sections_created += len(new_section_data)
+            logger.info(
+                "section_split_nodes_created",
+                new_sections=len(new_section_data),
+                paths=[s["path_key"] for s in new_section_data],
+            )
+
         # Backfill IN_SECTION edges: upsert_sentences_batch (Step 3) runs
         # before Section nodes exist (Step 4), so it can't create them.
         # Create them now that both Sentence and Section nodes are committed.
