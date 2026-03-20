@@ -182,12 +182,13 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
             "ppr_passage_top_k": 100,  # wider net — dynamic reranker handles filtering
             "prompt_variant": None,
             "max_tokens": None,
-            "community_passage_seeds": True,   # inject Community→Entity→Sentence into passage seeds
+            "community_passage_seeds": False,  # Neural PPR achieves 100% recall — injection redundant
             "community_guided_instruction": True,  # guide embed + reranker with community summaries
-            "rerank_dynamic_cutoff": False,  # fixed top-K gives MAP more data for cross-doc synthesis
-            "rerank_top_k": 260,  # wide net — MAP-REDUCE handles volume
-            "min_chunks_per_doc": 5,  # guarantee every doc gets at least 5 chunks for global questions
-            "max_chunks_per_doc": 5,  # cap per doc to balance coverage across documents
+            "rerank_dynamic_cutoff": True,   # let reranker score decide which passages survive
+            "rerank_relevance_threshold": 0.25,  # natural breakpoint — keeps ~25-40 passages per query
+            "rerank_top_k": 260,  # wide net — Voyage scores all, threshold filters
+            "min_chunks_per_doc": 0,  # disabled — dynamic cutoff handles passage selection
+            "max_chunks_per_doc": 0,  # disabled — dynamic cutoff handles passage selection
             "map_reduce_synthesis": True,  # per-document MAP extraction → cross-doc REDUCE merge
             "section_graph": True,  # load Section nodes + SHARES_ENTITY edges in PPR
             # Unified PPR modifiers — available via config_overrides for A/B testing:
@@ -356,7 +357,7 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
         # or env var.  Gives community-dominant queries thematic coverage.
         community_passage_seeds_enabled = _ov(
             "community_passage_seeds", "ROUTE8_COMMUNITY_PASSAGE_SEEDS",
-            "1"
+            "1" if preset.get("community_passage_seeds", True) else "0"
         ).strip().lower() in {"1", "true", "yes"}
         community_sentence_weight = float(
             _ov("community_sentence_weight", "ROUTE7_COMMUNITY_SENTENCE_WEIGHT", "0.03")
@@ -385,7 +386,8 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
             "1" if preset.get("rerank_dynamic_cutoff", True) else "0"
         ).strip().lower() in {"1", "true", "yes"}
         rerank_relevance_threshold = float(
-            _ov("rerank_relevance_threshold", "ROUTE7_RERANK_RELEVANCE_THRESHOLD", "0.15")
+            _ov("rerank_relevance_threshold", "ROUTE7_RERANK_RELEVANCE_THRESHOLD",
+                str(preset.get("rerank_relevance_threshold", 0.15)))
         )
         rerank_dynamic_max = int(
             _ov("rerank_dynamic_max", "ROUTE7_RERANK_DYNAMIC_MAX", "80")
@@ -1227,8 +1229,14 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
                 (time.perf_counter() - t0_ra) * 1000
             )
 
-        # Determine top passage IDs for chunk fetch
-        passage_limit = ppr_passage_top_k + rerank_all_injected
+        # Determine top passage IDs for chunk fetch.
+        # When the reranker used dynamic cutoff, passage_scores may already be
+        # shorter than ppr_passage_top_k — respect that instead of inflating
+        # back to the original top-K (which would pad with stale PPR tail).
+        if rerank_dynamic_cutoff and rerank_enabled and len(passage_scores) < ppr_passage_top_k:
+            passage_limit = len(passage_scores) + rerank_all_injected
+        else:
+            passage_limit = ppr_passage_top_k + rerank_all_injected
         if rerank_all_injected > 0:
             # Re-sort by score so injected passages compete fairly
             passage_scores.sort(key=lambda x: x[1], reverse=True)
@@ -1279,11 +1287,14 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
         # (e.g., warranty docs getting 40 of 55 slots). Interleave
         # top passages from each document in round-robin to guarantee
         # every document with relevant content gets representation.
+        # Skip when dynamic cutoff is active — the reranker's threshold
+        # already filtered to relevant passages; interleaving would
+        # override that decision.
         max_per_doc = int(_ov(
             "max_chunks_per_doc", "ROUTE8_MAX_CHUNKS_PER_DOC",
             str(preset.get("max_chunks_per_doc", 0))
         ))
-        if max_per_doc > 0 and passage_scores:
+        if max_per_doc > 0 and passage_scores and not (rerank_dynamic_cutoff and rerank_enabled):
             from collections import defaultdict as _dd, OrderedDict as _OD
             doc_buckets: Dict[str, List[Tuple[str, float]]] = _dd(list)
             for sid, score in passage_scores[:passage_limit]:
@@ -1996,6 +2007,14 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
                     "text": (_ppr_text_map.get(cid, ""))[:400],
                 }
                 for cid, s in raw_ppr_passage_scores[:ppr_passage_top_k]
+            ]
+            metadata["final_passages"] = [
+                {
+                    "sentence_id": cid,
+                    "score": round(s, 6),
+                    "text": (_ppr_text_map.get(cid, ""))[:400],
+                }
+                for cid, s in top_passage_scores
             ]
             metadata["ppr_top_entities"] = [
                 {"entity": name, "score": round(s, 6)}
@@ -3108,11 +3127,14 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
         if not documents:
             return [(cid, 1.0 - i * 0.01) for i, cid in enumerate(candidate_ids[:top_k])]
 
-        # Request enough results to satisfy dynamic cutoff: when dynamic_max
-        # exceeds top_k, Voyage must return the larger amount so the threshold
-        # filter has enough candidates to work with.
-        effective_k = max(top_k, dynamic_max) if dynamic_max > 0 else top_k
-        request_k = min(effective_k, len(documents))
+        # When dynamic cutoff is active, request ALL candidates from Voyage so
+        # low-scoring passages are visible for threshold filtering.  Without
+        # this, Voyage only returns top-K which all score high, making the
+        # threshold useless.
+        if relevance_threshold > 0:
+            request_k = len(documents)
+        else:
+            request_k = min(top_k, len(documents))
 
         # Call Voyage reranker
         vc = make_voyage_client()
