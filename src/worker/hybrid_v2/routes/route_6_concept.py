@@ -578,9 +578,18 @@ class ConceptSearchHandler(BaseRouteHandler):
             if rerank_enabled and sentence_evidence:
                 # R6-3: Wrap in try/except — reranker failures must not crash the request.
                 try:
-                    sentence_evidence = await self._rerank_sentences(
-                        query, sentence_evidence, top_k=rerank_top_k,
-                    )
+                    multi_query_rerank = os.getenv(
+                        "ROUTE6_MULTI_QUERY_RERANK", "1"
+                    ).strip().lower() in {"1", "true", "yes"}
+                    if multi_query_rerank and community_data:
+                        sentence_evidence = await self._multi_query_rerank(
+                            query, community_data, sentence_evidence,
+                            top_k=rerank_top_k,
+                        )
+                    else:
+                        sentence_evidence = await self._rerank_sentences(
+                            query, sentence_evidence, top_k=rerank_top_k,
+                        )
                 except Exception as e:
                     logger.warning("route6_rerank_failed_fallback", error=str(e))
                     sentence_evidence = sentence_evidence[:rerank_top_k]
@@ -2392,6 +2401,165 @@ class ConceptSearchHandler(BaseRouteHandler):
             # graceful degradation even when called from other contexts.
             logger.warning("route6_rerank_failed", error=str(e))
             return evidence[:top_k]
+
+    async def _multi_query_rerank(
+        self,
+        query: str,
+        communities: List[Dict[str, Any]],
+        evidence: List[Dict[str, Any]],
+        top_k: int = 25,
+    ) -> List[Dict[str, Any]]:
+        """Rerank evidence against multiple queries: user query + community titles.
+
+        For each sentence, take the MAX relevance score across all rerank passes.
+        This rescues topically-relevant sentences that score low against the user
+        query but high against a community title (e.g. "merchantability" scores
+        low vs "risk allocation" but high vs "Warranty Claims").
+
+        Uses at most ROUTE6_MULTI_QUERY_MAX_EXTRA extra rerank passes (community
+        titles), plus the primary user-query pass.
+        """
+        max_extra = int(os.getenv("ROUTE6_MULTI_QUERY_MAX_EXTRA", "3"))
+
+        # Build supplementary queries from community titles (highest-rated first)
+        extra_queries: List[str] = []
+        for c in communities[:max_extra]:
+            title = (c.get("title") or "").strip()
+            if title:
+                extra_queries.append(title)
+
+        all_queries = [query] + extra_queries
+        documents = [ev.get("sentence_text") or ev.get("text") or "" for ev in evidence]
+
+        if not documents:
+            return []
+
+        rerank_model = os.getenv("ROUTE6_RERANK_MODEL", "rerank-2.5")
+        vc = make_voyage_client()
+
+        # Run all rerank passes concurrently
+        async def _rerank_one(q: str):
+            return await rerank_with_retry(
+                vc,
+                query=q,
+                documents=documents,
+                model=rerank_model,
+                top_k=len(documents),  # get scores for ALL docs
+                executor=self._executor,
+            )
+
+        results = await asyncio.gather(
+            *[_rerank_one(q) for q in all_queries],
+            return_exceptions=True,
+        )
+
+        # Aggregate scores: user query provides the primary ranking.
+        # Community titles provide "rescue slots" — sentences that scored
+        # poorly against the user query but well against a community title
+        # get added as BONUS evidence (they don't displace user-ranked items).
+        rescue_slots = int(os.getenv("ROUTE6_MULTI_QUERY_RESCUE_SLOTS", "5"))
+        rescue_threshold = float(os.getenv("ROUTE6_MULTI_QUERY_RESCUE_THRESHOLD", "0.4"))
+
+        user_scores: Dict[int, float] = {}
+        community_best: Dict[int, float] = {}
+        community_best_query: Dict[int, str] = {}
+        total_rerank_tokens = 0
+
+        for q_idx, rr_result in enumerate(results):
+            if isinstance(rr_result, Exception):
+                logger.warning(
+                    "route6_multi_query_rerank_pass_failed",
+                    query_idx=q_idx,
+                    query=all_queries[q_idx][:50],
+                    error=str(rr_result),
+                )
+                continue
+
+            total_rerank_tokens += getattr(rr_result, "total_tokens", 0)
+            for rr in rr_result.results:
+                score = rr.relevance_score
+                if q_idx == 0:
+                    user_scores[rr.index] = score
+                else:
+                    if rr.index not in community_best or score > community_best[rr.index]:
+                        community_best[rr.index] = score
+                        community_best_query[rr.index] = all_queries[q_idx]
+
+        if not user_scores:
+            logger.warning("route6_multi_query_rerank_all_failed_fallback")
+            return await self._rerank_sentences(query, evidence, top_k=top_k)
+
+        # Phase 1: Normal user-query ranking (top_k)
+        user_ranked = sorted(user_scores.items(), key=lambda x: x[1], reverse=True)
+        primary_indices = set()
+        primary: List[Dict[str, Any]] = []
+        for idx, score in user_ranked[:top_k]:
+            primary_indices.add(idx)
+            primary.append({
+                **evidence[idx],
+                "rerank_score": score,
+                "score": score,
+            })
+
+        # Phase 2: Rescue slots — find sentences that scored well against
+        # community titles but didn't make the user-query top_k.
+        rescue_candidates = []
+        for idx, c_score in community_best.items():
+            if idx in primary_indices:
+                continue
+            if c_score >= rescue_threshold:
+                rescue_candidates.append((idx, c_score))
+
+        rescue_candidates.sort(key=lambda x: x[1], reverse=True)
+        rescued: List[Dict[str, Any]] = []
+        for idx, c_score in rescue_candidates[:rescue_slots]:
+            rescued.append({
+                **evidence[idx],
+                "rerank_score": c_score,
+                "score": c_score,
+                "_rerank_best_query": community_best_query.get(idx, "")[:60],
+                "_rescued": True,
+            })
+
+        final = primary + rescued
+
+        scored_evidence = final
+        scored_evidence.sort(key=lambda e: e.get("score", 0), reverse=True)
+
+        # Track reranker usage
+        try:
+            acc = getattr(self, "_token_accumulator", None)
+            if acc is not None:
+                acc.add_rerank(rerank_model, total_rerank_tokens, len(documents) * len(all_queries))
+            from src.core.services.usage_tracker import get_usage_tracker
+            _tracker = get_usage_tracker()
+            asyncio.ensure_future(_tracker.log_rerank_usage(
+                partition_id=self.group_id,
+                model=rerank_model,
+                total_tokens=total_rerank_tokens,
+                documents_reranked=len(documents) * len(all_queries),
+                route="route_6",
+                user_id=None,
+            ))
+        except Exception:
+            pass
+
+        # Log which sentences were "rescued" by supplementary queries
+        logger.info(
+            "route6_multi_query_rerank_complete",
+            queries=len(all_queries),
+            query_titles=[q[:40] for q in all_queries],
+            pool_size=len(evidence),
+            primary_count=len(primary),
+            rescued_count=len(rescued),
+            output_count=len(scored_evidence),
+            rescue_threshold=rescue_threshold,
+            top_score=round(scored_evidence[0]["score"], 4) if scored_evidence else 0,
+            bottom_score=round(scored_evidence[-1]["score"], 4) if scored_evidence else 0,
+            total_rerank_tokens=total_rerank_tokens,
+        )
+
+        return scored_evidence
 
     # ==================================================================
     # Citations
