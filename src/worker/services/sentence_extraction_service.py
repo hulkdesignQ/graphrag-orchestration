@@ -453,7 +453,7 @@ def _llm_detect_section_headers(
                 token = credential.get_token("https://cognitiveservices.azure.com/.default")
                 client_kwargs["azure_ad_token"] = token.token
 
-        client = OpenAIClient(**client_kwargs)
+        client = OpenAIClient(timeout=60, **client_kwargs)
         response = client.chat.completions.create(
             model=deployment,
             temperature=0,
@@ -519,11 +519,28 @@ def _split_oversized_sections(sentences: List[Dict]) -> List[Dict]:
     if not oversized:
         return sentences
 
+    # Detect headers for all oversized sections in parallel
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    detect_tasks = {
+        sp: [sentences[i] for i in idxs]
+        for sp, idxs in oversized.items()
+    }
+    header_results: Dict[str, List[int]] = {}
+    with ThreadPoolExecutor(max_workers=min(len(detect_tasks), 4)) as pool:
+        futures = {
+            pool.submit(_llm_detect_section_headers, sents, sp): sp
+            for sp, sents in detect_tasks.items()
+        }
+        for fut in as_completed(futures):
+            sp = futures[fut]
+            try:
+                header_results[sp] = fut.result()
+            except Exception as exc:
+                logger.warning("section_split_parallel_failed", section=sp, error=str(exc))
+                header_results[sp] = []
+
     for section_path, indices in oversized.items():
-        # Collect sentences for this section
-        section_sents = [sentences[i] for i in indices]
-        header_positions = _llm_detect_section_headers(section_sents, section_path)
-        header_set = set(header_positions)
+        header_set = set(header_results.get(section_path, []))
 
         if not header_set:
             continue

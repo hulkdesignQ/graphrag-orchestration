@@ -1269,7 +1269,8 @@ class LazyGraphRAGIndexingPipeline:
             if di_units:
                 logger.info("_index_sentences_direct: extracting sentences doc=%s units=%d", doc_title, len(di_units))
                 _sys.stderr.flush(); _sys.stdout.flush()
-                raw = extract_sentences_from_di_units(
+                raw = await asyncio.to_thread(
+                    extract_sentences_from_di_units,
                     di_units, doc_id=doc_id,
                     doc_title=doc_title, doc_source=doc_source,
                 )
@@ -1277,7 +1278,8 @@ class LazyGraphRAGIndexingPipeline:
                 content = (doc.get("content") or doc.get("text") or "").strip()
                 if not content:
                     continue
-                raw = extract_sentences_from_raw_text(
+                raw = await asyncio.to_thread(
+                    extract_sentences_from_raw_text,
                     content, doc_id=doc_id,
                     doc_title=doc_title, doc_source=doc_source,
                 )
@@ -1418,7 +1420,6 @@ class LazyGraphRAGIndexingPipeline:
                 [len(dc) for dc in document_chunks],
             )
 
-            import asyncio
             from src.worker.hybrid_v2.embeddings.voyage_embed import get_voyage_embed_service
             voyage_svc = get_voyage_embed_service()
             loop = asyncio.get_event_loop()
