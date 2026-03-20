@@ -64,6 +64,7 @@ class HippoRAG2PPR:
         self._node_types: Dict[int, str] = {}  # index -> "entity"|"passage"
         self._node_names: Dict[int, str] = {}  # index -> display name
         self._passage_full_texts: Dict[str, str] = {}  # node_id -> full text (for reranker)
+        self._passage_embeddings: Dict[str, List[float]] = {}  # node_id -> embedding vector (for pre-filter)
         self._entity_mention_counts: Dict[str, int] = {}  # entity_id -> # passages mentioning it
         # Community metadata for community-balanced personalization
         self._community_id: Dict[int, int] = {}  # node_idx -> community_id
@@ -89,6 +90,67 @@ class HippoRAG2PPR:
         Used by the cross-encoder reranker to avoid a separate Neo4j fetch.
         """
         return self._passage_full_texts
+
+    def get_all_passage_embeddings(self) -> Dict[str, List[float]]:
+        """Return all passage node IDs mapped to their embedding vectors.
+
+        Used for fast cosine pre-filtering before cross-encoder reranking.
+        """
+        return self._passage_embeddings
+
+    def cosine_prefilter(
+        self,
+        query_embedding: List[float],
+        top_k: int = 100,
+        candidate_ids: Optional[List[str]] = None,
+    ) -> List[Tuple[str, float]]:
+        """Fast in-memory cosine similarity pre-filter for passages.
+
+        Uses cached passage embeddings (loaded at graph init) to rank
+        passages by cosine similarity to the query embedding. This avoids
+        a Neo4j roundtrip and can reduce cross-encoder reranker input
+        from N to top_k, cutting reranker token usage proportionally.
+
+        Args:
+            query_embedding: Query vector (same dim as passage embeddings).
+            top_k: Number of top passages to return.
+            candidate_ids: If provided, only score these IDs (skip others).
+
+        Returns:
+            List of (sentence_id, cosine_similarity) sorted best-first.
+        """
+        import numpy as np
+
+        if not self._passage_embeddings:
+            return []
+
+        q = np.array(query_embedding, dtype=np.float32)
+        q_norm = np.linalg.norm(q)
+        if q_norm == 0:
+            return []
+        q = q / q_norm
+
+        if candidate_ids is not None:
+            ids = [sid for sid in candidate_ids if sid in self._passage_embeddings]
+        else:
+            ids = list(self._passage_embeddings.keys())
+
+        if not ids:
+            return []
+
+        # Build matrix and compute cosine in one vectorized operation
+        mat = np.array([self._passage_embeddings[sid] for sid in ids], dtype=np.float32)
+        norms = np.linalg.norm(mat, axis=1, keepdims=True)
+        norms = np.maximum(norms, 1e-10)
+        mat = mat / norms
+        scores = mat @ q  # cosine similarities
+
+        # Get top-k indices
+        k = min(top_k, len(ids))
+        top_indices = np.argpartition(scores, -k)[-k:]
+        top_indices = top_indices[np.argsort(scores[top_indices])[::-1]]
+
+        return [(ids[i], float(scores[i])) for i in top_indices]
 
     @property
     def entity_mention_counts(self) -> Dict[str, int]:
@@ -236,12 +298,13 @@ class HippoRAG2PPR:
                     self._community_id[idx] = int(cid)
 
             # ----------------------------------------------------------
-            # 2. Load Sentence (passage) nodes
+            # 2. Load Sentence (passage) nodes + embeddings
             # ----------------------------------------------------------
             result = session.run(
                 "MATCH (c:Sentence) "
                 "WHERE c.group_id IN $group_ids "
-                "RETURN c.id AS id, c.text AS text",
+                "RETURN c.id AS id, c.text AS text, "
+                "c.sentence_embedding AS emb",
                 group_ids=group_ids,
             )
             for record in result:
@@ -249,6 +312,9 @@ class HippoRAG2PPR:
                 full_text = record["text"] or ""
                 self._add_node(record["id"], "passage", full_text[:80])
                 self._passage_full_texts[record["id"]] = full_text
+                emb = record["emb"]
+                if emb is not None:
+                    self._passage_embeddings[record["id"]] = list(emb)
 
             # ----------------------------------------------------------
             # 3. Entity-Entity edges via RELATED_TO

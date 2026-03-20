@@ -410,6 +410,10 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
         semantic_seed_top_k = int(_ov("semantic_seed_top_k", "ROUTE7_SEMANTIC_SEED_TOP_K", "20"))
         semantic_seed_weight = float(_ov("semantic_seed_weight", "ROUTE7_SEMANTIC_SEED_WEIGHT", "0.05"))
 
+        # Embedding pre-filter: narrow candidates before cross-encoder reranking.
+        # 0 = disabled (rerank all passages). >0 = cosine pre-filter to this many.
+        rerank_prefilter_k = int(_ov("rerank_prefilter_k", "ROUTE7_RERANK_PREFILTER_K", "0"))
+
         # Triple reranking config (read early for logging)
         triple_rerank_enabled = _ov(
             "triple_rerank", "ROUTE7_TRIPLE_RERANK", "1"
@@ -619,6 +623,7 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
                     relevance_threshold=rerank_relevance_threshold if rerank_dynamic_cutoff else 0.0,
                     dynamic_max=rerank_dynamic_max if rerank_dynamic_cutoff else 0,
                     user_id=user_id,
+                    prefilter_top_k=rerank_prefilter_k,
                 )
             )
 
@@ -1192,6 +1197,7 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
                     relevance_threshold=rerank_relevance_threshold if rerank_dynamic_cutoff else 0.0,
                     dynamic_max=rerank_dynamic_max if rerank_dynamic_cutoff else 0,
                     user_id=user_id,
+                    prefilter_top_k=rerank_prefilter_k,
                 )
                 if rerank_all_results:
                     # Only dedup against PPR TOP-K (not all PPR passages,
@@ -3188,11 +3194,33 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
     ) -> List[str]:
         """Pre-filter PPR candidates by instructed embedding similarity.
 
-        Embeds the query WITH a retrieval instruction using voyage-context-3,
-        then computes cosine similarity against stored sentence_embeddings.
-        The instruction broadens the embedding to capture related content
-        beyond what the query literally asks about.
+        Fast path: if PPR engine has cached passage embeddings, computes
+        cosine similarity in-memory (no Neo4j roundtrip).
+
+        Slow path: falls back to Neo4j vector.similarity.cosine() query.
         """
+        # Fast path: in-memory cosine using cached PPR embeddings
+        if self._ppr_engine and self._ppr_engine.get_all_passage_embeddings():
+            voyage_service = _get_voyage_service()
+            if voyage_service:
+                instruction = os.getenv(
+                    "ROUTE7_SEMANTIC_PREFILTER_INSTRUCTION",
+                    "Retrieve all sentences relevant to answering the following query.",
+                )
+                try:
+                    instructed_query = instruction + " " + query
+                    query_embedding = await asyncio.to_thread(
+                        voyage_service.embed_query, instructed_query,
+                    )
+                    prefiltered = self._ppr_engine.cosine_prefilter(
+                        query_embedding, top_k=top_n, candidate_ids=candidate_ids,
+                    )
+                    if prefiltered:
+                        return [sid for sid, _ in prefiltered]
+                except Exception as e:
+                    logger.warning("prefilter_inmemory_failed_fallback", error=str(e))
+
+        # Slow path: Neo4j-based cosine similarity
         voyage_service = _get_voyage_service()
         if not voyage_service or not self.neo4j_driver:
             return candidate_ids[:top_n]
@@ -3241,13 +3269,19 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
         relevance_threshold: float = 0.0,
         dynamic_max: int = 0,
         user_id: Optional[str] = None,
+        prefilter_top_k: int = 0,
     ) -> List[Tuple[str, float]]:
-        """Rerank ALL sentences using cached texts from the PPR engine.
+        """Rerank sentences using cached texts from the PPR engine.
 
-        Replaces DPR cosine pre-filtering — the cross-encoder sees every
-        sentence and can match conceptual queries (e.g. "day-based
-        timeframes" → "90 days labor warranty") that embedding similarity
-        misses entirely.
+        Two-stage pipeline to reduce cross-encoder token usage:
+        1. If prefilter_top_k > 0 and passage embeddings are cached, uses
+           fast in-memory cosine similarity to narrow ALL passages down to
+           the top prefilter_top_k candidates.
+        2. Cross-encoder (voyage rerank-2.5) reranks only the pre-filtered
+           candidates for final scoring.
+
+        Without pre-filtering (prefilter_top_k=0), reranks ALL passages
+        directly (original behavior).
 
         When relevance_threshold > 0, returns all passages above threshold
         (up to dynamic_max) instead of a fixed top-K.
@@ -3261,12 +3295,37 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
             logger.warning("rerank_all_no_texts")
             return []
 
+        # Stage 1: Embedding pre-filter (optional)
+        prefiltered_ids: Optional[set] = None
+        if prefilter_top_k > 0 and self._ppr_engine.get_all_passage_embeddings():
+            # Get query embedding via Voyage (input_type="query")
+            from ..embeddings.voyage_embed import get_voyage_embed_service
+            try:
+                voyage_svc = get_voyage_embed_service()
+                q_emb = voyage_svc.embed_query(query, group_id=self.group_id, user_id=user_id)
+                prefiltered = self._ppr_engine.cosine_prefilter(
+                    q_emb, top_k=prefilter_top_k,
+                )
+                prefiltered_ids = {sid for sid, _ in prefiltered}
+                logger.info(
+                    "rerank_all_prefilter_applied",
+                    total_passages=len(text_map),
+                    prefilter_top_k=prefilter_top_k,
+                    prefiltered=len(prefiltered_ids),
+                )
+            except Exception as e:
+                logger.warning("rerank_all_prefilter_failed", error=str(e))
+                # Fall through to rerank all
+
         ids = []
         documents = []
         for sid, text in text_map.items():
-            if text.strip():
-                ids.append(sid)
-                documents.append(text)
+            if not text.strip():
+                continue
+            if prefiltered_ids is not None and sid not in prefiltered_ids:
+                continue
+            ids.append(sid)
+            documents.append(text)
 
         if not documents:
             return []
@@ -3323,6 +3382,7 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
             min_score=min_score,
             threshold=relevance_threshold,
             dynamic=relevance_threshold > 0,
+            prefiltered=prefiltered_ids is not None,
         )
 
         return results
