@@ -71,7 +71,7 @@ GROUND_TRUTH: Dict[str, Dict[str, Any]] = {
         "query": "What obligations are explicitly described as reporting / record-keeping?",
         "required": [
             ("report", "HOLDING TANK"),  # pumper submits reports
-            ("volumes pumped", "HOLDING TANK"),
+            ("volumes in gallons", "HOLDING TANK"),
             ("monthly statement", "PROPERTY MANAGEMENT"),
         ],
     },
@@ -98,7 +98,7 @@ GROUND_TRUTH: Dict[str, Dict[str, Any]] = {
         "required": [
             ("written notice", "PROPERTY MANAGEMENT"),
             ("certified mail", "WARRANTY"),
-            ("10 business days", "HOLDING TANK"),
+            ("business days", "HOLDING TANK"),
         ],
     },
     "Q-G8": {

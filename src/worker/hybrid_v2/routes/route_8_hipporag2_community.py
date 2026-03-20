@@ -233,6 +233,18 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
             synonym_threshold = float(
                 os.getenv("ROUTE7_SYNONYM_THRESHOLD", "0.70")
             )
+            section_edge_weight = float(
+                os.getenv("ROUTE7_SECTION_EDGE_WEIGHT", "0.1")
+            )
+            section_sim_threshold = float(
+                os.getenv("ROUTE7_SECTION_SIM_THRESHOLD", "0.5")
+            )
+            include_appears_in_section = os.getenv(
+                "ROUTE7_APPEARS_IN_SECTION", "0"
+            ).strip().lower() in {"1", "true", "yes"}
+            include_next_in_section = os.getenv(
+                "ROUTE7_NEXT_IN_SECTION", "0"
+            ).strip().lower() in {"1", "true", "yes"}
 
             # Load triple store and PPR graph in parallel
             triple_store = TripleEmbeddingStore()
@@ -249,6 +261,10 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
                     passage_node_weight=passage_node_weight,
                     synonym_threshold=synonym_threshold,
                     include_section_graph=include_section_graph,
+                    section_edge_weight=section_edge_weight,
+                    section_sim_threshold=section_sim_threshold,
+                    include_appears_in_section=include_appears_in_section,
+                    include_next_in_section=include_next_in_section,
                 ),
             )
 

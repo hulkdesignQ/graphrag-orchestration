@@ -133,6 +133,8 @@ class HippoRAG2PPR:
         include_section_graph: bool = False,
         section_edge_weight: float = 0.1,
         section_sim_threshold: float = 0.5,
+        include_appears_in_section: bool = False,
+        include_next_in_section: bool = False,
     ) -> None:
         """Load Entity + Sentence nodes and edges from Neo4j.
 
@@ -146,6 +148,10 @@ class HippoRAG2PPR:
             section_edge_weight: Weight for IN_SECTION edges (default 0.1).
             section_sim_threshold: Min similarity for section SEMANTICALLY_SIMILAR
                 edges (default 0.5).
+            include_appears_in_section: Load Entity→Section APPEARS_IN_SECTION
+                edges as shortcuts (bypasses Sentence→Section hop).
+            include_next_in_section: Load Sentence→Sentence NEXT_IN_SECTION
+                edges for sequential sentence bridging.
         """
         t0 = time.perf_counter()
 
@@ -158,6 +164,8 @@ class HippoRAG2PPR:
             include_section_graph,
             section_edge_weight,
             section_sim_threshold,
+            include_appears_in_section,
+            include_next_in_section,
         )
 
         self._finalize_graph()
@@ -195,6 +203,8 @@ class HippoRAG2PPR:
         include_section_graph: bool,
         section_edge_weight: float,
         section_sim_threshold: float,
+        include_appears_in_section: bool = False,
+        include_next_in_section: bool = False,
     ) -> None:
         """Synchronous graph loading from Neo4j."""
         entity_edge_count = 0
@@ -345,12 +355,56 @@ class HippoRAG2PPR:
                     session, group_ids, section_edge_weight, section_sim_threshold
                 )
 
+            # ----------------------------------------------------------
+            # 7. APPEARS_IN_SECTION: Entity→Section shortcut (optional)
+            #    Bypasses the Sentence→IN_SECTION→Section path, giving
+            #    entities direct access to sections for cross-doc bridging.
+            # ----------------------------------------------------------
+            appears_in_section_count = 0
+            if include_appears_in_section and include_section_graph:
+                result = session.run(
+                    "MATCH (e:Entity)-[:APPEARS_IN_SECTION]->(s:Section) "
+                    "WHERE e.group_id IN $group_ids "
+                    "AND s.group_id IN $group_ids "
+                    "RETURN e.id AS entity_id, s.id AS section_id",
+                    group_ids=group_ids,
+                )
+                for record in result:
+                    src_idx = self._node_to_idx.get(record["entity_id"])
+                    tgt_idx = self._node_to_idx.get(record["section_id"])
+                    if src_idx is not None and tgt_idx is not None:
+                        self._add_edge(src_idx, tgt_idx, section_edge_weight)
+                        appears_in_section_count += 1
+
+            # ----------------------------------------------------------
+            # 8. NEXT_IN_SECTION: sequential sentence links (optional)
+            #    Connects consecutive sentences within sections so PPR
+            #    can walk from a found sentence to its neighbors.
+            # ----------------------------------------------------------
+            next_in_section_count = 0
+            if include_next_in_section:
+                result = session.run(
+                    "MATCH (s1:Sentence)-[:NEXT_IN_SECTION]->(s2:Sentence) "
+                    "WHERE s1.group_id IN $group_ids "
+                    "AND s2.group_id IN $group_ids "
+                    "RETURN s1.id AS src, s2.id AS tgt",
+                    group_ids=group_ids,
+                )
+                for record in result:
+                    src_idx = self._node_to_idx.get(record["src"])
+                    tgt_idx = self._node_to_idx.get(record["tgt"])
+                    if src_idx is not None and tgt_idx is not None:
+                        self._add_edge(src_idx, tgt_idx, section_edge_weight)
+                        next_in_section_count += 1
+
         logger.debug(
             "hipporag2_ppr_edges_loaded",
             entity_edges=entity_edge_count,
             mentions_edges=mentions_edge_count,
             synonym_edges=synonym_edge_count,
             sentence_sim_edges=sentence_sim_count,
+            appears_in_section_edges=appears_in_section_count if include_appears_in_section else 0,
+            next_in_section_edges=next_in_section_count if include_next_in_section else 0,
         )
 
     def _load_section_graph_sync(
