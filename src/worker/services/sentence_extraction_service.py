@@ -400,57 +400,107 @@ _LIST_JOIN_GROUP_MAX_TOKENS = 120
 _PREAMBLE_RE = re.compile(r"[:\.][\s.]*$")  # ends with : or :. (possibly trailing spaces/dots)
 
 # Section header detection for oversized section splitting.
-# Matches patterns like "3. Exclusions from Coverage." or "A. Binding Arbitration."
-_SECTION_HEADER_RE = re.compile(
-    r'^(?:'
-    r'(?:[A-Z]\.?\s)|'           # "A. " or "A "
-    r'(?:\d{1,2}\.?\s)|'         # "3. " or "3 "
-    r'(?:[IVXLC]+\.?\s)'         # "IV. " (roman numerals)
-    r')'
-    r'.{2,60}$'                  # 2-60 chars total (short heading text)
-)
 _SECTION_SPLIT_THRESHOLD = int(os.getenv("SECTION_SPLIT_THRESHOLD", "20"))
 
 
-def _is_section_header(text: str, source: str) -> bool:
-    """Detect if a sentence is an inline section header.
+def _llm_detect_section_headers(
+    sentences: List[Dict[str, Any]],
+    section_path: str,
+) -> List[int]:
+    """Use LLM to detect inline section headers within an oversized section.
 
-    Two patterns:
-    1. Numbered/lettered prefix: "A. Binding Arbitration.", "3. Exclusions."
-    2. Title-case short phrase: "Notification of Defects.", "No Other Warranties."
-       (≤6 words, ≥50% capitalized content words, paragraph source)
+    Sends numbered sentence texts to gpt-4.1 and asks it to identify which
+    are section/subsection headers vs body content. Returns indices of
+    detected headers.
+
+    Cost: ~3K tokens per oversized section (negligible at indexing time).
     """
-    if source != "paragraph":
-        return False
-    words = text.split()
-    if len(words) > 8:
-        return False
+    numbered = "\n".join(
+        f"[{i}] {s.get('text', '').strip()}" for i, s in enumerate(sentences)
+    )
 
-    # Pattern 1: numbered/lettered prefix
-    if _SECTION_HEADER_RE.match(text) and len(words) <= 8:
-        return True
+    prompt = (
+        "You are a document structure analyst. Given numbered sentences from a "
+        "legal document section, identify which sentences are section or subsection "
+        "headers (not body content). Headers are typically short titles like "
+        "'Exclusions from Coverage.' or 'A. Binding Arbitration.'\n\n"
+        "Return ONLY a JSON array of objects: "
+        '[{"index": N, "title": "header text"}]\n'
+        "If there are no headers, return [].\n\n"
+        f"Sentences:\n{numbered}"
+    )
 
-    # Pattern 2: title-case short phrase (≤6 words, mostly capitalized)
-    # Exclude data-like patterns (e.g., "Contract Date: 2024-06-15.")
-    if len(words) <= 6 and ":" not in text:
-        content_words = [w for w in words if len(w) > 2 and not w[0].isdigit()]
-        if content_words:
-            cap_ratio = sum(1 for w in content_words if w[0].isupper()) / len(content_words)
-            if cap_ratio >= 0.5:
-                return True
+    endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+    deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4.1")
+    api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-12-01-preview")
+    if not endpoint:
+        logger.debug("section_split_llm_no_endpoint")
+        return []
 
-    return False
+    try:
+        from llama_index.llms.azure_openai import AzureOpenAI as LlamaAzureOpenAI
+
+        llm_kwargs: Dict[str, Any] = {
+            "model": deployment,
+            "engine": deployment,
+            "azure_endpoint": endpoint,
+            "api_version": api_version,
+            "temperature": 0.0,
+        }
+
+        api_key = os.getenv("AZURE_OPENAI_API_KEY")
+        if api_key:
+            llm_kwargs["api_key"] = api_key
+        else:
+            env_token = os.getenv("AZURE_OPENAI_AD_TOKEN")
+            if env_token:
+                llm_kwargs["use_azure_ad"] = True
+                llm_kwargs["azure_ad_token_provider"] = lambda: env_token
+            else:
+                from azure.identity import DefaultAzureCredential, get_bearer_token_provider
+                credential = DefaultAzureCredential()
+                token_provider = get_bearer_token_provider(
+                    credential, "https://cognitiveservices.azure.com/.default"
+                )
+                llm_kwargs["use_azure_ad"] = True
+                llm_kwargs["azure_ad_token_provider"] = token_provider
+
+        llm = LlamaAzureOpenAI(**llm_kwargs)
+        response = llm.complete(prompt)
+        text = (response.text or "").strip()
+
+        # Strip markdown fences
+        if text.startswith("```"):
+            text = text.split("\n", 1)[1] if "\n" in text else text[3:]
+        if text.endswith("```"):
+            text = text[:-3].rstrip()
+        if text.startswith("json"):
+            text = text[4:].lstrip()
+
+        headers = json_mod.loads(text)
+        indices = [h["index"] for h in headers if isinstance(h.get("index"), int)]
+        logger.info(
+            "section_split_llm_detected",
+            section=section_path,
+            headers_found=len(indices),
+            headers=[h.get("title", "") for h in headers],
+        )
+        return indices
+
+    except Exception as exc:
+        logger.warning("section_split_llm_failed", error=str(exc))
+        return []
 
 
 def _split_oversized_sections(sentences: List[Dict]) -> List[Dict]:
-    """Split oversized sections by detecting inline subsection headers.
+    """Split oversized sections by detecting inline subsection headers via LLM.
 
     When Azure DI assigns many sentences to one section (e.g., 76 sentences
-    under "2. Term."), this function detects header-like sentences (short,
-    numbered/lettered text like "3. Exclusions from Coverage.") and creates
-    new subsection paths for the sentences that follow them.
+    under "2. Term."), this function uses an LLM to identify which sentences
+    are section headers and creates new subsection paths accordingly.
 
     Only processes sections exceeding SECTION_SPLIT_THRESHOLD (default 20).
+    Falls back to no-op if LLM is unavailable.
     """
     if _SECTION_SPLIT_THRESHOLD <= 0:
         return sentences
@@ -469,23 +519,25 @@ def _split_oversized_sections(sentences: List[Dict]) -> List[Dict]:
         return sentences
 
     for section_path, indices in oversized.items():
+        # Collect sentences for this section
+        section_sents = [sentences[i] for i in indices]
+        header_positions = _llm_detect_section_headers(section_sents, section_path)
+        header_set = set(header_positions)
+
+        if not header_set:
+            continue
+
         current_subsection: Optional[str] = None
         sub_idx = 0
         for pos, sent_idx in enumerate(indices):
             sent = sentences[sent_idx]
-            text = sent.get("text", "").strip()
-            words = text.split()
 
-            # Detect header: short, matches pattern, source=paragraph
-            is_header = _is_section_header(text, sent.get("source", ""))
-
-            if is_header:
-                # Clean title: strip trailing period
-                title = text.rstrip(".")
+            if pos in header_set:
+                title = sent.get("text", "").strip().rstrip(".").rstrip(";")
                 current_subsection = f"{section_path} > {title}"
                 sub_idx = 0
                 logger.debug(
-                    "section_split_header_detected",
+                    "section_split_header_applied",
                     parent=section_path,
                     subsection=title,
                     position=pos,
@@ -497,6 +549,7 @@ def _split_oversized_sections(sentences: List[Dict]) -> List[Dict]:
                 sub_idx += 1
 
     # Recount total_in_section
+    from collections import defaultdict
     section_counts: Dict[str, int] = defaultdict(int)
     for sent in sentences:
         sp = sent.get("section_path") or "[Document Root]"
