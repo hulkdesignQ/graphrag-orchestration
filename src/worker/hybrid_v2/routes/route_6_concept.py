@@ -606,6 +606,31 @@ class ConceptSearchHandler(BaseRouteHandler):
             )
 
         # ================================================================
+        # Step 2b: Evidence score floor — drop low-scoring evidence
+        # before synthesis to reduce peripheral content that causes
+        # LLM over-inclusion (e.g., low-scoring "insurance" sentences
+        # making the LLM include insurance as "record-keeping").
+        # Disabled by default (0) — set > 0 to activate.
+        # ================================================================
+        evidence_score_floor = float(
+            os.getenv("ROUTE6_EVIDENCE_SCORE_FLOOR", "0")
+        )
+        if sentence_evidence and evidence_score_floor > 0:
+            before_floor = len(sentence_evidence)
+            sentence_evidence = [
+                ev for ev in sentence_evidence
+                if ev.get("score", 0) >= evidence_score_floor
+            ]
+            if len(sentence_evidence) < before_floor:
+                logger.info(
+                    "route6_evidence_score_floor_applied",
+                    before=before_floor,
+                    after=len(sentence_evidence),
+                    floor=evidence_score_floor,
+                    removed=before_floor - len(sentence_evidence),
+                )
+
+        # ================================================================
         # Negative detection: no communities AND no sentences AND no sections
         # ================================================================
         if not community_data and not sentence_evidence and not section_headings:
