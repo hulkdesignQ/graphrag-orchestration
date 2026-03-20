@@ -11,13 +11,23 @@
 #   - For testing v3: use preview-worker.sh to deploy preview container
 #
 # Deployment:
-#   - Push to main: auto-deploy to production
-#   - Manual: choose algorithm version for worker
+#   - Push/PR to main: CI only (test + build)
+#   - Manual workflow_dispatch: build + deploy to production
+#   - deploy-graphrag.sh: full infra + code deploy (break-glass)
 
 name: Build & Deploy
 
 on:
   push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'frontend/**'
+      - 'Dockerfile*'
+      - 'requirements*.txt'
+      - 'pyproject.toml'
+      - '.github/workflows/**'
+  pull_request:
     branches: [main]
     paths:
       - 'src/**'
@@ -162,6 +172,7 @@ jobs:
   deploy:
     name: Deploy to Production
     needs: [frontend-test, build]
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     environment: production
     
