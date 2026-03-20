@@ -360,6 +360,7 @@ async def _execute_query(
     folder_id: Optional[str] = None,
     response_type: str = "detailed_report",
     force_route: Optional[str] = None,
+    language: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Execute a GraphRAG query via HybridPipeline.
@@ -380,7 +381,23 @@ async def _execute_query(
     from src.worker.hybrid_v2.router.main import QueryRoute
     from src.api_gateway.services.folder_resolver import resolve_neo4j_group_id
 
+    logger.info(
+        "execute_query_resolve_start",
+        auth_group_id=group_id,
+        folder_id_raw=folder_id,
+        folder_id_type=type(folder_id).__name__,
+        folder_id_repr=repr(folder_id),
+    )
     neo4j_gid = await resolve_neo4j_group_id(group_id, folder_id)
+    logger.info(
+        "execute_query_resolved",
+        auth_group_id=group_id,
+        folder_id_raw=folder_id,
+        neo4j_gid=neo4j_gid,
+    )
+    # Demo mode: group_id is resolved but there's no real folder to scope by
+    if folder_id == "__demo__":
+        folder_id = None
     pipeline = await _get_hybrid_pipeline(neo4j_gid, folder_id)
 
     # Resolve route: direct force_route string takes priority over approach mapping
@@ -409,9 +426,10 @@ async def _execute_query(
                 route=route,
                 response_type=response_type,
                 folder_id=folder_id,
+                language=language,
             )
         else:
-            result = await pipeline.query(query, response_type, folder_id=folder_id)
+            result = await pipeline.query(query, response_type, folder_id=folder_id, language=language)
         
         # Extract thoughts from result
         thoughts = _extract_thoughts(result)
@@ -419,6 +437,7 @@ async def _execute_query(
         usage_raw = result.get("usage") or {}
         return {
             "answer": result.get("response", ""),
+            "original_answer": result.get("original_answer"),
             "route_used": result.get("route_used", approach),
             "usage": {
                 "prompt_tokens": usage_raw.get("prompt_tokens", 0),
@@ -613,7 +632,7 @@ async def chat_completions(
     
     # Sync route (local/hybrid) - execute immediately
     try:
-        result = await _execute_query(query, approach, group_id, body.folder_id)
+        result = await _execute_query(query, approach, group_id, body.folder_id, language=getattr(body, "language", None))
         
         response_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
         route_used = result.get("route_used", approach)
@@ -838,7 +857,8 @@ async def _stream_chat_response(
             route_used = result.get("route_used", approach)
             
             # For better UX, stream answer in chunks (simulate word-by-word)
-            words = answer.split()
+            # Split on space only (not all whitespace) to preserve \n for markdown lists
+            words = [w for w in answer.split(' ') if w]
             buffer = ""
             chunk_size = 5  # Words per chunk
             
@@ -846,7 +866,7 @@ async def _stream_chat_response(
                 buffer += word + " "
                 if (i + 1) % chunk_size == 0 or i == len(words) - 1:
                     yield _format_stream_chunk(
-                        response_id, created, route_used, buffer.strip() + " ", thoughts
+                        response_id, created, route_used, buffer, thoughts
                     )
                     buffer = ""
                     await asyncio.sleep(0.02)  # Natural typing feel
@@ -1011,7 +1031,7 @@ class FrontendChatOverrides(BaseModel):
     reasoning_effort: Optional[str] = None
     temperature: Optional[float] = None
     top: Optional[int] = None
-    suggest_followup_questions: Optional[bool] = True
+    suggest_followup_questions: Optional[bool] = False
     send_text_sources: Optional[bool] = True
     send_image_sources: Optional[bool] = False
     search_text_embeddings: Optional[bool] = True
@@ -1063,6 +1083,7 @@ class FrontendResponseContext(BaseModel):
     data_points: FrontendDataPoints = Field(default_factory=FrontendDataPoints)
     followup_questions: Optional[List[str]] = None
     thoughts: List[FrontendThought] = Field(default_factory=list)
+    original_answer: Optional[str] = None
 
 
 class FrontendChatResponse(BaseModel):
@@ -1204,9 +1225,12 @@ async def frontend_chat(
         query_preview=query[:50],
     )
 
+    # Generate session_state UUID so the frontend can save chat history
+    session_id = body.session_state if isinstance(body.session_state, str) and body.session_state else str(uuid.uuid4())
+
     try:
         folder_id = overrides.folder_id if overrides else None
-        result = await _execute_query(query, approach, group_id, folder_id=folder_id, force_route=force_route_str)
+        result = await _execute_query(query, approach, group_id, folder_id=folder_id, force_route=force_route_str, language=overrides.language if overrides else None)
         
         # Build frontend-compatible response
         thoughts = [
@@ -1271,8 +1295,9 @@ async def frontend_chat(
                 ),
                 followup_questions=followup_questions,
                 thoughts=thoughts,
+                original_answer=result.get("original_answer"),
             ),
-            session_state=body.session_state,
+            session_state=session_id,
         )
         
     except Exception as e:
@@ -1324,10 +1349,14 @@ async def frontend_chat_stream(
         approach=approach,
         force_route=force_route_str,
         query_preview=query[:50],
+        folder_id=overrides.folder_id if overrides else None,
     )
 
+    # Generate session_state UUID so the frontend can save chat history
+    session_id = body.session_state if isinstance(body.session_state, str) and body.session_state else str(uuid.uuid4())
+
     return StreamingResponse(
-        _frontend_stream_response(query, approach, group_id, user_id, body.session_state, overrides, force_route_str,
+        _frontend_stream_response(query, approach, group_id, user_id, session_id, overrides, force_route_str,
                                   query_recorded=getattr(request.state, "query_recorded", False)),
         media_type="text/event-stream",
         headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
@@ -1373,7 +1402,7 @@ async def _frontend_stream_response(
         # Execute query in background while sending keepalive pings
         folder_id = overrides.folder_id if overrides else None
         query_task = asyncio.create_task(
-            _execute_query(query, approach, group_id, folder_id=folder_id, force_route=force_route)
+            _execute_query(query, approach, group_id, folder_id=folder_id, force_route=force_route, language=overrides.language if overrides else None)
         )
         while not query_task.done():
             await asyncio.sleep(2)
@@ -1419,6 +1448,14 @@ async def _frontend_stream_response(
             raw_citations
         )
 
+        logger.info(
+            "stream_citation_debug",
+            raw_citation_count=len(raw_citations),
+            structured_count=len(structured_citations) if structured_citations else 0,
+            flat_count=len(flat_citations),
+            route_used=result.get("route_used", "unknown"),
+        )
+
         # Build context for streaming
         stream_context = {
             "data_points": {
@@ -1432,11 +1469,13 @@ async def _frontend_stream_response(
                 "Can you elaborate on the key findings?",
                 "What are the supporting documents for this answer?",
             ] if overrides and overrides.suggest_followup_questions else None,
+            "original_answer": result.get("original_answer"),
         }
         
         # Keep inline [N] citation markers for frontend rendering
         answer = result.get("answer", "")
-        words = answer.split()
+        # Split on space only (not all whitespace) to preserve \n for markdown lists
+        words = [w for w in answer.split(' ') if w]
         chunk_size = 3  # Words per chunk for natural feel
         
         for i in range(0, len(words), chunk_size):

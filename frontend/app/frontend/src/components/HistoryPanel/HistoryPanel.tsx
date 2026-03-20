@@ -4,7 +4,7 @@ import { OverlayDrawer, DrawerHeader, DrawerHeaderTitle, DrawerBody, Spinner, Bu
 import { Dismiss24Regular } from "@fluentui/react-icons";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { HistoryData, HistoryItem } from "../HistoryItem";
-import { Answers, HistoryProviderOptions } from "../HistoryProviders/IProvider";
+import { HistoryProviderOptions, HistoryItemData } from "../HistoryProviders/IProvider";
 import { useHistoryManager, HistoryMetaData } from "../HistoryProviders";
 import { useTranslation } from "react-i18next";
 import styles from "./HistoryPanel.module.css";
@@ -22,7 +22,7 @@ export const HistoryPanel = ({
     isOpen: boolean;
     notify: boolean;
     onClose: () => void;
-    onChatSelected: (answers: Answers) => void;
+    onChatSelected: (data: HistoryItemData) => void;
 }) => {
     const historyManager = useHistoryManager(provider);
     const [history, setHistory] = useState<HistoryMetaData[]>([]);

@@ -88,6 +88,7 @@ class LocalSearchHandler(BaseRouteHandler):
         include_context: bool = False,
         language: Optional[str] = None,
         folder_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> RouteResult:
         """
         Execute Route 2: LazyGraphRAG for entity-focused queries.
@@ -300,7 +301,7 @@ class LocalSearchHandler(BaseRouteHandler):
                     citation_type=c.get("citation_type", "chunk"),
                 ))
 
-        self._enrich_citations_with_geometry(citations)
+        await self._enrich_citations_with_geometry(citations)
         return RouteResult(
             response=synthesis_result["response"],
             route_used=self.ROUTE_NAME,
@@ -447,8 +448,6 @@ class LocalSearchHandler(BaseRouteHandler):
         OPTIONAL MATCH (sent)-[:IN_SECTION]->(sec:Section)
         OPTIONAL MATCH (sent)-[:IN_DOCUMENT]->(doc:Document)
         WITH sent, score, sec, doc
-        WHERE $folder_id IS NULL
-           OR (doc IS NOT NULL AND EXISTS { MATCH (doc)-[:IN_FOLDER]->(f:Folder) WHERE f.id = $folder_id AND f.group_id IN $group_ids })
         RETURN sent.id AS sentence_id,
                sent.text AS text,
                sent.source AS source,
@@ -603,14 +602,12 @@ class LocalSearchHandler(BaseRouteHandler):
              min(anchor.hop) AS min_hop, collect(DISTINCT anchor.via)[0] AS via
         
         // EXPAND: NEXT_IN_SECTION neighbours for section-bounded context window
-        CALL {
-            WITH sent
+        CALL (sent) {
             OPTIONAL MATCH path = (sent)-[:NEXT_IN_SECTION*1..2]->(fwd:Sentence)
             WHERE fwd.group_id IN $group_ids
             RETURN collect(DISTINCT {node: fwd, hop_type: 'next'}) AS next_nodes
         }
-        CALL {
-            WITH sent
+        CALL (sent) {
             OPTIONAL MATCH path = (sent)<-[:NEXT_IN_SECTION*1..2]-(prev:Sentence)
             WHERE prev.group_id IN $group_ids
             RETURN collect(DISTINCT {node: prev, hop_type: 'prev'}) AS prev_nodes
@@ -644,8 +641,6 @@ class LocalSearchHandler(BaseRouteHandler):
         OPTIONAL MATCH (sent)-[:IN_SECTION]->(sec:Section)
         OPTIONAL MATCH (sent)-[:IN_DOCUMENT]->(doc:Document)
         WITH sent, final_score, sources, sec, doc
-        WHERE $folder_id IS NULL
-           OR (doc IS NOT NULL AND EXISTS { MATCH (doc)-[:IN_FOLDER]->(f:Folder) WHERE f.id = $folder_id AND f.group_id IN $group_ids })
 
         RETURN sent.id AS sentence_id,
                sent.text AS text,

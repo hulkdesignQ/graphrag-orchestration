@@ -77,6 +77,14 @@ const Layout = () => {
                         </NavLink>
                         <div className={styles.navDivider} />
                         <NavLink
+                            to="/getting-started"
+                            className={({ isActive }) => `${styles.navItem} ${isActive ? styles.navItemActive : ""}`}
+                            onClick={closeSidebar}
+                        >
+                            <span className={styles.navIcon}>🚀</span>
+                            <span className={styles.navLabel}>{t("nav.gettingStarted", "Getting Started")}</span>
+                        </NavLink>
+                        <NavLink
                             to="/dashboard"
                             className={({ isActive }) => `${styles.navItem} ${isActive ? styles.navItemActive : ""}`}
                             onClick={closeSidebar}

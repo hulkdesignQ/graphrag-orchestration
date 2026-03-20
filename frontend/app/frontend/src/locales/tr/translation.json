@@ -55,15 +55,15 @@
         "stopStreaming": "Akışı durdur",
         "askWithVoice": "Sesle soru sor",
         "stopRecording": "Kaydı durdur",
-        "showSupportingContent": "Destekleyici içeriği göster",
         "speakAnswer": "Cevabı seslendir",
         "info": "Bilgi",
         "save": "Kaydet",
         "copy": "Kopyala",
-        "copied": "Kopyalandı!"
+        "copied": "Kopyalandı!",
+        "showOriginal": "Orijinal yanıtı göster",
+        "showTranslated": "Çevrilmiş yanıtı göster"
     },
     "headerTexts": {
-        "supportingContent": "Destekleyici İçerik",
         "citation": "Alıntı"
     },
     "labels": {
@@ -231,7 +231,12 @@
         "deleteAnalysisConfirm": "Bu, klasörün tüm analiz verilerini (grafik, varlıklar, gömülmeler) kalıcı olarak silecektir. Orijinal dosyalar korunacaktır. Devam edilsin mi?",
         "analysisDeleted": "Analiz verileri başarıyla silindi",
         "deleteAnalysisFailed": "Analiz silme başarısız: {{message}}",
-        "storageReminder": "💡 Analiz verileri depolama alanı kullanır. Maliyetlerden tasarruf etmek için artık gerekli olmayan analizleri silin."
+        "storageReminder": "💡 Analiz verileri depolama alanı kullanır. Maliyetlerden tasarruf etmek için artık gerekli olmayan analizleri silin.",
+        "zoneAnalysisResults": "Analiz Sonuçları",
+        "zoneAnalyzed": "Analiz Edildi",
+        "zoneFolders": "Klasörler",
+        "expandZone": "Genişlet",
+        "collapseZone": "Daralt"
     },
     "viewer": {
         "loadingFile": "Dosya yükleniyor",
@@ -279,35 +284,27 @@
         "creditsUsed": "Kullanılan krediler",
         "documents": "Belgeler",
         "storageUsed": "Kullanılan depolama",
-        "dailyLimit": "{{limit}} günlük limitin",
         "monthlyLimit": "{{limit}} aylık limitin",
         "monthlyCredits": "{{limit}} aylık kredinin",
         "unlimitedCredits": "Sınırsız krediler",
         "translated": "{{count}} çevrilmiş",
         "voice": "{{count}} sesli",
         "personalShared": "({{personal}} kişisel + {{shared}} paylaşılan) {{limit}} limitin",
-        "ofLimit": "{{limit}} limitin",
         "gbLimit": "{{limit}} GB limitin",
         "recentActivity": "Son etkinlik",
         "time": "Zaman",
         "tokens": "Tokenler",
         "credits": "Krediler",
         "language": "Dil",
-        "yourFeatures": "Özellikleriniz",
         "plans": "Planlar",
         "currentPlan": "Mevcut plan",
         "contactSales": "Satışla iletişime geçin",
-        "queriesPerDay": "{{count}} sorgu/gün",
-        "maxDocuments": "{{count}} belge",
         "maxStorage": "{{count}} GB depolama",
         "creditsPerMonth": "{{count}} kredi/ay",
-        "featureGraphrag": "Evidoc Search",
         "featureAdvancedAnalytics": "Gelişmiş Analitik",
-        "featureCustomModels": "Özel Modeller",
         "featureApiAccess": "API Erişimi",
-        "featurePrioritySupport": "Öncelikli Destek",
-        "featureSso": "SSO Entegrasyonu",
-        "featureCustomBranding": "Özel Marka"
+        "featureCentralizedBilling": "Merkezi faturalandırma",
+        "featureAuditLogs": "Denetim günlükleri"
     },
     "admin": {
         "signInRequired": "Giriş gerekli",
@@ -335,5 +332,12 @@
         "plan": "Plan",
         "lastActive": "Son etkinlik",
         "noUserActivity": "Henüz kullanıcı etkinlik verisi yok. Analitik bağlandığında veriler görünecektir."
+    },
+    "folderSelector": {
+        "label": "Bilgi tabanı:",
+        "placeholder": "Bir bilgi tabanı seçin…",
+        "noFolders": "Henüz analiz edilmiş klasör yok",
+        "loadError": "Could not load folders",
+        "demo": "Demo"
     }
 }

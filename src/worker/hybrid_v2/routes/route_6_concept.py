@@ -29,14 +29,21 @@ import re
 import time
 import threading
 from collections import defaultdict
-from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import structlog
 import tiktoken
 
 from src.core.config import settings
-from .base import BaseRouteHandler, Citation, RouteResult
-from .route_6_prompts import CONCEPT_SYNTHESIS_PROMPT, COMMUNITY_EXTRACT_PROMPT
+from .base import BaseRouteHandler, Citation, RouteResult, rerank_with_retry, make_voyage_client, acomplete_with_retry
+from .route_6_prompts import (
+    CONCEPT_SYNTHESIS_PROMPT,
+    COMMUNITY_EXTRACT_PROMPT,
+    SYNTHESIS_COMPLETENESS_CHECK_PROMPT,
+    COMMUNITY_MAP_SYNTHESIS_PROMPT,
+    REDUCE_SYNTHESIS_PROMPT,
+    SELF_CONSISTENCY_MERGE_PROMPT,
+)
 from ..services.neo4j_retry import retry_session
 
 # Shared tiktoken encoder for token budget control (Feature 4)
@@ -91,6 +98,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         include_context: bool = False,
         language: Optional[str] = None,
         folder_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> RouteResult:
         """Execute Route 6: Community-aware concept synthesis.
 
@@ -110,13 +118,18 @@ class ConceptSearchHandler(BaseRouteHandler):
         Returns:
             RouteResult with response, citations, and metadata.
         """
+        # Resolve per-query folder scope (local variable — never mutate self.folder_id
+        # to avoid cross-request leakage when the handler is shared across concurrent requests)
+        folder_id = self._resolve_folder_id(folder_id)
+
         enable_timings = os.getenv("ROUTE6_RETURN_TIMINGS", "0").strip().lower() in {
             "1", "true", "yes",
         }
         timings_ms: Dict[str, int] = {}
         t_route_start = time.perf_counter()
 
-        community_top_k = int(os.getenv("ROUTE6_COMMUNITY_TOP_K", "10"))
+        community_top_k = int(os.getenv("ROUTE6_COMMUNITY_TOP_K", "8"))
+        rate_all_threshold = int(os.getenv("ROUTE6_RATE_ALL_THRESHOLD", "20"))
         sentence_top_k = int(os.getenv("ROUTE6_SENTENCE_TOP_K", "30"))
         section_top_k = int(os.getenv("ROUTE6_SECTION_TOP_K", "10"))
 
@@ -135,25 +148,40 @@ class ConceptSearchHandler(BaseRouteHandler):
         t0 = time.perf_counter()
 
         sentence_search_task = asyncio.create_task(
-            self._retrieve_sentence_evidence(query, top_k=sentence_top_k)
+            self._retrieve_sentence_evidence(query, top_k=sentence_top_k, folder_id=folder_id)
         )
         section_search_task = asyncio.create_task(
-            self._retrieve_section_headings(query, top_k=section_top_k)
-        )
-        # R6-XI: entity-document coverage map — launched in parallel.
-        # Resolves queries like "which entity appears in the most documents?"
-        # using a 2-hop Entity←MENTIONS←Sentence→IN_DOCUMENT→Document traversal
-        # (same path as Route 7 PPR) to avoid the edge-coverage gap in the
-        # pre-materialised APPEARS_IN_DOCUMENT shortcut.
-        entity_doc_task = asyncio.create_task(
-            self._retrieve_entity_document_map(top_k=20)
+            self._retrieve_section_headings(query, top_k=section_top_k, folder_id=folder_id)
         )
 
-        matched_communities = await self.pipeline.community_matcher.match_communities(
-            query, top_k=community_top_k,
-        )
-        community_data: List[Dict[str, Any]] = [c for c, _ in matched_communities]
-        community_scores: List[float] = [s for _, s in matched_communities]
+        # Upstream alignment: when the corpus is small (≤ rate_all_threshold),
+        # skip embedding pre-filter and LLM-rate ALL communities.  This prevents
+        # semantically distant but topically relevant communities from being cut
+        # before the LLM ever sees them (root cause of Q-G8 / Q-G6 gaps).
+        all_communities = await self.pipeline.community_matcher.get_all_communities()
+        if len(all_communities) <= rate_all_threshold:
+            # Shallow-copy dicts to avoid mutating the cached originals
+            # (concurrent requests share the same CommunityMatcher cache)
+            community_data = [dict(c) for c in all_communities]
+            # Folder-scope prune: remove communities with no content in target folder
+            if folder_id is not None:
+                community_data = await self.pipeline.community_matcher.filter_communities_by_folder(
+                    community_data, folder_id=folder_id,
+                )
+            community_scores = [1.0] * len(community_data)
+            logger.info(
+                "route6_rate_all_communities",
+                total=len(community_data),
+                threshold=rate_all_threshold,
+            )
+        else:
+            matched_communities = await self.pipeline.community_matcher.match_communities(
+                query, top_k=community_top_k, folder_id=folder_id,
+            )
+            # Shallow-copy dicts to avoid mutating the cached originals
+            community_data = [dict(c) for c, _ in matched_communities]
+            community_scores = [s for _, s in matched_communities]
+
         timings_ms["step_1_community_match_ms"] = int(
             (time.perf_counter() - t0) * 1000
         )
@@ -167,7 +195,7 @@ class ConceptSearchHandler(BaseRouteHandler):
 
         # Feature 1: Dynamic Community Selection — LLM-rate matched communities
         dynamic_community = os.getenv(
-            "ROUTE6_DYNAMIC_COMMUNITY", "0"
+            "ROUTE6_DYNAMIC_COMMUNITY", "1"
         ).strip().lower() in {"1", "true", "yes"}
         if dynamic_community and community_data:
             t_dc = time.perf_counter()
@@ -190,6 +218,7 @@ class ConceptSearchHandler(BaseRouteHandler):
             try:
                 children = await self._fetch_community_children(
                     community_data, parent_scores=community_scores,
+                    folder_id=folder_id,
                 )
                 if children:
                     # Dedup: skip children already in community_data
@@ -228,13 +257,6 @@ class ConceptSearchHandler(BaseRouteHandler):
             logger.warning("route6_section_search_failed", error=str(e))
             section_headings = []
 
-        # R6-XI: Await entity-document coverage map
-        try:
-            entity_doc_map = await entity_doc_task
-        except Exception as e:
-            logger.warning("route6_entity_doc_map_failed", error=str(e))
-            entity_doc_map = {}
-
         timings_ms["step_1_parallel_ms"] = int(
             (time.perf_counter() - t0) * 1000
         )
@@ -244,7 +266,6 @@ class ConceptSearchHandler(BaseRouteHandler):
             communities=len(community_data),
             sentences_raw=len(sentence_evidence),
             sections=len(section_headings),
-            entity_doc_map_entries=len(entity_doc_map),
         )
 
         # ================================================================
@@ -272,6 +293,7 @@ class ConceptSearchHandler(BaseRouteHandler):
                     seed_count=exp_seeds,
                     top_k=exp_top_k,
                     min_overlap=exp_min_overlap,
+                    folder_id=folder_id,
                 )
                 if expanded:
                     expansion_count = len(expanded)
@@ -291,6 +313,144 @@ class ConceptSearchHandler(BaseRouteHandler):
             )
 
         # ================================================================
+        # Step 1c: Community-guided sentence retrieval
+        # The original sentence search uses the user query, which may miss
+        # semantically distant but topically relevant sentences (e.g. query
+        # says "indemnification" but warranty disclaimers use "merchantability").
+        # Use matched community TITLES as supplementary search queries to
+        # bridge this vocabulary gap.
+        # Community-guided sentences are kept SEPARATE and injected after
+        # diversity (before reranking) so the score_gate doesn't filter them.
+        # ================================================================
+        community_guided = os.getenv(
+            "ROUTE6_COMMUNITY_GUIDED_RETRIEVAL", "1"
+        ).strip().lower() in {"1", "true", "yes"}
+        community_guided_sentences: List[Dict[str, Any]] = []
+
+        if community_guided and community_data:
+            t_cg = time.perf_counter()
+            community_titles = [
+                c.get("title", "") for c in community_data if c.get("title")
+            ]
+            if community_titles:
+                # Single supplementary query combining all community titles
+                supplementary_query = " | ".join(community_titles)
+                # Trim to keep embedding input reasonable
+                supplementary_query = supplementary_query[:500]
+                try:
+                    additional = await self._retrieve_sentence_evidence(
+                        supplementary_query,
+                        top_k=sentence_top_k,
+                        folder_id=folder_id,
+                    )
+                    if additional:
+                        # Dedup against original sentence evidence
+                        seen_ids = {
+                            s.get("sentence_id") for s in sentence_evidence
+                        }
+                        seen_texts = {
+                            (s.get("text") or "")[:100].lower().strip()
+                            for s in sentence_evidence
+                        }
+                        for s in additional:
+                            if s.get("sentence_id") not in seen_ids:
+                                txt_key = (
+                                    (s.get("text") or "")[:100].lower().strip()
+                                )
+                                if txt_key not in seen_texts:
+                                    s["_community_guided"] = True
+                                    community_guided_sentences.append(s)
+                                    seen_ids.add(s.get("sentence_id"))
+                                    seen_texts.add(txt_key)
+                        logger.info(
+                            "route6_community_guided_retrieval",
+                            community_titles=len(community_titles),
+                            additional_found=len(additional),
+                            new_unique=len(community_guided_sentences),
+                        )
+                except Exception as e:
+                    logger.warning(
+                        "route6_community_guided_retrieval_failed",
+                        error=str(e),
+                    )
+            timings_ms["step_1c_community_guided_ms"] = int(
+                (time.perf_counter() - t_cg) * 1000
+            )
+
+        # ================================================================
+        # Step 1d: Community → Entity → Sentence graph traversal
+        # Deterministic retrieval via the knowledge graph. Unlike vector
+        # search (Steps 1/1c), this follows entity MENTIONS edges so it
+        # finds sentences that are topically connected to matched
+        # communities regardless of vocabulary overlap.
+        # Example: query "dispute resolution" → community "Construction
+        # Defects" → entity "full refund" → sentence "Customer may cancel
+        # within 3 business days for full refund."
+        # ================================================================
+        graph_source_enabled = os.getenv(
+            "ROUTE6_GRAPH_SOURCE_SENTENCES", "1"
+        ).strip().lower() in {"1", "true", "yes"}
+        graph_source_sentences: List[Dict[str, Any]] = []
+
+        if graph_source_enabled and community_data:
+            t_gs = time.perf_counter()
+            try:
+                source_map = await self._fetch_community_source_sentences(
+                    community_data, folder_id=folder_id,
+                )
+                if source_map:
+                    # Dedup against original + community-guided evidence
+                    seen_ids = {
+                        s.get("sentence_id") for s in sentence_evidence
+                    }
+                    seen_ids.update(
+                        s.get("sentence_id") for s in community_guided_sentences
+                    )
+                    seen_texts = {
+                        (s.get("text") or "")[:100].lower().strip()
+                        for s in sentence_evidence
+                    }
+                    seen_texts.update(
+                        (s.get("text") or "")[:100].lower().strip()
+                        for s in community_guided_sentences
+                    )
+                    for cid, sents in source_map.items():
+                        for s in sents:
+                            sid = s.get("sentence_id")
+                            if sid and sid not in seen_ids:
+                                txt_key = (
+                                    (s.get("text") or "")[:100].lower().strip()
+                                )
+                                if txt_key not in seen_texts:
+                                    graph_source_sentences.append({
+                                        "sentence_id": sid,
+                                        "text": s.get("text", ""),
+                                        "source": s.get("document_title", ""),
+                                        "section_path": s.get("section_path", ""),
+                                        "page": s.get("page"),
+                                        "document_title": s.get("document_title", ""),
+                                        "score": 0.1,
+                                        "_graph_source": True,
+                                    })
+                                    seen_ids.add(sid)
+                                    seen_texts.add(txt_key)
+                    logger.info(
+                        "route6_graph_source_sentences",
+                        communities_with_sources=len(source_map),
+                        total_graph_sentences=sum(
+                            len(v) for v in source_map.values()
+                        ),
+                        new_unique=len(graph_source_sentences),
+                    )
+            except Exception as e:
+                logger.warning(
+                    "route6_graph_source_sentences_failed", error=str(e),
+                )
+            timings_ms["step_1d_graph_source_ms"] = int(
+                (time.perf_counter() - t_gs) * 1000
+            )
+
+        # ================================================================
         # Step 2: Denoise + Rerank sentence evidence
         # ================================================================
         if sentence_evidence:
@@ -302,7 +462,7 @@ class ConceptSearchHandler(BaseRouteHandler):
             rerank_enabled = os.getenv(
                 "ROUTE6_SENTENCE_RERANK", "1"
             ).strip().lower() in {"1", "true", "yes"}
-            rerank_top_k = int(os.getenv("ROUTE6_RERANK_TOP_K", "15"))
+            rerank_top_k = int(os.getenv("ROUTE6_RERANK_TOP_K", "25"))
             diversity_enabled = os.getenv(
                 "ROUTE6_SENTENCE_DIVERSITY", "1"
             ).strip().lower() in {"1", "true", "yes"}
@@ -311,19 +471,20 @@ class ConceptSearchHandler(BaseRouteHandler):
 
             # R6-6: Diversity BEFORE reranking but AFTER denoising (correct order).
             #
-            #   Previously diversity ran inside _retrieve_sentence_evidence on the raw
-            #   fetch, then reranking nullified it by cutting the diverse set to top_k.
-            #
-            #   Correct pipeline:
+            #   Pipeline:
             #     1. Denoise  (removes junk sentences)
             #     2. Diversity → pool of 2×rerank_top_k (guarantees document coverage)
             #     3. Rerank   → final rerank_top_k from the diverse pool
             #
             #   The reranker picks the BEST sentences from a pool that already covers
             #   all qualifying documents, so both relevance and coverage are preserved.
+            #
+            #   Diversity activates whenever we have more evidence than rerank_top_k
+            #   (previously required > 2×rerank_top_k, which was never met when
+            #   the shared vector index limited raw results).
             if diversity_enabled and sentence_evidence:
                 diversity_pool_k = rerank_top_k * 2
-                if len(sentence_evidence) > diversity_pool_k:
+                if len(sentence_evidence) > rerank_top_k:
                     sentence_evidence = self._diversify_by_document(
                         sentence_evidence,
                         top_k=diversity_pool_k,
@@ -339,22 +500,96 @@ class ConceptSearchHandler(BaseRouteHandler):
                 expanded_denoised = self._denoise_sentences(expanded)
                 if expanded_denoised:
                     seen_ids = {ev.get("sentence_id") for ev in sentence_evidence}
+                    seen_texts = {
+                        (ev.get("text") or "")[:100].lower().strip()
+                        for ev in sentence_evidence
+                    }
                     for ev in expanded_denoised:
                         if ev.get("sentence_id") not in seen_ids:
+                            txt_key = (ev.get("text") or "")[:100].lower().strip()
+                            if txt_key in seen_texts:
+                                continue
                             sentence_evidence.append(ev)
                             seen_ids.add(ev.get("sentence_id"))
+                            seen_texts.add(txt_key)
                     logger.info(
                         "route6_expansion_injected_for_rerank",
                         injected=len(expanded_denoised),
                         rerank_pool=len(sentence_evidence),
                     )
 
+            # Inject community-guided sentences AFTER diversity, BEFORE reranking.
+            # These sentences were found using community titles as queries and may
+            # be semantically distant from the original user query. The diversity
+            # score_gate would filter them out, but the cross-encoder reranker
+            # can recognise topical relevance (e.g. "merchantability" → "liability").
+            if community_guided_sentences:
+                cg_denoised = self._denoise_sentences(community_guided_sentences)
+                if cg_denoised:
+                    seen_ids = {ev.get("sentence_id") for ev in sentence_evidence}
+                    seen_texts = {
+                        (ev.get("text") or "")[:100].lower().strip()
+                        for ev in sentence_evidence
+                    }
+                    cg_injected = 0
+                    for ev in cg_denoised:
+                        if ev.get("sentence_id") not in seen_ids:
+                            txt_key = (ev.get("text") or "")[:100].lower().strip()
+                            if txt_key in seen_texts:
+                                continue
+                            sentence_evidence.append(ev)
+                            seen_ids.add(ev.get("sentence_id"))
+                            seen_texts.add(txt_key)
+                            cg_injected += 1
+                    logger.info(
+                        "route6_community_guided_injected_for_rerank",
+                        injected=cg_injected,
+                        rerank_pool=len(sentence_evidence),
+                    )
+
+            # Inject graph-sourced sentences AFTER diversity + community-guided,
+            # BEFORE reranking.  These come from deterministic graph traversal
+            # (Community→Entity→Sentence) and may be very distant from the
+            # query in embedding space, but topically relevant via entity links.
+            if graph_source_sentences:
+                gs_denoised = self._denoise_sentences(graph_source_sentences)
+                if gs_denoised:
+                    seen_ids = {ev.get("sentence_id") for ev in sentence_evidence}
+                    seen_texts = {
+                        (ev.get("text") or "")[:100].lower().strip()
+                        for ev in sentence_evidence
+                    }
+                    gs_injected = 0
+                    for ev in gs_denoised:
+                        if ev.get("sentence_id") not in seen_ids:
+                            txt_key = (ev.get("text") or "")[:100].lower().strip()
+                            if txt_key in seen_texts:
+                                continue
+                            sentence_evidence.append(ev)
+                            seen_ids.add(ev.get("sentence_id"))
+                            seen_texts.add(txt_key)
+                            gs_injected += 1
+                    logger.info(
+                        "route6_graph_source_injected_for_rerank",
+                        injected=gs_injected,
+                        rerank_pool=len(sentence_evidence),
+                    )
+
             if rerank_enabled and sentence_evidence:
                 # R6-3: Wrap in try/except — reranker failures must not crash the request.
                 try:
-                    sentence_evidence = await self._rerank_sentences(
-                        query, sentence_evidence, top_k=rerank_top_k,
-                    )
+                    multi_query_rerank = os.getenv(
+                        "ROUTE6_MULTI_QUERY_RERANK", "1"
+                    ).strip().lower() in {"1", "true", "yes"}
+                    if multi_query_rerank and community_data:
+                        sentence_evidence = await self._multi_query_rerank(
+                            query, community_data, sentence_evidence,
+                            top_k=rerank_top_k,
+                        )
+                    else:
+                        sentence_evidence = await self._rerank_sentences(
+                            query, sentence_evidence, top_k=rerank_top_k,
+                        )
                 except Exception as e:
                     logger.warning("route6_rerank_failed_fallback", error=str(e))
                     sentence_evidence = sentence_evidence[:rerank_top_k]
@@ -369,6 +604,31 @@ class ConceptSearchHandler(BaseRouteHandler):
                 after_rerank=len(sentence_evidence),
                 rerank_enabled=rerank_enabled,
             )
+
+        # ================================================================
+        # Step 2b: Evidence score floor — drop low-scoring evidence
+        # before synthesis to reduce peripheral content that causes
+        # LLM over-inclusion (e.g., low-scoring "insurance" sentences
+        # making the LLM include insurance as "record-keeping").
+        # Disabled by default (0) — set > 0 to activate.
+        # ================================================================
+        evidence_score_floor = float(
+            os.getenv("ROUTE6_EVIDENCE_SCORE_FLOOR", "0")
+        )
+        if sentence_evidence and evidence_score_floor > 0:
+            before_floor = len(sentence_evidence)
+            sentence_evidence = [
+                ev for ev in sentence_evidence
+                if ev.get("score", 0) >= evidence_score_floor
+            ]
+            if len(sentence_evidence) < before_floor:
+                logger.info(
+                    "route6_evidence_score_floor_applied",
+                    before=before_floor,
+                    after=len(sentence_evidence),
+                    floor=evidence_score_floor,
+                    removed=before_floor - len(sentence_evidence),
+                )
 
         # ================================================================
         # Negative detection: no communities AND no sentences AND no sections
@@ -387,14 +647,23 @@ class ConceptSearchHandler(BaseRouteHandler):
             )
 
         # ================================================================
-        # Step 3: Single LLM synthesis (communities + sentences)
+        # Step 3: LLM synthesis (MAP-REDUCE or single-call)
         # ================================================================
         t0 = time.perf_counter()
-        response_text = await self._synthesize(
-            query, community_data, section_headings, sentence_evidence,
-            entity_doc_map=entity_doc_map,
-            language=language,
-        )
+        map_reduce = os.getenv(
+            "ROUTE6_MAP_REDUCE_SYNTHESIS", "0"
+        ).strip().lower() in {"1", "true", "yes"}
+
+        if map_reduce:
+            response_text = await self._map_reduce_synthesize(
+                query, community_data, section_headings, sentence_evidence,
+                language=language, folder_id=folder_id,
+            )
+        else:
+            response_text = await self._synthesize(
+                query, community_data, section_headings, sentence_evidence,
+                language=language, folder_id=folder_id,
+            )
         timings_ms["step_3_synthesis_ms"] = int(
             (time.perf_counter() - t0) * 1000
         )
@@ -414,7 +683,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         citations = self._build_citations(
             community_data, community_scores, sentence_evidence,
         )
-        self._enrich_citations_with_geometry(citations)
+        await self._enrich_citations_with_geometry(citations)
 
         # ================================================================
         # Assemble metadata
@@ -431,10 +700,10 @@ class ConceptSearchHandler(BaseRouteHandler):
                 for s in section_headings
             },
             "sentence_evidence_count": len(sentence_evidence),
-            "entity_doc_map_count": len(entity_doc_map),
             "entity_expansion_enabled": expansion_enabled,
             "entity_expansion_count": expansion_count,
             "community_extract_enabled": os.getenv("ROUTE6_COMMUNITY_EXTRACT", "1").strip().lower() in {"1", "true", "yes"},
+            "map_reduce_synthesis": map_reduce,
             "dynamic_community_enabled": dynamic_community,
             "community_children_enabled": community_children_enabled,
             "community_children_count": len([c for c in community_data if c.get("_is_child")]),
@@ -471,11 +740,6 @@ class ConceptSearchHandler(BaseRouteHandler):
                 }
                 for s in sentence_evidence[:10]
             ]
-            # R6-XI: include entity-document map for debugging
-            if entity_doc_map:
-                metadata["entity_doc_map"] = {
-                    name: docs for name, docs in list(entity_doc_map.items())[:10]
-                }
 
         if enable_timings:
             metadata["timings_ms"] = timings_ms
@@ -498,251 +762,402 @@ class ConceptSearchHandler(BaseRouteHandler):
         communities: List[Dict[str, Any]],
         section_headings: List[Dict[str, Any]],
         sentence_evidence: List[Dict[str, Any]],
-        entity_doc_map: Optional[Dict[str, List[str]]] = None,
         language: Optional[str] = None,
+        folder_id: Optional[str] = None,
     ) -> str:
         """Synthesize community summaries + section headings + sentence evidence in one LLM call.
 
         Unlike Route 3's MAP-REDUCE, community summaries are passed directly
         as thematic context — no per-community claim extraction.
 
+        When ROUTE6_COMPLETENESS_CHECK is enabled, a second LLM pass verifies
+        that all high-importance key points are represented in the answer.
+
         Args:
             query: User query.
             communities: Matched community dicts with title/summary.
             section_headings: Matched section dicts with title/summary/path_key.
             sentence_evidence: Denoised + reranked sentence dicts.
-            entity_doc_map: R6-XI — {entity_name: [doc_title, ...]} for top entities
-                by document count. Provides structured entity-document coverage for
-                comparison queries ("which entity appears in the most documents?").
+            folder_id: Folder scope for community source fetch (passed through).
 
         Returns:
             Synthesized response text.
         """
         # Build the synthesis prompt (shared with _stream_synthesize)
-        prompt = await self._build_synthesis_prompt(
+        prompt, summaries_text = await self._build_synthesis_prompt(
             query, communities, section_headings, sentence_evidence,
-            entity_doc_map, language,
+            language=language, folder_id=folder_id,
+        )
+
+        # Self-consistency: run synthesis N times in parallel, merge results
+        self_consistency = os.getenv(
+            "ROUTE6_SELF_CONSISTENCY", "0"
+        ).strip().lower() in {"1", "true", "yes"}
+        sc_count = int(os.getenv("ROUTE6_SELF_CONSISTENCY_N", "2"))
+
+        if self_consistency and sc_count >= 2:
+            answer = await self._self_consistent_synthesize(
+                query, prompt, summaries_text, n=sc_count, language=language,
+            )
+        else:
+            try:
+                response = await acomplete_with_retry(self.llm, prompt)
+                answer = response.text.strip()
+            except Exception as e:
+                logger.error(
+                    "route6_synthesis_failed",
+                    error=str(e),
+                    error_type=type(e).__name__,
+                )
+                return (
+                    "An error occurred while synthesizing the response. "
+                    f"Please try again. (Error: {type(e).__name__})"
+                )
+
+        # Two-pass completeness check (works on both single-call and merged answers)
+        completeness_check = os.getenv(
+            "ROUTE6_COMPLETENESS_CHECK", "1"
+        ).strip().lower() in {"1", "true", "yes"}
+
+        if completeness_check and summaries_text and "(No thematic context" not in summaries_text:
+            answer = await self._completeness_check(query, summaries_text, answer)
+
+        return answer
+
+    async def _self_consistent_synthesize(
+        self,
+        query: str,
+        prompt: str,
+        summaries_text: str,
+        n: int = 2,
+        language: Optional[str] = None,
+    ) -> str:
+        """Run synthesis N times in parallel, then merge answers.
+
+        Each call sees the same prompt but LLM non-determinism produces
+        different item selections. The merge step takes the UNION of
+        items from all answers, reducing the chance of dropping any item.
+
+        Falls back to single answer if merge fails.
+        """
+        t0 = time.perf_counter()
+
+        # Run N synthesis calls in parallel
+        async def _one_synthesis() -> str:
+            try:
+                resp = await acomplete_with_retry(self.llm, prompt)
+                return resp.text.strip()
+            except Exception as e:
+                logger.warning("route6_sc_synthesis_one_failed", error=str(e))
+                return ""
+
+        tasks = [_one_synthesis() for _ in range(n)]
+        answers = await asyncio.gather(*tasks)
+        answers = [a for a in answers if a and len(a) > 50]
+        synthesis_ms = int((time.perf_counter() - t0) * 1000)
+
+        if not answers:
+            return "An error occurred while synthesizing the response. Please try again."
+
+        if len(answers) == 1:
+            logger.info("route6_sc_only_one_answer", synthesis_ms=synthesis_ms)
+            return answers[0]
+
+        # Merge: combine Answer A + Answer B via merge prompt
+        t1 = time.perf_counter()
+        merge_prompt = SELF_CONSISTENCY_MERGE_PROMPT.format(
+            query=query,
+            answer_a=answers[0],
+            answer_b=answers[1],
+        )
+        if language:
+            merge_prompt += f"\n\nIMPORTANT: Respond entirely in {language}."
+
+        try:
+            merge_resp = await acomplete_with_retry(self.llm, merge_prompt)
+            merged = merge_resp.text.strip()
+            merge_ms = int((time.perf_counter() - t1) * 1000)
+        except Exception as e:
+            logger.warning("route6_sc_merge_failed", error=str(e))
+            # Fallback: return the longer answer
+            merged = max(answers, key=len)
+            merge_ms = 0
+
+        logger.info(
+            "route6_self_consistency_done",
+            n=n,
+            answer_lengths=[len(a) for a in answers],
+            merged_length=len(merged),
+            synthesis_ms=synthesis_ms,
+            merge_ms=merge_ms,
+            total_ms=synthesis_ms + merge_ms,
+        )
+
+        return merged
+
+    async def _completeness_check(
+        self,
+        query: str,
+        key_points: str,
+        answer: str,
+    ) -> str:
+        """Second LLM pass: identify high-importance key points missing from the answer.
+
+        If any key points with importance ≥ 70 are missing, their content is
+        appended to the answer as additional details. The original answer is
+        never rewritten — only additive.
+
+        Args:
+            query: Original user query.
+            key_points: Formatted key-points text (from extraction).
+            answer: Initial synthesis answer.
+
+        Returns:
+            Original answer with missing items appended (or unchanged if complete).
+        """
+        t0 = time.perf_counter()
+        prompt = SYNTHESIS_COMPLETENESS_CHECK_PROMPT.format(
+            query=query,
+            key_points=key_points,
+            answer=answer,
         )
 
         try:
-            response = await self.llm.acomplete(prompt)
-            return response.text.strip()
+            response = await acomplete_with_retry(self.llm, prompt)
+            result = response.text.strip()
+            elapsed_ms = int((time.perf_counter() - t0) * 1000)
+
+            if "ALL_COMPLETE" in result and len(result) < 50:
+                logger.info(
+                    "route6_completeness_check_done",
+                    changed=False,
+                    elapsed_ms=elapsed_ms,
+                )
+                return answer
+
+            # Append missing items to the original answer
+            if result and len(result) > 10:
+                patched = answer.rstrip() + "\n\n" + result.strip()
+                logger.info(
+                    "route6_completeness_check_done",
+                    changed=True,
+                    original_len=len(answer),
+                    addendum_len=len(result),
+                    patched_len=len(patched),
+                    elapsed_ms=elapsed_ms,
+                )
+                return patched
+            else:
+                logger.info(
+                    "route6_completeness_check_done",
+                    changed=False,
+                    elapsed_ms=elapsed_ms,
+                )
+                return answer
         except Exception as e:
             logger.error(
-                "route6_synthesis_failed",
+                "route6_completeness_check_failed",
                 error=str(e),
                 error_type=type(e).__name__,
             )
-            return (
-                "An error occurred while synthesizing the response. "
-                f"Please try again. (Error: {type(e).__name__})"
-            )
+            return answer  # graceful fallback — return original answer
 
     # ==================================================================
-    # Feature 3: Streaming Synthesis
+    # MAP-REDUCE Synthesis (per-community MAP → merge REDUCE)
     # ==================================================================
 
-    async def _stream_synthesize(
+    async def _map_reduce_synthesize(
         self,
         query: str,
         communities: List[Dict[str, Any]],
         section_headings: List[Dict[str, Any]],
         sentence_evidence: List[Dict[str, Any]],
-        entity_doc_map: Optional[Dict[str, List[str]]] = None,
         language: Optional[str] = None,
-    ) -> AsyncGenerator[str, None]:
-        """Streaming variant of _synthesize(). Yields token chunks.
+        folder_id: Optional[str] = None,
+    ) -> str:
+        """MAP-REDUCE synthesis: per-community MAP → merge REDUCE.
 
-        Uses self.llm.astream_complete() (LlamaIndex AzureOpenAI) to stream
-        the synthesis response token-by-token. Falls back to a single yield
-        of the full response if streaming is not supported.
+        MAP phase: For each community's key points, generate a focused
+        mini-answer. Each MAP call sees only 3-5 points → can't
+        non-deterministically drop items.
+
+        REDUCE phase: Merge all community mini-answers + sentence evidence
+        + section headings into the final organized response.
+
+        Falls back to single-call synthesis when extraction is disabled
+        or produces no structured points.
         """
-        # Build prompt identically to _synthesize()
-        prompt = await self._build_synthesis_prompt(
-            query, communities, section_headings, sentence_evidence,
-            entity_doc_map, language,
+        community_extract = os.getenv(
+            "ROUTE6_COMMUNITY_EXTRACT", "1"
+        ).strip().lower() in {"1", "true", "yes"}
+
+        if community_extract and communities:
+            summaries_text, points = await self._extract_community_key_points(
+                query, communities, folder_id=folder_id,
+            )
+        else:
+            return await self._synthesize(
+                query, communities, section_headings, sentence_evidence,
+                language=language, folder_id=folder_id,
+            )
+
+        if not points or "(No thematic context" in summaries_text:
+            return await self._synthesize(
+                query, communities, section_headings, sentence_evidence,
+                language=language, folder_id=folder_id,
+            )
+
+        # Group key points by community
+        by_community: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+        for p in points:
+            by_community[p.get("community", "General")].append(p)
+
+        logger.info(
+            "route6_map_reduce_synthesis_start",
+            num_communities=len(by_community),
+            total_points=len(points),
+            points_per_community={k: len(v) for k, v in by_community.items()},
         )
 
+        # MAP phase: parallel per-community synthesis
+        max_concurrent = int(os.getenv("ROUTE6_MAP_SYNTHESIS_CONCURRENCY", "12"))
+        semaphore = asyncio.Semaphore(max_concurrent)
+
+        async def _map_one(community_title: str, community_points: List[Dict[str, Any]]) -> str:
+            kp_lines = []
+            for p in community_points:
+                desc = p.get("description", "")
+                score = p.get("score", 0)
+                kp_lines.append(f"- (importance: {score}) {desc}")
+            kp_text = "\n".join(kp_lines)
+
+            prompt = COMMUNITY_MAP_SYNTHESIS_PROMPT.format(
+                query=query,
+                community_title=community_title,
+                community_key_points=kp_text,
+            )
+            async with semaphore:
+                try:
+                    resp = await acomplete_with_retry(self.llm, prompt)
+                    return resp.text.strip()
+                except Exception as e:
+                    logger.warning(
+                        "route6_map_synthesis_one_failed",
+                        community=community_title,
+                        error=str(e),
+                    )
+                    return kp_text  # fallback: raw key points
+
+        t0 = time.perf_counter()
+        community_items = list(by_community.items())
+        tasks = [_map_one(title, pts) for title, pts in community_items]
+        map_results = await asyncio.gather(*tasks)
+        map_ms = int((time.perf_counter() - t0) * 1000)
+
+        # Format community responses for REDUCE
+        community_response_blocks = []
+        for (title, _), mini_answer in zip(community_items, map_results):
+            community_response_blocks.append(f"--- {title} ---\n{mini_answer}")
+        community_text = "\n\n".join(community_response_blocks)
+
+        # Format section headings
+        if section_headings:
+            heading_lines = []
+            for i, sec in enumerate(section_headings, 1):
+                title = sec.get("title", f"Section {i}")
+                doc_title = sec.get("document_title", "")
+                path_key = sec.get("path_key", "").strip()
+                parts = []
+                if doc_title:
+                    parts.append(f"[{doc_title}]")
+                if path_key and path_key != title:
+                    parts.append(path_key)
+                else:
+                    parts.append(title)
+                heading_lines.append(f"- {' '.join(parts)}")
+            headings_text = "\n".join(heading_lines)
+        else:
+            headings_text = "(No document structure available)"
+
+        # Format sentence evidence
+        if sentence_evidence:
+            evidence_lines = []
+            for i, ev in enumerate(sentence_evidence, 1):
+                doc = ev.get("document_title") or "Unknown"
+                section = ev.get("section_path") or ""
+                text = ev.get("text") or ""
+                if section:
+                    evidence_lines.append(f"{i}. [{doc} > {section}] {text}")
+                else:
+                    evidence_lines.append(f"{i}. [{doc}] {text}")
+            evidence_text = "\n".join(evidence_lines)
+        else:
+            evidence_text = "(No additional document evidence)"
+
+        # REDUCE: merge community responses + evidence → final answer
+        reduce_prompt = REDUCE_SYNTHESIS_PROMPT.format(
+            query=query,
+            community_responses=community_text,
+            section_headings=headings_text,
+            sentence_evidence=evidence_text,
+        )
+
+        if language:
+            reduce_prompt += f"\n\nIMPORTANT: Respond entirely in {language}."
+
         try:
-            stream_resp = await self.llm.astream_complete(prompt)
-            async for chunk in stream_resp:
-                if chunk.delta:
-                    yield chunk.delta
+            t1 = time.perf_counter()
+            response = await acomplete_with_retry(self.llm, reduce_prompt)
+            answer = response.text.strip()
+            reduce_ms = int((time.perf_counter() - t1) * 1000)
         except Exception as e:
-            logger.error("route6_stream_synthesis_failed", error=str(e))
-            yield (
+            logger.error("route6_reduce_synthesis_failed", error=str(e))
+            return (
                 "An error occurred while synthesizing the response. "
                 f"Please try again. (Error: {type(e).__name__})"
             )
 
-    async def stream_execute(
-        self,
-        query: str,
-        response_type: str = "summary",
-        language: Optional[str] = None,
-    ) -> AsyncGenerator[str, None]:
-        """Streaming variant of execute(). Yields synthesis chunks.
-
-        Runs the same retrieval pipeline (community match, sentence search,
-        section heading search, entity-doc map, denoise, diversity, entity
-        expansion, rerank), then streams the LLM synthesis token-by-token.
-
-        Gated by ROUTE6_STREAM_SYNTHESIS env var — caller should check before invoking.
-        """
-        community_top_k = int(os.getenv("ROUTE6_COMMUNITY_TOP_K", "10"))
-        sentence_top_k = int(os.getenv("ROUTE6_SENTENCE_TOP_K", "30"))
-        section_top_k = int(os.getenv("ROUTE6_SECTION_TOP_K", "10"))
-
-        # Step 1: Parallel retrieval (same as execute)
-        sentence_search_task = asyncio.create_task(
-            self._retrieve_sentence_evidence(query, top_k=sentence_top_k)
-        )
-        section_search_task = asyncio.create_task(
-            self._retrieve_section_headings(query, top_k=section_top_k)
-        )
-        entity_doc_task = asyncio.create_task(
-            self._retrieve_entity_document_map(top_k=20)
+        logger.info(
+            "route6_map_reduce_synthesis_done",
+            map_calls=len(community_items),
+            map_ms=map_ms,
+            reduce_ms=reduce_ms,
+            total_ms=map_ms + reduce_ms,
+            answer_length=len(answer),
         )
 
-        matched_communities = await self.pipeline.community_matcher.match_communities(
-            query, top_k=community_top_k,
-        )
-        community_data = [c for c, _ in matched_communities]
-        community_scores = [s for _, s in matched_communities]
-
-        # Feature 1: Dynamic Community Selection (if enabled)
-        dynamic_community = os.getenv(
-            "ROUTE6_DYNAMIC_COMMUNITY", "0"
+        # Completeness check (same as single-call)
+        completeness_check = os.getenv(
+            "ROUTE6_COMPLETENESS_CHECK", "1"
         ).strip().lower() in {"1", "true", "yes"}
-        if dynamic_community and community_data:
-            try:
-                community_data, community_scores = await self._rate_communities_with_llm(
-                    query, community_data, community_scores,
-                )
-            except Exception:
-                pass  # fallback to embedding-only
 
-        # Feature 2: Community Children (if enabled)
-        community_children_enabled = os.getenv(
-            "ROUTE6_COMMUNITY_CHILDREN", "0"
-        ).strip().lower() in {"1", "true", "yes"}
-        if community_children_enabled and community_data:
-            try:
-                children = await self._fetch_community_children(
-                    community_data, parent_scores=community_scores,
-                )
-                if children:
-                    existing_ids = {c.get("id") for c in community_data}
-                    for child, child_score in children:
-                        if child.get("id") not in existing_ids:
-                            community_data.append(child)
-                            community_scores.append(child_score)
-                            existing_ids.add(child.get("id"))
-            except Exception:
-                pass
+        if completeness_check and summaries_text and "(No thematic context" not in summaries_text:
+            answer = await self._completeness_check(query, summaries_text, answer)
 
-        # Await parallel tasks
-        try:
-            sentence_evidence = await sentence_search_task
-        except Exception:
-            sentence_evidence = []
-        try:
-            section_headings = await section_search_task
-        except Exception:
-            section_headings = []
-        try:
-            entity_doc_map = await entity_doc_task
-        except Exception:
-            entity_doc_map = {}
-
-        # Step 1b: Entity expansion (same as execute)
-        expansion_enabled = os.getenv(
-            "ROUTE6_ENTITY_EXPANSION", "0"
-        ).strip().lower() in {"1", "true", "yes"}
-        expanded: List[Dict[str, Any]] = []
-
-        if expansion_enabled and sentence_evidence:
-            exp_seeds = int(os.getenv("ROUTE6_ENTITY_EXPANSION_SEEDS", "10"))
-            exp_top_k = int(os.getenv("ROUTE6_ENTITY_EXPANSION_TOP_K", "20"))
-            exp_min_overlap = int(
-                os.getenv("ROUTE6_ENTITY_EXPANSION_MIN_OVERLAP", "1")
-            )
-            try:
-                expanded = await self._expand_sentences_via_entities(
-                    seed_evidence=sentence_evidence,
-                    seed_count=exp_seeds,
-                    top_k=exp_top_k,
-                    min_overlap=exp_min_overlap,
-                )
-            except Exception:
-                pass
-
-        # Step 2: Denoise + Diversity + Rerank (same as execute)
-        if sentence_evidence:
-            sentence_evidence = self._denoise_sentences(sentence_evidence)
-
-            rerank_enabled = os.getenv(
-                "ROUTE6_SENTENCE_RERANK", "1"
-            ).strip().lower() in {"1", "true", "yes"}
-            rerank_top_k = int(os.getenv("ROUTE6_RERANK_TOP_K", "15"))
-            diversity_enabled = os.getenv(
-                "ROUTE6_SENTENCE_DIVERSITY", "1"
-            ).strip().lower() in {"1", "true", "yes"}
-            min_per_doc = int(os.getenv("ROUTE6_SENTENCE_MIN_PER_DOC", "2"))
-            score_gate = float(os.getenv("ROUTE6_SENTENCE_SCORE_GATE", "0.85"))
-
-            # Diversity before reranking (same as execute)
-            if diversity_enabled and sentence_evidence:
-                diversity_pool_k = rerank_top_k * 2
-                if len(sentence_evidence) > diversity_pool_k:
-                    sentence_evidence = self._diversify_by_document(
-                        sentence_evidence,
-                        top_k=diversity_pool_k,
-                        min_per_doc=min_per_doc,
-                        score_gate=score_gate,
-                    )
-
-            # Inject entity-expanded sentences after diversity, before rerank
-            if expanded:
-                expanded_denoised = self._denoise_sentences(expanded)
-                if expanded_denoised:
-                    seen_ids = {ev.get("sentence_id") for ev in sentence_evidence}
-                    for ev in expanded_denoised:
-                        if ev.get("sentence_id") not in seen_ids:
-                            sentence_evidence.append(ev)
-                            seen_ids.add(ev.get("sentence_id"))
-
-            if rerank_enabled and sentence_evidence:
-                try:
-                    sentence_evidence = await self._rerank_sentences(
-                        query, sentence_evidence, top_k=rerank_top_k,
-                    )
-                except Exception:
-                    sentence_evidence = sentence_evidence[:rerank_top_k]
-
-        # Negative detection (same as execute)
-        if not community_data and not sentence_evidence and not section_headings:
-            yield "The requested information was not found in the available documents."
-            return
-
-        # Step 3: Stream synthesis
-        async for chunk in self._stream_synthesize(
-            query, community_data, section_headings, sentence_evidence,
-            entity_doc_map=entity_doc_map, language=language,
-        ):
-            yield chunk
+        return answer
 
     # ==================================================================
     # Feature 1: Dynamic Community Selection (LLM-rated)
     # ==================================================================
 
+    # Upstream-aligned rating prompt with chain-of-thought reasoning.
+    # Key improvements over the original:
+    #  1. "even if only partially relevant" — inclusive rating language
+    #  2. "reason" field — forces LLM to think before scoring
+    #  3. Entity names in context — richer signal for relevance
     _COMMUNITY_RATING_PROMPT = (
-        "Rate how relevant the following community summary is to the query.\n\n"
-        "Query: {query}\n\n"
+        "You are deciding whether the following information is useful for "
+        "answering a question, even if it is only partially relevant.\n\n"
+        "---Information---\n"
         "Community: {title}\n"
-        "Summary: {summary}\n\n"
-        "Respond with ONLY a JSON object: {{\"rating\": <0-10>}}\n"
-        "0 = completely irrelevant, 10 = perfectly relevant."
+        "{summary}\n"
+        "{entities}\n\n"
+        "---Question---\n"
+        "{query}\n\n"
+        "Respond with ONLY a JSON object:\n"
+        "{{\"reason\": \"brief reasoning for your rating\", \"rating\": <0-5>}}\n"
+        "0 = completely irrelevant, 5 = perfectly relevant.\n"
+        "Rate generously — even partial or indirect relevance should score ≥ 1."
     )
 
     async def _rate_communities_with_llm(
@@ -751,11 +1166,14 @@ class ConceptSearchHandler(BaseRouteHandler):
         communities: List[Dict[str, Any]],
         scores: List[float],
     ) -> Tuple[List[Dict[str, Any]], List[float]]:
-        """Rate matched communities using a cheap LLM, filter low-rated ones.
+        """Rate matched communities using the pipeline LLM, filter low-rated ones.
 
-        Inspired by Microsoft GraphRAG's DynamicCommunitySelection. Uses
-        gpt-4o-mini (or configurable model) to rate each community's relevance
-        on a 0-10 scale, then filters below threshold.
+        Inspired by Microsoft GraphRAG's DynamicCommunitySelection. Rates each
+        community's relevance on a 0-5 scale, then filters below threshold.
+
+        Note: uses self.llm (the main synthesis model).  For lower cost,
+        consider setting ROUTE6_DYNAMIC_COMMUNITY=0 and relying on embedding
+        pre-filtering alone.
 
         Args:
             query: User query.
@@ -766,19 +1184,26 @@ class ConceptSearchHandler(BaseRouteHandler):
             Filtered (communities, scores) tuple.
         """
         threshold = int(os.getenv("ROUTE6_DYNAMIC_COMMUNITY_THRESHOLD", "1"))
-        max_concurrent = int(os.getenv("ROUTE6_DYNAMIC_COMMUNITY_CONCURRENCY", "8"))
+        max_concurrent = int(os.getenv("ROUTE6_DYNAMIC_COMMUNITY_CONCURRENCY", "12"))
         semaphore = asyncio.Semaphore(max_concurrent)
 
         async def _rate_one(community: Dict[str, Any]) -> int:
+            # Build entity context for richer signal (Priority 3)
+            entity_names = community.get("entity_names", [])
+            entities_text = (
+                f"Key entities: {', '.join(entity_names[:15])}"
+                if entity_names else ""
+            )
             prompt = self._COMMUNITY_RATING_PROMPT.format(
                 query=query,
                 title=community.get("title", ""),
                 summary=(community.get("summary", "") or "")[:500],
+                entities=entities_text,
             )
             async with semaphore:
                 resp = None
                 try:
-                    resp = await self.llm.acomplete(prompt)
+                    resp = await acomplete_with_retry(self.llm, prompt)
                     text = resp.text.strip()
                     if text.startswith("```"):
                         text = re.sub(r'^```(?:json)?\s*\n?', '', text)
@@ -798,18 +1223,25 @@ class ConceptSearchHandler(BaseRouteHandler):
         ratings = await asyncio.gather(*[_rate_one(c) for c in communities])
 
         # Filter below threshold; keep communities where LLM failed (rating == -1)
-        filtered_communities = []
-        filtered_scores = []
+        rated_triples = []
         for community, score, rating in zip(communities, scores, ratings):
             if rating == -1 or rating >= threshold:
-                filtered_communities.append(community)
-                filtered_scores.append(score)
+                rated_triples.append((community, score, rating))
+
+        # Sort by LLM rating descending (upstream alignment: highest-rated first)
+        rated_triples.sort(key=lambda t: t[2], reverse=True)
+        filtered_communities = [t[0] for t in rated_triples]
+        filtered_scores = [t[1] for t in rated_triples]
+
+        # Attach LLM rating to community dict for downstream use (extraction cutoff)
+        for community, _, rating in rated_triples:
+            community["_llm_rating"] = rating
 
         logger.info(
             "route6_dynamic_community_ratings",
             ratings=list(zip(
-                [c.get("title", "?") for c in communities],
-                ratings,
+                [c.get("title", "?") for c in filtered_communities],
+                [t[2] for t in rated_triples],
             )),
             threshold=threshold,
             kept=len(filtered_communities),
@@ -831,6 +1263,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         self,
         communities: List[Dict[str, Any]],
         max_per_community: int = 50,
+        folder_id: Optional[str] = None,
     ) -> Dict[str, List[Dict[str, Any]]]:
         """Fetch source sentences for matched communities via graph traversal.
 
@@ -842,6 +1275,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         Args:
             communities: Matched community dicts (must have 'id' field).
             max_per_community: Max sentences per community (dedup'd).
+            folder_id: Folder scope filter (None = all folders).
 
         Returns:
             Dict mapping community_id → list of sentence dicts with
@@ -856,13 +1290,13 @@ class ConceptSearchHandler(BaseRouteHandler):
             return {}
 
         group_ids = self.group_ids
-        folder_id = self.folder_id
 
-        folder_filter_clause = (
-            "WITH s, doc, c_id\n"
-            "        WHERE $folder_id IS NULL"
-            " OR (doc IS NOT NULL AND (doc)-[:IN_FOLDER]->(:Folder {id: $folder_id}))\n"
-        )
+        # IN_FOLDER relationships do not exist in Neo4j; group_id on
+        # Sentence/Document nodes already provides tenant isolation.
+        folder_filter_clause = ""
+
+        # Fetch entity-linked sentences via Community→Entity→MENTIONS→Sentence
+        # graph traversal.
 
         cypher = f"""
         UNWIND $community_ids AS c_id
@@ -928,29 +1362,50 @@ class ConceptSearchHandler(BaseRouteHandler):
         self,
         query: str,
         communities: List[Dict[str, Any]],
-    ) -> str:
+        folder_id: Optional[str] = None,
+    ) -> Tuple[str, List[Dict[str, Any]]]:
         """Extract query-relevant key points from community SOURCE TEXT.
 
-        Aligned with Microsoft's LazyGraphRAG MAP phase:
+        True MAP pattern (upstream-aligned):
         1. For each matched community, fetch actual source sentences
            via Community → Entity → MENTIONS → Sentence graph traversal.
-        2. Pass source sentences (not abstract summaries) to the LLM.
-        3. Extract query-relevant claims with importance scores.
+        2. Extract key points from top-rated communities INDIVIDUALLY in parallel.
+           This gives each community focused LLM attention (prevents large
+           combined contexts from causing detail loss).
+        3. Lower-rated communities use raw summaries (no LLM call) to save latency.
+        4. Aggregate, deduplicate, sort, and filter all key points.
 
         Falls back to raw summaries if source fetch fails.
-        """
-        # Fetch source sentences for each matched community
-        source_map = await self._fetch_community_source_sentences(communities)
 
-        # Build per-community source text blocks
-        community_blocks = []
-        for i, c in enumerate(communities, 1):
+        Returns:
+            Tuple of (formatted_text, structured_points). structured_points is the
+            deduplicated/filtered list of dicts (description, score, community).
+        """
+        extract_top_k = int(os.getenv("ROUTE6_EXTRACT_TOP_K", "12"))
+        extract_min_rating = int(os.getenv("ROUTE6_EXTRACT_MIN_RATING", "1"))
+
+        # Fetch source sentences only for communities we'll extract from.
+        # Communities list is pre-sorted by LLM rating (highest first).
+        # Apply both a count cap (top_k) and a rating floor (min_rating).
+        extract_communities = [
+            c for c in communities[:extract_top_k]
+            if c.get("_llm_rating", 5) >= extract_min_rating
+        ]
+        extract_ids = {c.get("id") for c in extract_communities}
+        summary_communities = [c for c in communities if c.get("id") not in extract_ids]
+
+        source_map = await self._fetch_community_source_sentences(
+            extract_communities, folder_id=folder_id,
+        )
+
+        # Build per-community source text blocks for extraction
+        community_texts: List[Tuple[Dict[str, Any], str]] = []
+        for i, c in enumerate(extract_communities, 1):
             title = c.get("title", f"Theme {i}")
             cid = c.get("id", "")
             sentences = source_map.get(cid, [])
 
             if sentences:
-                # Format source sentences grouped by document
                 by_doc: Dict[str, List[str]] = defaultdict(list)
                 for s in sentences:
                     doc = s.get("document_title") or "Unknown"
@@ -963,67 +1418,123 @@ class ConceptSearchHandler(BaseRouteHandler):
                     joined = " ".join(texts)
                     doc_sections.append(f"  [{doc_title}]: {joined}")
                 source_text = "\n".join(doc_sections)
-                community_blocks.append(
-                    f"--- Community {i}: {title} ---\n{source_text}"
-                )
+                community_texts.append((c, f"--- Community: {title} ---\n{source_text}"))
             else:
-                # Fallback: use the abstract summary if no source text
                 summary = (c.get("summary") or "").strip()
                 if summary:
-                    community_blocks.append(
-                        f"--- Community {i}: {title} ---\n  {summary}"
-                    )
+                    community_texts.append((c, f"--- Community: {title} ---\n  {summary}"))
 
-        if not community_blocks:
-            return "(No thematic context available)"
+        if not community_texts and not summary_communities:
+            return "(No thematic context available)", []
 
-        source_text_block = "\n\n".join(community_blocks)
-        prompt = COMMUNITY_EXTRACT_PROMPT.format(
-            query=query,
-            community_source_text=source_text_block,
+        logger.info(
+            "route6_extract_source_stats",
+            total_communities=len(communities),
+            extract_communities=len(community_texts),
+            summary_only_communities=len(summary_communities),
+            source_text_chars=sum(len(t) for _, t in community_texts),
         )
 
-        try:
-            resp = await self.llm.acomplete(prompt)
-            text = resp.text.strip()
-            # Strip markdown code fences (LLMs often wrap JSON in ```json...```)
-            if text.startswith("```"):
-                text = re.sub(r'^```(?:json)?\s*\n?', '', text)
-                text = re.sub(r'\n?```\s*$', '', text)
-            parsed = json.loads(text)
-            points = parsed.get("points", [])
-            if not points:
-                logger.info("route6_community_extract_no_points")
-                # Fallback: format raw summaries
-                return self._format_raw_summaries(communities)
+        # MAP phase: per-community parallel extraction for top-rated communities.
+        # Each community gets its own LLM call for focused attention.
+        # All calls run concurrently — wall-clock time ≈ slowest single call.
+        max_concurrent = int(os.getenv("ROUTE6_EXTRACT_CONCURRENCY", "12"))
+        semaphore = asyncio.Semaphore(max_concurrent)
 
-            # Sort by score descending, filter low-importance
-            points = sorted(points, key=lambda p: p.get("score", 0), reverse=True)
-            points = [p for p in points if p.get("score", 0) >= 20]
-            if not points:
-                return self._format_raw_summaries(communities)
-
-            formatted = []
-            for p in points:
-                desc = p.get("description", "")
-                score = p.get("score", 0)
-                community = p.get("community", "")
-                tag = f" [{community}]" if community else ""
-                formatted.append(f"- (importance: {score}) {desc}{tag}")
-
-            logger.info(
-                "route6_community_extract_done",
-                total_points=len(points),
-                top_score=points[0].get("score", 0) if points else 0,
+        async def _extract_one(community: Dict[str, Any], source_block: str) -> List[Dict[str, Any]]:
+            title = community.get("title", "?")
+            prompt = COMMUNITY_EXTRACT_PROMPT.format(
+                query=query,
+                community_source_text=source_block,
             )
-            return "\n".join(formatted)
+            async with semaphore:
+                try:
+                    resp = await acomplete_with_retry(self.llm, prompt)
+                    text = resp.text.strip()
+                    if text.startswith("```"):
+                        text = re.sub(r'^```(?:json)?\s*\n?', '', text)
+                        text = re.sub(r'\n?```\s*$', '', text)
+                    parsed = json.loads(text)
+                    points = parsed.get("points", [])
+                    for p in points:
+                        if not p.get("community"):
+                            p["community"] = title
+                    return points
+                except (json.JSONDecodeError, ValueError):
+                    logger.warning("route6_extract_one_parse_error", community=title)
+                    return []
+                except Exception as e:
+                    logger.warning("route6_extract_one_failed", community=title, error=str(e))
+                    return []
 
-        except (json.JSONDecodeError, ValueError) as e:
-            logger.warning("route6_community_extract_parse_error", error=str(e))
-            return self._format_raw_summaries(communities)
-        except Exception as e:
-            logger.warning("route6_community_extract_failed", error=str(e))
-            return self._format_raw_summaries(communities)
+        if community_texts:
+            tasks = [_extract_one(c, txt) for c, txt in community_texts]
+            results = await asyncio.gather(*tasks)
+        else:
+            results = []
+
+        # REDUCE phase: aggregate all points, deduplicate, sort, filter
+        all_points: List[Dict[str, Any]] = []
+        for pts in results:
+            all_points.extend(pts)
+
+        if not all_points:
+            logger.info("route6_community_extract_no_points")
+            return self._format_raw_summaries(communities), []
+
+        # Deduplicate by description similarity (exact match on first 60 chars)
+        seen_descs: set = set()
+        unique_points = []
+        for p in all_points:
+            key = (p.get("description", "")[:60]).lower().strip()
+            if key not in seen_descs:
+                seen_descs.add(key)
+                unique_points.append(p)
+
+        # Sort by score descending, filter low-importance
+        unique_points.sort(key=lambda p: p.get("score", 0), reverse=True)
+        min_score = int(os.getenv("ROUTE6_EXTRACT_MIN_SCORE", "20"))
+        points = [p for p in unique_points if p.get("score", 0) >= min_score]
+        if not points:
+            return self._format_raw_summaries(communities), []
+
+        # Cap key points to keep synthesis prompt tractable (reduces latency)
+        max_points = int(os.getenv("ROUTE6_MAX_EXTRACT_POINTS", "30"))
+        points = points[:max_points]
+
+        formatted = []
+        for p in points:
+            desc = p.get("description", "")
+            score = p.get("score", 0)
+            community = p.get("community", "")
+            tag = f" [{community}]" if community else ""
+            formatted.append(f"- (importance: {score}) {desc}{tag}")
+
+        # Append raw summaries for ALL communities as fallback context.
+        # Extracted communities get both focused key-points above AND their
+        # raw summary below, so synthesis never loses information that the
+        # extraction LLM filtered out too aggressively (fixes Q-G7 regression
+        # where "60 days written notice" etc. were dropped by extraction).
+        all_summary_communities = extract_communities + summary_communities
+        if all_summary_communities:
+            formatted.append("")
+            formatted.append("--- Thematic Summaries (broad context) ---")
+            for c in all_summary_communities:
+                title = c.get("title", "?")
+                summary = (c.get("summary") or "").strip()
+                if summary:
+                    formatted.append(f"- [{title}]: {summary[:200]}")
+
+        logger.info(
+            "route6_community_extract_done",
+            total_raw=len(all_points),
+            after_dedup=len(unique_points),
+            after_filter=len(points),
+            max_points=max_points,
+            summary_appended=len(all_summary_communities),
+            top_score=points[0].get("score", 0) if points else 0,
+        )
+        return "\n".join(formatted), points
 
     @staticmethod
     def _format_raw_summaries(communities: List[Dict[str, Any]]) -> str:
@@ -1044,6 +1555,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         self,
         parent_communities: List[Dict[str, Any]],
         parent_scores: Optional[List[float]] = None,
+        folder_id: Optional[str] = None,
     ) -> List[Tuple[Dict[str, Any], float]]:
         """Fetch child communities via PARENT_COMMUNITY edges in Neo4j.
 
@@ -1052,6 +1564,7 @@ class ConceptSearchHandler(BaseRouteHandler):
 
         Args:
             parent_communities: Matched parent community dicts.
+            folder_id: Folder scope filter (None = all folders).
 
         Returns:
             List of (child_community_dict, synthetic_score) tuples.
@@ -1124,6 +1637,10 @@ class ConceptSearchHandler(BaseRouteHandler):
             }
             children.append((child_dict, synthetic_score))
 
+        # IN_FOLDER relationships do not exist in Neo4j; group_id on
+        # Sentence/Document nodes already provides tenant isolation.
+        # Folder-scope filter block removed (was always returning 0 rows).
+
         logger.info(
             "route6_community_children_fetched",
             parent_count=len(parent_ids),
@@ -1143,17 +1660,24 @@ class ConceptSearchHandler(BaseRouteHandler):
         communities: List[Dict[str, Any]],
         section_headings: List[Dict[str, Any]],
         sentence_evidence: List[Dict[str, Any]],
-        entity_doc_map: Optional[Dict[str, List[str]]] = None,
         language: Optional[str] = None,
-    ) -> str:
-        """Build the full synthesis prompt. Shared by _synthesize and _stream_synthesize."""
+        folder_id: Optional[str] = None,
+    ) -> Tuple[str, str]:
+        """Build the full synthesis prompt. Shared by _synthesize and _stream_synthesize.
+
+        Returns:
+            Tuple of (prompt, summaries_text) — summaries_text is the key-points
+            text used for completeness checking.
+        """
         # Format community summaries
         community_extract = os.getenv(
             "ROUTE6_COMMUNITY_EXTRACT", "1"
         ).strip().lower() in {"1", "true", "yes"}
 
         if community_extract and communities:
-            summaries_text = await self._extract_community_key_points(query, communities)
+            summaries_text, _ = await self._extract_community_key_points(
+                query, communities, folder_id=folder_id,
+            )
         elif communities:
             summary_lines = []
             for i, c in enumerate(communities, 1):
@@ -1203,31 +1727,25 @@ class ConceptSearchHandler(BaseRouteHandler):
         else:
             evidence_text = "(No document evidence retrieved)"
 
-        # Format entity-document coverage
-        if entity_doc_map:
-            cov_lines = []
-            for entity_name, doc_titles in entity_doc_map.items():
-                docs_str = ", ".join(sorted(t for t in doc_titles if t))
-                cov_lines.append(
-                    f"- {entity_name}: {docs_str} ({len(doc_titles)} document{'s' if len(doc_titles) != 1 else ''})"
-                )
-            entity_coverage_text = "\n".join(cov_lines)
-        else:
-            entity_coverage_text = ""
-
         # Feature 4: Token budget
         max_tokens = int(os.getenv("ROUTE6_MAX_CONTEXT_TOKENS", "0"))
         if max_tokens > 0:
             summaries_tokens = len(_tiktoken_enc.encode(summaries_text))
             sections = [
                 ("evidence", evidence_text),
-                ("entity_coverage", entity_coverage_text),
                 ("headings", headings_text),
             ]
             other_tokens = sum(len(_tiktoken_enc.encode(t)) for _, t in sections)
             total = summaries_tokens + other_tokens
             if total > max_tokens:
-                budget = max_tokens - summaries_tokens
+                # If community summaries alone exceed the budget, truncate them
+                # to 70% of budget so evidence always gets at least 30%.
+                if summaries_tokens > max_tokens:
+                    summary_cap = int(max_tokens * 0.7)
+                    summary_tokens_list = _tiktoken_enc.encode(summaries_text)
+                    summaries_text = _tiktoken_enc.decode(summary_tokens_list[:summary_cap])
+                    summaries_tokens = summary_cap
+                budget = max(max_tokens - summaries_tokens, 0)
                 truncated = {}
                 for name, text in sections:
                     tokens = _tiktoken_enc.encode(text)
@@ -1238,7 +1756,6 @@ class ConceptSearchHandler(BaseRouteHandler):
                         truncated[name] = _tiktoken_enc.decode(tokens[:max(budget, 0)])
                         budget = 0
                 evidence_text = truncated["evidence"]
-                entity_coverage_text = truncated["entity_coverage"]
                 headings_text = truncated["headings"]
 
         prompt = CONCEPT_SYNTHESIS_PROMPT.format(
@@ -1246,18 +1763,18 @@ class ConceptSearchHandler(BaseRouteHandler):
             community_summaries=summaries_text,
             section_headings=headings_text,
             sentence_evidence=evidence_text,
-            entity_coverage=entity_coverage_text,
         )
 
         if language:
             prompt += f"\n\nIMPORTANT: Respond entirely in {language}."
 
-        return prompt
+        return prompt, summaries_text
 
     async def _retrieve_sentence_evidence(
         self,
         query: str,
         top_k: int = 20,
+        folder_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Retrieve sentence-level evidence via Voyage vector search.
 
@@ -1267,6 +1784,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         Args:
             query: User query to embed and search.
             top_k: Max sentences to retrieve.
+            folder_id: Folder scope filter (None = all folders).
 
         Returns:
             List of sentence dicts with text, metadata, and score.
@@ -1280,9 +1798,12 @@ class ConceptSearchHandler(BaseRouteHandler):
             logger.warning("route6_sentence_search_no_neo4j_driver")
             return []
 
-        # 1. Embed query with Voyage
+        # 1. Embed query with Voyage (sync HTTP call — run off event loop)
         try:
-            query_embedding = voyage_service.embed_query(query)
+            loop = asyncio.get_running_loop()
+            query_embedding = await loop.run_in_executor(
+                self._executor, voyage_service.embed_query, query,
+            )
         except Exception as e:
             logger.warning("route6_sentence_embed_failed", error=str(e))
             return []
@@ -1293,19 +1814,25 @@ class ConceptSearchHandler(BaseRouteHandler):
         fetch_k = top_k * 3
         group_ids = self.group_ids
 
-        # R6-1: Build folder filter clause — applied AFTER OPTIONAL MATCH for doc.
-        # Uses Cypher's IS NULL test so the WHERE is a no-op when no folder scope is set.
-        folder_filter_clause = (
-            "// R6-1: folder scope filter (no-op when $folder_id IS NULL)\n"
-            "        WITH sent, score, doc, sec, prev_sent, next_sent\n"
-            "        WHERE $folder_id IS NULL"
-            " OR (doc IS NOT NULL AND (doc)-[:IN_FOLDER]->(:Folder {id: $folder_id}))\n"
-        )
+        # IN_FOLDER relationships do not exist in Neo4j; group_id on
+        # Sentence/Document nodes already provides tenant isolation.
+        folder_filter_clause = ""
 
-        # 2. Vector search on Sentence nodes + collect parent context
-        # UNION ALL of two branches for multi-group (user + __global__)
-        cypher = f"""CYPHER 25
-        CALL () {{
+        # 2. Vector search on Sentence nodes + collect parent context.
+        # sentence_embedding index has group_id as a filterable property
+        # (WITH [s.group_id]), so use UNION ALL for in-index filtering
+        # across tenant + __global__ groups.
+        # Skip duplicate UNION branch when group_id == global_group_id.
+        if self.group_id == settings.GLOBAL_GROUP_ID:
+            search_clause = """CYPHER 25
+        MATCH (sent:Sentence)
+        SEARCH sent IN (VECTOR INDEX sentence_embedding FOR $embedding WHERE sent.group_id = $group_id LIMIT $top_k)
+        SCORE AS score
+        WHERE score >= $threshold
+        """
+        else:
+            search_clause = """CYPHER 25
+        CALL () {
             MATCH (sent:Sentence)
             SEARCH sent IN (VECTOR INDEX sentence_embedding FOR $embedding WHERE sent.group_id = $group_id LIMIT $top_k)
             SCORE AS score
@@ -1317,7 +1844,10 @@ class ConceptSearchHandler(BaseRouteHandler):
             SCORE AS score
             WHERE score >= $threshold
             RETURN sent, score
-        }}
+        }
+        """
+
+        cypher = f"""{search_clause}
 
         // Get document + section context
         OPTIONAL MATCH (sent)-[:IN_DOCUMENT]->(doc:Document)
@@ -1337,6 +1867,7 @@ class ConceptSearchHandler(BaseRouteHandler):
                sent.parent_text AS chunk_text,
                doc.title AS document_title,
                doc.id AS document_id,
+               doc.source AS document_source,
                score,
                prev_sent.text AS prev_text,
                next_sent.text AS next_text
@@ -1346,7 +1877,6 @@ class ConceptSearchHandler(BaseRouteHandler):
         try:
             loop = asyncio.get_running_loop()
             driver = self.neo4j_driver
-            folder_id = self.folder_id
 
             def _run_search():
                 with retry_session(driver, read_only=True) as session:
@@ -1373,6 +1903,7 @@ class ConceptSearchHandler(BaseRouteHandler):
 
         # 3. Deduplicate by sentence_id and build context passages
         seen_sentences: set = set()
+        seen_texts: set = set()
         evidence: List[Dict[str, Any]] = []
 
         for r in results:
@@ -1380,6 +1911,13 @@ class ConceptSearchHandler(BaseRouteHandler):
             if sid in seen_sentences:
                 continue
             seen_sentences.add(sid)
+
+            # Text-level dedup: different sentence_ids can share identical text
+            # (e.g., from UNION ALL across group branches or chunk overlaps).
+            text_key = (r.get("text") or "")[:100].lower().strip()
+            if text_key in seen_texts:
+                continue
+            seen_texts.add(text_key)
 
             # Build passage: prev + current + next for coherent context
             parts = []
@@ -1404,6 +1942,7 @@ class ConceptSearchHandler(BaseRouteHandler):
                 "score": r.get("score", 0),
                 "document_title": r.get("document_title", "Unknown"),
                 "document_id": r.get("document_id", ""),
+                "document_source": r.get("document_source", ""),
                 "section_path": r.get("section_key") or r.get("section_path", ""),
                 "page": r.get("page"),
                 "sentence_id": sid,
@@ -1430,6 +1969,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         seed_count: int = 10,
         top_k: int = 20,
         min_overlap: int = 1,
+        folder_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Expand sentence pool via shared-entity graph traversal.
 
@@ -1447,6 +1987,7 @@ class ConceptSearchHandler(BaseRouteHandler):
             top_k: Max expanded sentences to return.
             min_overlap: Minimum number of distinct shared entities for a
                 sentence to qualify.
+            folder_id: Folder scope filter (None = all folders).
 
         Returns:
             List of evidence dicts matching the schema of
@@ -1474,16 +2015,10 @@ class ConceptSearchHandler(BaseRouteHandler):
         synthetic_score = min(seed_scores) * 0.8 if seed_scores else 0.3
 
         group_ids = self.group_ids
-        folder_id = self.folder_id
 
-        # R6-1: folder scope filter (same pattern as sentence vector search)
-        folder_filter_clause = (
-            "// R6-1: folder scope filter (no-op when $folder_id IS NULL)\n"
-            "        WITH expanded, shared_entity_count, doc, sec,"
-            " prev_sent, next_sent\n"
-            "        WHERE $folder_id IS NULL"
-            " OR (doc IS NOT NULL AND (doc)-[:IN_FOLDER]->(:Folder {id: $folder_id}))\n"
-        )
+        # IN_FOLDER relationships do not exist in Neo4j; group_id on
+        # Sentence/Document nodes already provides tenant isolation.
+        folder_filter_clause = ""
 
         cypher = f"""
         UNWIND $seed_ids AS seed_id
@@ -1598,6 +2133,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         self,
         query: str,
         top_k: int = 10,
+        folder_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Retrieve section headings via structural embedding cosine similarity.
 
@@ -1609,6 +2145,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         Args:
             query: User query to embed and match against section headings.
             top_k: Max sections to retrieve.
+            folder_id: Folder scope filter (None = all folders).
 
         Returns:
             List of section dicts with title, summary, path_key, document_title, score.
@@ -1622,16 +2159,18 @@ class ConceptSearchHandler(BaseRouteHandler):
             logger.warning("route6_section_search_no_neo4j_driver")
             return []
 
-        # 1. Embed query with Voyage
+        # 1. Embed query with Voyage (sync HTTP call — run off event loop)
         try:
-            query_embedding = voyage_service.embed_query(query)
+            loop = asyncio.get_running_loop()
+            query_embedding = await loop.run_in_executor(
+                self._executor, voyage_service.embed_query, query,
+            )
         except Exception as e:
             logger.warning("route6_section_embed_failed", error=str(e))
             return []
 
         min_similarity = float(os.getenv("ROUTE6_SECTION_MIN_SIMILARITY", "0.25"))
         group_ids = self.group_ids
-        folder_id = self.folder_id
 
         # 2. Cosine similarity against Section.structural_embedding
         # Note: no vector index exists for Section.structural_embedding (architectural
@@ -1645,11 +2184,6 @@ class ConceptSearchHandler(BaseRouteHandler):
 
         // Get parent document title
         OPTIONAL MATCH (s)<-[:HAS_SECTION]-(doc:Document)
-
-        // R6-2: Folder scope filter (no-op when $folder_id IS NULL)
-        WITH s, score, doc
-        WHERE $folder_id IS NULL
-           OR (doc IS NOT NULL AND (doc)-[:IN_FOLDER]->(:Folder {id: $folder_id}))
 
         RETURN s.title AS title,
                s.summary AS summary,
@@ -1697,87 +2231,6 @@ class ConceptSearchHandler(BaseRouteHandler):
         )
 
         return results
-
-    # ==================================================================
-    # Entity-Document Coverage (R6-XI)
-    # ==================================================================
-
-    async def _retrieve_entity_document_map(
-        self,
-        top_k: int = 20,
-    ) -> Dict[str, List[str]]:
-        """Return {entity_name: [doc_title, ...]} for the top entities by document count.
-
-        Uses a 2-hop traversal Entity←MENTIONS←Sentence→IN_DOCUMENT→Document
-        (same path the Route 7 PPR engine walks). This is more complete than the
-        pre-materialised APPEARS_IN_DOCUMENT edge, which can miss documents when
-        ingestion did not populate that shortcut edge for every entity.
-
-        Only includes entities that appear in 2+ documents to filter noise.
-        Result is sorted by document count descending so the most cross-document
-        entities appear first.
-
-        Used by _synthesize() to answer queries like "which entity appears in
-        the most documents?" without relying on heuristic LLM counting from
-        sentence snippets.
-
-        Args:
-            top_k: Maximum number of entities to return (default 20).
-
-        Returns:
-            Dict mapping entity name → list of document titles, or {} on failure.
-        """
-        if not self.neo4j_driver:
-            return {}
-
-        group_ids = self.group_ids
-        folder_id = self.folder_id
-
-        cypher = """
-        MATCH (e:Entity)<-[:MENTIONS]-(s:Sentence)-[:IN_DOCUMENT]->(d:Document)
-        WHERE e.group_id IN $group_ids AND s.group_id IN $group_ids AND d.group_id IN $group_ids
-
-        // R6-1 pattern: folder scope filter (no-op when $folder_id IS NULL)
-        WITH e, d
-        WHERE $folder_id IS NULL
-           OR (d)-[:IN_FOLDER]->(:Folder {id: $folder_id})
-
-        WITH e, collect(DISTINCT d.title) AS doc_titles, count(DISTINCT d) AS doc_count
-        WHERE doc_count >= 2
-        RETURN e.name AS entity_name, doc_titles, doc_count
-        ORDER BY doc_count DESC, e.name ASC
-        LIMIT $top_k
-        """
-
-        try:
-            loop = asyncio.get_running_loop()
-            driver = self.neo4j_driver
-
-            def _run():
-                with retry_session(driver, read_only=True) as session:
-                    records = session.run(
-                        cypher,
-                        group_ids=group_ids,
-                        folder_id=folder_id,
-                        top_k=top_k,
-                    )
-                    return [dict(r) for r in records]
-
-            results = await loop.run_in_executor(self._executor, _run)
-            entity_map = {r["entity_name"]: r["doc_titles"] for r in results}
-
-            logger.info(
-                "route6_entity_doc_map_complete",
-                entities=len(entity_map),
-                top_entries=[
-                    (r["entity_name"], r["doc_count"]) for r in results[:5]
-                ],
-            )
-            return entity_map
-
-        except Exception as e:
-            logger.warning("route6_entity_doc_map_failed", error=str(e))
-            return {}
 
     # ==================================================================
     # Document diversification (reused from Route 3)
@@ -1914,21 +2367,16 @@ class ConceptSearchHandler(BaseRouteHandler):
         rerank_model = os.getenv("ROUTE6_RERANK_MODEL", "rerank-2.5")
 
         try:
-            import voyageai
-            from src.core.config import settings
-
-            vc = voyageai.Client(api_key=settings.VOYAGE_API_KEY)
+            vc = make_voyage_client()
             documents = [ev.get("sentence_text") or ev.get("text") or "" for ev in evidence]
 
-            loop = asyncio.get_running_loop()
-            rr_result = await loop.run_in_executor(
-                self._executor,
-                lambda: vc.rerank(
-                    query=query,
-                    documents=documents,
-                    model=rerank_model,
-                    top_k=min(top_k, len(documents)),
-                ),
+            rr_result = await rerank_with_retry(
+                vc,
+                query=query,
+                documents=documents,
+                model=rerank_model,
+                top_k=min(top_k, len(documents)),
+                executor=self._executor,
             )
 
             # Track reranker usage (fire-and-forget)
@@ -1945,6 +2393,7 @@ class ConceptSearchHandler(BaseRouteHandler):
                     total_tokens=_rerank_tokens,
                     documents_reranked=len(documents),
                     route="route_6",
+                    user_id=None,
                 ))
             except Exception:
                 pass
@@ -1978,6 +2427,165 @@ class ConceptSearchHandler(BaseRouteHandler):
             logger.warning("route6_rerank_failed", error=str(e))
             return evidence[:top_k]
 
+    async def _multi_query_rerank(
+        self,
+        query: str,
+        communities: List[Dict[str, Any]],
+        evidence: List[Dict[str, Any]],
+        top_k: int = 25,
+    ) -> List[Dict[str, Any]]:
+        """Rerank evidence against multiple queries: user query + community titles.
+
+        For each sentence, take the MAX relevance score across all rerank passes.
+        This rescues topically-relevant sentences that score low against the user
+        query but high against a community title (e.g. "merchantability" scores
+        low vs "risk allocation" but high vs "Warranty Claims").
+
+        Uses at most ROUTE6_MULTI_QUERY_MAX_EXTRA extra rerank passes (community
+        titles), plus the primary user-query pass.
+        """
+        max_extra = int(os.getenv("ROUTE6_MULTI_QUERY_MAX_EXTRA", "3"))
+
+        # Build supplementary queries from community titles (highest-rated first)
+        extra_queries: List[str] = []
+        for c in communities[:max_extra]:
+            title = (c.get("title") or "").strip()
+            if title:
+                extra_queries.append(title)
+
+        all_queries = [query] + extra_queries
+        documents = [ev.get("sentence_text") or ev.get("text") or "" for ev in evidence]
+
+        if not documents:
+            return []
+
+        rerank_model = os.getenv("ROUTE6_RERANK_MODEL", "rerank-2.5")
+        vc = make_voyage_client()
+
+        # Run all rerank passes concurrently
+        async def _rerank_one(q: str):
+            return await rerank_with_retry(
+                vc,
+                query=q,
+                documents=documents,
+                model=rerank_model,
+                top_k=len(documents),  # get scores for ALL docs
+                executor=self._executor,
+            )
+
+        results = await asyncio.gather(
+            *[_rerank_one(q) for q in all_queries],
+            return_exceptions=True,
+        )
+
+        # Aggregate scores: user query provides the primary ranking.
+        # Community titles provide "rescue slots" — sentences that scored
+        # poorly against the user query but well against a community title
+        # get added as BONUS evidence (they don't displace user-ranked items).
+        rescue_slots = int(os.getenv("ROUTE6_MULTI_QUERY_RESCUE_SLOTS", "5"))
+        rescue_threshold = float(os.getenv("ROUTE6_MULTI_QUERY_RESCUE_THRESHOLD", "0.4"))
+
+        user_scores: Dict[int, float] = {}
+        community_best: Dict[int, float] = {}
+        community_best_query: Dict[int, str] = {}
+        total_rerank_tokens = 0
+
+        for q_idx, rr_result in enumerate(results):
+            if isinstance(rr_result, Exception):
+                logger.warning(
+                    "route6_multi_query_rerank_pass_failed",
+                    query_idx=q_idx,
+                    query=all_queries[q_idx][:50],
+                    error=str(rr_result),
+                )
+                continue
+
+            total_rerank_tokens += getattr(rr_result, "total_tokens", 0)
+            for rr in rr_result.results:
+                score = rr.relevance_score
+                if q_idx == 0:
+                    user_scores[rr.index] = score
+                else:
+                    if rr.index not in community_best or score > community_best[rr.index]:
+                        community_best[rr.index] = score
+                        community_best_query[rr.index] = all_queries[q_idx]
+
+        if not user_scores:
+            logger.warning("route6_multi_query_rerank_all_failed_fallback")
+            return await self._rerank_sentences(query, evidence, top_k=top_k)
+
+        # Phase 1: Normal user-query ranking (top_k)
+        user_ranked = sorted(user_scores.items(), key=lambda x: x[1], reverse=True)
+        primary_indices = set()
+        primary: List[Dict[str, Any]] = []
+        for idx, score in user_ranked[:top_k]:
+            primary_indices.add(idx)
+            primary.append({
+                **evidence[idx],
+                "rerank_score": score,
+                "score": score,
+            })
+
+        # Phase 2: Rescue slots — find sentences that scored well against
+        # community titles but didn't make the user-query top_k.
+        rescue_candidates = []
+        for idx, c_score in community_best.items():
+            if idx in primary_indices:
+                continue
+            if c_score >= rescue_threshold:
+                rescue_candidates.append((idx, c_score))
+
+        rescue_candidates.sort(key=lambda x: x[1], reverse=True)
+        rescued: List[Dict[str, Any]] = []
+        for idx, c_score in rescue_candidates[:rescue_slots]:
+            rescued.append({
+                **evidence[idx],
+                "rerank_score": c_score,
+                "score": c_score,
+                "_rerank_best_query": community_best_query.get(idx, "")[:60],
+                "_rescued": True,
+            })
+
+        final = primary + rescued
+
+        scored_evidence = final
+        scored_evidence.sort(key=lambda e: e.get("score", 0), reverse=True)
+
+        # Track reranker usage
+        try:
+            acc = getattr(self, "_token_accumulator", None)
+            if acc is not None:
+                acc.add_rerank(rerank_model, total_rerank_tokens, len(documents) * len(all_queries))
+            from src.core.services.usage_tracker import get_usage_tracker
+            _tracker = get_usage_tracker()
+            asyncio.ensure_future(_tracker.log_rerank_usage(
+                partition_id=self.group_id,
+                model=rerank_model,
+                total_tokens=total_rerank_tokens,
+                documents_reranked=len(documents) * len(all_queries),
+                route="route_6",
+                user_id=None,
+            ))
+        except Exception:
+            pass
+
+        # Log which sentences were "rescued" by supplementary queries
+        logger.info(
+            "route6_multi_query_rerank_complete",
+            queries=len(all_queries),
+            query_titles=[q[:40] for q in all_queries],
+            pool_size=len(evidence),
+            primary_count=len(primary),
+            rescued_count=len(rescued),
+            output_count=len(scored_evidence),
+            rescue_threshold=rescue_threshold,
+            top_score=round(scored_evidence[0]["score"], 4) if scored_evidence else 0,
+            bottom_score=round(scored_evidence[-1]["score"], 4) if scored_evidence else 0,
+            total_rerank_tokens=total_rerank_tokens,
+        )
+
+        return scored_evidence
+
     # ==================================================================
     # Citations
     # ==================================================================
@@ -1988,31 +2596,15 @@ class ConceptSearchHandler(BaseRouteHandler):
         scores: List[float],
         sentence_evidence: List[Dict[str, Any]],
     ) -> List[Citation]:
-        """Build citations from communities and sentence evidence.
+        """Build citations from sentence evidence (document-backed only).
 
-        Community citations come first (thematic sources), followed by
-        sentence-level citations (direct document evidence).
+        Community summaries are excluded from citations because they have no
+        backing PDF file — clicking them would produce a 404.  Sentence-level
+        citations carry document_url from the Neo4j Document.source property.
         """
         citations: List[Citation] = []
 
-        # Community-level citations (all matched communities, not just those with claims)
-        for i, (community, score) in enumerate(zip(communities, scores), 1):
-            title = community.get("title", "Untitled")
-            summary = community.get("summary", "")
-            if summary.strip():
-                citations.append(
-                    Citation(
-                        index=i,
-                        sentence_id=f"community_{community.get('id', i)}",
-                        document_id="",
-                        document_title=title,
-                        score=round(score, 4),
-                        text_preview=summary[:200],
-                    )
-                )
-
-        # Sentence-level citations (top 5 documents to avoid overload)
-        offset = len(citations)
+        # Sentence-level citations only (document-backed, clickable)
         seen_docs: set = set()
         for ev in sentence_evidence:
             doc_id = ev.get("document_id", "")
@@ -2021,17 +2613,19 @@ class ConceptSearchHandler(BaseRouteHandler):
             if dedup_key in seen_docs:
                 continue
             seen_docs.add(dedup_key)
-            offset += 1
+            idx = len(citations) + 1
             sent_text = ev.get("sentence_text", "")
             citations.append(
                 Citation(
-                    index=offset,
-                    sentence_id=ev.get("sentence_id", f"sentence_{offset}"),
+                    index=idx,
+                    sentence_id=ev.get("sentence_id", f"sentence_{idx}"),
                     document_id=ev.get("document_id", ""),
                     document_title=doc_title,
+                    document_url=ev.get("document_source", ""),
                     score=round(ev.get("score", 0), 4),
                     text_preview=sent_text[:200],
                     page_number=ev.get("page"),
+                    section_path=ev.get("section_path", ""),
                     sentence_text=sent_text,
                     sentence_length=len(sent_text),
                 )

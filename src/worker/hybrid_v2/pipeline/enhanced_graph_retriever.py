@@ -158,9 +158,8 @@ class EnhancedGraphRetriever:
         
         Returns empty string if folder_id is None (no filter).
         """
-        if self.folder_id is None:
-            return ""
-        return f"AND ({doc_alias})-[:IN_FOLDER]->(:Folder {{id: $folder_id}}) AND {doc_alias}.group_id IN $group_ids"
+        # IN_FOLDER relationships not created during indexing; group_id provides isolation
+        return ""
     
     def _get_folder_params(self) -> dict:
         """Get folder_id parameter dict for Cypher queries."""
@@ -640,10 +639,8 @@ class EnhancedGraphRetriever:
         # Build filter for cross-doc vs any
         cross_doc_filter = "AND s1.doc_id <> s2.doc_id" if cross_doc_only else ""
         
-        # Build folder filter for related document - only allow sections from same folder
+        # IN_FOLDER relationships not created during indexing; group_id provides isolation
         folder_filter_clause_with_group = "WHERE d IS NULL OR d.group_id IN $group_ids"
-        if self.folder_id:
-            folder_filter_clause_with_group = "WHERE d IS NULL OR (d.group_id IN $group_ids AND (d)-[:IN_FOLDER]->(:Folder {id: $folder_id}))"
         
         query = f"""
         UNWIND $section_ids AS source_section_id
@@ -851,10 +848,8 @@ class EnhancedGraphRetriever:
         if not entity_names:
             return []
         
-        # Build folder filter for document optional match
+        # IN_FOLDER relationships not created during indexing; group_id provides isolation
         folder_filter_clause = ""
-        if self.folder_id:
-            folder_filter_clause = "WHERE d IS NULL OR (d.group_id IN $group_ids AND (d)-[:IN_FOLDER]->(:Folder {id: $folder_id}))"
         
         # Query: Use new 1-hop edges to get sections, then fetch chunks from those sections
         query = f"""
@@ -874,7 +869,7 @@ class EnhancedGraphRetriever:
                 {folder_filter_clause}
                 WITH entity_name, c, s, d, 
                      // Prioritize chunks that mention the entity (if MENTIONS edge exists)
-                     CASE WHEN exists((e)-[:MENTIONS]->(c)) THEN 1.0 ELSE 0.5 END AS score
+                     CASE WHEN EXISTS {{ (e)-[:MENTIONS]->(c) }} THEN 1.0 ELSE 0.5 END AS score
                 ORDER BY score DESC, coalesce(c.chunk_index, 0)
                 WITH entity_name, collect({{
                     sentence_id: c.id,
@@ -988,10 +983,8 @@ class EnhancedGraphRetriever:
         if not entity_names or not self.driver:
             return []
         
-        # Build folder filter for document optional match
+        # IN_FOLDER relationships not created during indexing; group_id provides isolation
         folder_filter_clause = ""
-        if self.folder_id:
-            folder_filter_clause = "WHERE d IS NULL OR (d.group_id IN $group_ids AND (d)-[:IN_FOLDER]->(:Folder {id: $folder_id}))"
         
         # Simplified query for current hybrid pipeline schema
         # Includes alias support for flexible entity matching
@@ -1032,12 +1025,8 @@ class EnhancedGraphRetriever:
                         chunk.doc_source AS doc_source
                 """
 
-        # Build folder filter for fallback query
-        fallback_folder_filter = "WHERE d IS NULL OR (d.group_id IN $group_ids"
-        if self.folder_id:
-            fallback_folder_filter += " AND (d)-[:IN_FOLDER]->(:Folder {id: $folder_id}))"
-        else:
-            fallback_folder_filter += ")"
+        # IN_FOLDER relationships not created during indexing; group_id provides isolation
+        fallback_folder_filter = "WHERE d IS NULL OR (d.group_id IN $group_ids)"
         
         fallback_query = f"""
                 UNWIND $entity_names AS entity_name
@@ -1403,7 +1392,7 @@ class EnhancedGraphRetriever:
         WHERE match_count >= $min_matches
         OPTIONAL MATCH (t)-[:IN_SECTION]->(s:Section)
         OPTIONAL MATCH (t)-[:IN_DOCUMENT]->(d:Document)
-        WHERE d IS NULL OR (d.group_id IN $group_ids AND ($folder_id IS NULL OR (d)-[:IN_FOLDER]->(:Folder {id: $folder_id})))
+        WHERE d IS NULL OR d.group_id IN $group_ids
         RETURN
             t.id AS sentence_id,
             t.text AS text,
@@ -1664,7 +1653,7 @@ class EnhancedGraphRetriever:
              ) AS match_count
         WHERE match_count >= $min_matches
         OPTIONAL MATCH (t)-[:IN_DOCUMENT]->(d:Document)
-        WHERE d IS NULL OR (d.group_id IN $group_ids AND ($folder_id IS NULL OR (d)-[:IN_FOLDER]->(:Folder {id: $folder_id})))
+        WHERE d IS NULL OR d.group_id IN $group_ids
         RETURN
             t.id AS sentence_id,
             t.text AS text,
@@ -1790,7 +1779,7 @@ class EnhancedGraphRetriever:
           AND s.group_id IN $group_ids
           AND s.id IN $section_ids
         OPTIONAL MATCH (t)-[:IN_DOCUMENT]->(d:Document)
-        WHERE d IS NULL OR (d.group_id IN $group_ids AND ($folder_id IS NULL OR (d)-[:IN_FOLDER]->(:Folder {id: $folder_id})))
+        WHERE d IS NULL OR d.group_id IN $group_ids
         RETURN
             t.id AS sentence_id,
             t.text AS text,
@@ -2836,10 +2825,8 @@ class EnhancedGraphRetriever:
             logger.warning("search_sections_by_vector_no_driver")
             return []
         
-        # Build folder filter for document join
+        # IN_FOLDER relationships not created during indexing; group_id provides isolation
         folder_filter_clause = ""
-        if self.folder_id:
-            folder_filter_clause = "AND (d IS NULL OR (d)-[:IN_FOLDER]->(:Folder {id: $folder_id}))"
         
         query = f"""
         MATCH (s:Section)

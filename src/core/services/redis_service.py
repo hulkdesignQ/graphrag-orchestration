@@ -489,12 +489,23 @@ class RedisJobQueue:
         
         Uses BRPOPLPUSH: pops from pending, pushes to processing.
         If timeout=0, blocks indefinitely until job available.
+        Resilient to transient Redis connectivity errors.
         """
-        result = await self.redis.brpoplpush(
-            self.QUEUE_KEY,
-            self.PROCESSING_KEY,
-            timeout=timeout
-        )
+        try:
+            result = await self.redis.brpoplpush(
+                self.QUEUE_KEY,
+                self.PROCESSING_KEY,
+                timeout=timeout
+            )
+        except (
+            aioredis.ConnectionError,
+            aioredis.TimeoutError,
+            OSError,
+            ConnectionResetError,
+            TimeoutError,
+        ) as e:
+            logger.warning(f"Redis dequeue transient error (will retry): {e}")
+            return None
         
         if not result:
             return None
@@ -617,7 +628,12 @@ class RedisService:
         """Create RedisService with connection."""
         url = redis_url or get_redis_url()
         
-        kwargs = {"decode_responses": True, "socket_timeout": 5, "socket_connect_timeout": 5}
+        kwargs = {
+            "decode_responses": True,
+            "socket_timeout": 30,
+            "socket_connect_timeout": 10,
+            "retry_on_timeout": True,
+        }
         if url.startswith("rediss://"):
             kwargs["ssl_cert_reqs"] = "required"
         
@@ -634,7 +650,9 @@ class RedisService:
         self,
         key: str,
         ttl_seconds: int = 60,
-        heartbeat_interval: int = 20
+        heartbeat_interval: int = 20,
+        retry_attempts: int = 3,
+        retry_delay: float = 1.0,
     ) -> AsyncIterator[DistributedLock]:
         """
         Acquire a distributed lock.
@@ -647,7 +665,9 @@ class RedisService:
             self._redis,
             key,
             ttl_seconds=ttl_seconds,
-            heartbeat_interval=heartbeat_interval
+            heartbeat_interval=heartbeat_interval,
+            retry_attempts=retry_attempts,
+            retry_delay=retry_delay,
         )
         
         try:

@@ -497,7 +497,7 @@ class DeterministicTracer:
         WITH collect(a) AS nodes
         UNWIND nodes AS a
         UNWIND nodes AS b
-        WITH a, b WHERE id(a) < id(b)
+        WITH a, b WHERE elementId(a) < elementId(b)
         MATCH (a)-[r]->(b)
         WHERE type(r) <> 'MENTIONS'
         RETURN a.name AS source, b.name AS target,

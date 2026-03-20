@@ -54,7 +54,7 @@ from .pipeline.enhanced_graph_retriever import EnhancedGraphRetriever
 from .router.main import HybridRouter, QueryRoute, DeploymentProfile
 
 # Modular route handlers (Jan 2026 refactor)
-from .routes import LocalSearchHandler, GlobalSearchHandler, DRIFTHandler, UnifiedSearchHandler, ConceptSearchHandler, HippoRAG2Handler
+from .routes import LocalSearchHandler, GlobalSearchHandler, DRIFTHandler, UnifiedSearchHandler, ConceptSearchHandler, HippoRAG2Handler, HippoRAG2CommunityHandler
 
 # Import async Neo4j service for native async operations
 try:
@@ -302,6 +302,7 @@ class HybridPipeline:
             QueryRoute.UNIFIED_SEARCH: UnifiedSearchHandler(self),
             QueryRoute.CONCEPT_SEARCH: ConceptSearchHandler(self),
             QueryRoute.HIPPORAG2_SEARCH: HippoRAG2Handler(self),
+            QueryRoute.HIPPORAG2_COMMUNITY: HippoRAG2CommunityHandler(self),
         }
         
         logger.info("hybrid_pipeline_initialized",
@@ -352,6 +353,25 @@ class HybridPipeline:
         """Async context manager exit - cleans up resources."""
         await self.close()
 
+    # Mapping from i18n frontend language codes to Azure Translator codes.
+    # Most codes are identical; only variants need explicit mapping.
+    _I18N_TO_AZURE_LANG = {
+        "ptBR": "pt",
+        "zhHans": "zh-Hans",
+        "zhHant": "zh-Hant",
+    }
+
+    @classmethod
+    def _to_azure_lang(cls, i18n_code: Optional[str]) -> Optional[str]:
+        """Convert an i18n language code to an Azure Translator language code.
+
+        Returns *None* when the code is ``"en"`` or unrecognised (let
+        auto-detect handle it).
+        """
+        if not i18n_code:
+            return None
+        return cls._I18N_TO_AZURE_LANG.get(i18n_code, i18n_code)
+
     async def _get_document_language(self) -> Optional[str]:
         """Get the primary language of documents in this group from Neo4j.
 
@@ -385,8 +405,16 @@ class HybridPipeline:
         self,
         query: str,
         accumulator=None,
+        hint_language: Optional[str] = None,
     ) -> tuple:
         """Detect query language and translate if it differs from document language.
+
+        Args:
+            query: User's raw query text.
+            accumulator: Optional TokenAccumulator for usage tracking.
+            hint_language: Optional i18n language code from the UI dropdown.
+                When provided and it maps to a known Azure Translator code,
+                it is passed as ``source_lang`` to skip auto-detection.
 
         Returns:
             (translated_query, detected_language, was_translated)
@@ -400,7 +428,15 @@ class HybridPipeline:
         doc_lang = await self._get_document_language()
         target_lang = doc_lang or "en"
 
-        result = await translator.detect_and_translate(query, target_lang=target_lang)
+        # Use the UI language as a source hint when available
+        source_hint = self._to_azure_lang(hint_language)
+        # Don't hint if the hint matches the target (no translation needed)
+        if source_hint and source_hint.split("-")[0].lower() == target_lang.split("-")[0].lower():
+            source_hint = None
+
+        result = await translator.detect_and_translate(
+            query, target_lang=target_lang, source_lang=source_hint,
+        )
 
         if accumulator and result.was_translated:
             accumulator.add_translation(
@@ -422,6 +458,8 @@ class HybridPipeline:
         include_context: bool = False,
         language: Optional[str] = None,
         folder_id: Optional[str] = None,
+        config_overrides: Optional[Dict[str, str]] = None,
+        user_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Execute a query through the appropriate route.
@@ -450,11 +488,16 @@ class HybridPipeline:
 
         # Step 0a: Translate query if user language ≠ document language
         translated_query, detected_lang, was_translated = await self._maybe_translate_query(
-            query, accumulator=accumulator,
+            query, accumulator=accumulator, hint_language=language,
         )
-        if was_translated and detected_lang and not language:
-            # Respond in the user's original language
-            language = detected_lang
+        # Determine the user's target language for response translation
+        user_language = language or detected_lang  # UI dropdown or auto-detected
+        doc_lang = await self._get_document_language() or "en"
+        user_azure_lang = self._to_azure_lang(user_language)
+        needs_response_translation = bool(
+            user_azure_lang
+            and user_azure_lang.split("-")[0].lower() != doc_lang.split("-")[0].lower()
+        )
         search_query = translated_query if was_translated else query
 
         # Step 0b: Route the (translated) query and determine weight profile
@@ -479,21 +522,51 @@ class HybridPipeline:
             handler._token_accumulator = accumulator
             # Pass weight profile to Route 5 (other routes ignore keyword args
             # they don't accept via **kwargs, but Route 5 uses it for seed weighting)
-            extra_kwargs: Dict[str, Any] = {}
+            extra_kwargs: Dict[str, Any] = {"user_id": user_id}
             if route == QueryRoute.UNIFIED_SEARCH:
                 extra_kwargs["weight_profile"] = weight_profile
             if route == QueryRoute.HIPPORAG2_SEARCH:
                 extra_kwargs["query_mode"] = original_route.value
+                if config_overrides:
+                    extra_kwargs["config_overrides"] = config_overrides
+            if route == QueryRoute.HIPPORAG2_COMMUNITY:
+                extra_kwargs["query_mode"] = original_route.value
+                if config_overrides:
+                    extra_kwargs["config_overrides"] = config_overrides
             result = await handler.execute(
                 search_query, response_type,
                 knn_config=knn_config,
                 prompt_variant=prompt_variant,
                 synthesis_model=synthesis_model,
                 include_context=include_context,
-                language=language,
+                language=None,  # Generate in document language; we translate after
                 folder_id=folder_id,
                 **extra_kwargs,
             )
+
+            # Translate the response to the user's language if needed
+            if needs_response_translation and result.response:
+                result.original_answer = result.response
+                try:
+                    from src.worker.services.translator_service import get_translator_service
+                    translator = get_translator_service()
+                    if translator.is_available:
+                        tr = await translator.detect_and_translate(
+                            result.response,
+                            target_lang=user_azure_lang,
+                            source_lang=doc_lang,
+                        )
+                        if tr.was_translated:
+                            result.response = tr.translated_text
+                            if accumulator:
+                                accumulator.add_translation(
+                                    characters=tr.characters,
+                                    detected_language=tr.detected_language,
+                                    was_translated=True,
+                                )
+                except Exception as e:
+                    logger.warning("response_translation_failed", error=str(e))
+
             # Attach accumulated token usage to the result
             if result.usage is None and accumulator.call_count > 0:
                 result.usage = accumulator.snapshot()
@@ -703,7 +776,7 @@ class HybridPipeline:
         logger.info("stage_3.1_community_matching")
         t0 = time.perf_counter()
         community_top_k = int(os.getenv("ROUTE3_COMMUNITY_TOP_K", "3"))
-        matched_communities = await self.community_matcher.match_communities(query, top_k=community_top_k)
+        matched_communities = await self.community_matcher.match_communities(query, top_k=community_top_k, folder_id=self.folder_id)
         community_data = [c for c, _ in matched_communities]
         timings_ms["stage_3.1_ms"] = int((time.perf_counter() - t0) * 1000)
         logger.info("stage_3.1_complete", num_communities=len(community_data))
@@ -1070,7 +1143,7 @@ class HybridPipeline:
         # Extract significant words from query (4+ chars, not stopwords)
         stopwords = {"what", "when", "where", "which", "about", "does", "there", "their", "have", "this", "that", "with", "from", "they", "been", "were", "will", "would", "could", "should", "across", "list", "summarize", "identify"}
         query_terms = [
-            w.lower() for w in re.findall(r"[A-Za-z]{4,}", query)
+            w.lower() for w in re.findall(r"[\w]{2,}", query)
             if w.lower() not in stopwords
         ]
         
@@ -2254,13 +2327,13 @@ Sub-questions:"""
         
         try:
             # Query for entities with highest degree (most relationships)
-            # Optionally filter by keywords if provided
+            # Always filter by group_id for tenant isolation
             if keywords:
-                keyword_filter = " OR ".join([f"toLower(e.name) CONTAINS '{kw}'" for kw in keywords])
-                query = f"""
-                MATCH (e)
-                WHERE (e:Entity)
-                  AND ({keyword_filter})
+                # Use parameterized keyword list to avoid Cypher injection
+                query = """
+                MATCH (e:Entity)
+                WHERE e.group_id IN $group_ids
+                  AND any(kw IN $keywords WHERE toLower(e.name) CONTAINS kw)
                 WITH e
                 MATCH (e)-[r]-()
                 WITH e, count(r) as degree
@@ -2269,10 +2342,9 @@ Sub-questions:"""
                 RETURN e.name as name, degree
                 """
             else:
-                # No keywords - just get top entities by degree
                 query = """
-                MATCH (e)
-                WHERE e:Entity
+                MATCH (e:Entity)
+                WHERE e.group_id IN $group_ids
                 WITH e
                 MATCH (e)-[r]-()
                 WITH e, count(r) as degree
@@ -2281,7 +2353,14 @@ Sub-questions:"""
                 RETURN e.name as name, degree
                 """
             
-            results = await self._async_neo4j.execute_read(query, {"top_k": top_k})
+            results = await self._async_neo4j.execute_read(
+                query,
+                {
+                    "top_k": top_k,
+                    "group_ids": self.group_ids,
+                    "keywords": [kw.lower() for kw in keywords] if keywords else [],
+                },
+            )
             hub_entities = [r["name"] for r in results if r.get("name")]
             
             logger.info("neo4j_hub_extraction_complete",
@@ -2319,6 +2398,8 @@ Sub-questions:"""
         language: Optional[str] = None,
         query_mode: Optional[str] = None,
         folder_id: Optional[str] = None,
+        config_overrides: Optional[Dict[str, str]] = None,
+        user_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Force a specific route regardless of classification.
@@ -2335,15 +2416,22 @@ Sub-questions:"""
             folder_id: Per-query folder scope (overrides pipeline default, None = all folders).
         """
         # Translate query if needed
-        translated_query, detected_lang, was_translated = await self._maybe_translate_query(query)
-        if was_translated and detected_lang and not language:
-            language = detected_lang
+        translated_query, detected_lang, was_translated = await self._maybe_translate_query(
+            query, hint_language=language,
+        )
+        user_language = language or detected_lang
+        doc_lang = await self._get_document_language() or "en"
+        user_azure_lang = self._to_azure_lang(user_language)
+        needs_response_translation = bool(
+            user_azure_lang
+            and user_azure_lang.split("-")[0].lower() != doc_lang.split("-")[0].lower()
+        )
         search_query = translated_query if was_translated else query
 
         # Use modular handlers if available and requested
         if use_modular_handlers and route in self._route_handlers:
             handler = self._route_handlers[route]
-            extra_kwargs: Dict[str, Any] = {}
+            extra_kwargs: Dict[str, Any] = {"user_id": user_id}
             if route == QueryRoute.UNIFIED_SEARCH:
                 # Use explicit profile if provided, otherwise derive from route
                 extra_kwargs["weight_profile"] = (
@@ -2351,16 +2439,40 @@ Sub-questions:"""
                 )
             if route == QueryRoute.HIPPORAG2_SEARCH:
                 extra_kwargs["query_mode"] = query_mode or route.value
+                if config_overrides:
+                    extra_kwargs["config_overrides"] = config_overrides
+            if route == QueryRoute.HIPPORAG2_COMMUNITY:
+                extra_kwargs["query_mode"] = query_mode or route.value
+                if config_overrides:
+                    extra_kwargs["config_overrides"] = config_overrides
             result = await handler.execute(
                 search_query, response_type,
                 knn_config=knn_config,
                 prompt_variant=prompt_variant,
                 synthesis_model=synthesis_model,
                 include_context=include_context,
-                language=language,
+                language=None,  # Generate in document language; we translate after
                 folder_id=folder_id,
                 **extra_kwargs,
             )
+
+            # Translate the response to the user's language if needed
+            if needs_response_translation and result.response:
+                result.original_answer = result.response
+                try:
+                    from src.worker.services.translator_service import get_translator_service
+                    translator = get_translator_service()
+                    if translator.is_available:
+                        tr = await translator.detect_and_translate(
+                            result.response,
+                            target_lang=user_azure_lang,
+                            source_lang=doc_lang,
+                        )
+                        if tr.was_translated:
+                            result.response = tr.translated_text
+                except Exception as e:
+                    logger.warning("force_route_response_translation_failed", error=str(e))
+
             return result.to_dict()
         
         # Legacy fallback

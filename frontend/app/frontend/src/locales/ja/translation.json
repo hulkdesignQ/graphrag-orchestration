@@ -55,15 +55,15 @@
         "stopStreaming": "ストリーミングを停止",
         "askWithVoice": "音声で質問",
         "stopRecording": "質問の記録を停止",
-        "showSupportingContent": "サポート内容の表示",
         "speakAnswer": "音声による回答",
         "info": "情報",
         "save": "保存",
         "copy": "コピー",
-        "copied": "コピーしました！"
+        "copied": "コピーしました！",
+        "showOriginal": "原文を表示",
+        "showTranslated": "翻訳を表示"
     },
     "headerTexts": {
-        "supportingContent": "サポート内容",
         "citation": "引用"
     },
     "labels": {
@@ -231,7 +231,12 @@
         "deleteAnalysisConfirm": "このフォルダのすべての分析データ（グラフ、エンティティ、埋め込み）が完全に削除されます。元のファイルは保持されます。続行しますか？",
         "analysisDeleted": "分析データが正常に削除されました",
         "deleteAnalysisFailed": "分析データの削除に失敗しました：{{message}}",
-        "storageReminder": "💡 分析データはストレージを使用します。不要になったら分析を削除してコストを節約してください。"
+        "storageReminder": "💡 分析データはストレージを使用します。不要になったら分析を削除してコストを節約してください。",
+        "zoneAnalysisResults": "分析結果",
+        "zoneAnalyzed": "分析済み",
+        "zoneFolders": "フォルダ",
+        "expandZone": "展開",
+        "collapseZone": "折りたたむ"
     },
     "viewer": {
         "loadingFile": "ファイルを読み込み中",
@@ -279,35 +284,27 @@
         "creditsUsed": "使用済みクレジット",
         "documents": "ドキュメント",
         "storageUsed": "使用済みストレージ",
-        "dailyLimit": "{{limit}} 日次上限のうち",
         "monthlyLimit": "{{limit}} 月次上限のうち",
         "monthlyCredits": "{{limit}} 月次クレジットのうち",
         "unlimitedCredits": "無制限クレジット",
         "translated": "{{count}} 件翻訳済み",
         "voice": "{{count}} 件音声",
         "personalShared": "(個人 {{personal}} + 共有 {{shared}}) {{limit}} 上限のうち",
-        "ofLimit": "{{limit}} 上限のうち",
         "gbLimit": "{{limit}} GB 上限のうち",
         "recentActivity": "最近のアクティビティ",
         "time": "時刻",
         "tokens": "トークン",
         "credits": "クレジット",
         "language": "言語",
-        "yourFeatures": "利用可能な機能",
         "plans": "プラン",
         "currentPlan": "現在のプラン",
         "contactSales": "営業に問い合わせ",
-        "queriesPerDay": "{{count}} クエリ/日",
-        "maxDocuments": "{{count}} ドキュメント",
         "maxStorage": "{{count}} GB ストレージ",
         "creditsPerMonth": "{{count}} クレジット/月",
-        "featureGraphrag": "Evidoc Search",
         "featureAdvancedAnalytics": "高度な分析",
-        "featureCustomModels": "カスタムモデル",
         "featureApiAccess": "APIアクセス",
-        "featurePrioritySupport": "優先サポート",
-        "featureSso": "SSO連携",
-        "featureCustomBranding": "カスタムブランディング"
+        "featureCentralizedBilling": "一括請求",
+        "featureAuditLogs": "監査ログ"
     },
     "admin": {
         "signInRequired": "サインインが必要です",
@@ -335,5 +332,12 @@
         "plan": "プラン",
         "lastActive": "最終アクティブ",
         "noUserActivity": "ユーザーアクティビティデータはまだありません。分析が接続されるとデータが表示されます。"
+    },
+    "folderSelector": {
+        "label": "ナレッジベース：",
+        "placeholder": "ナレッジベースを選択…",
+        "noFolders": "分析済みのフォルダーがまだありません",
+        "loadError": "Could not load folders",
+        "demo": "Demo"
     }
 }

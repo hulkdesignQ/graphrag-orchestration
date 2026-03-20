@@ -13,6 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
+import asyncio
 import aiohttp
 import structlog
 from azure.identity.aio import DefaultAzureCredential
@@ -52,11 +53,14 @@ class TranslatorService:
         self,
         endpoint: Optional[str] = None,
         region: Optional[str] = None,
+        resource_id: Optional[str] = None,
     ) -> None:
         self.endpoint = (endpoint or settings.AZURE_TRANSLATOR_ENDPOINT or "").rstrip("/")
         self.region = region or settings.AZURE_TRANSLATOR_REGION or "swedencentral"
+        self.resource_id = resource_id or settings.AZURE_TRANSLATOR_RESOURCE_ID or ""
         self._credential: Optional[DefaultAzureCredential] = None
         self._session: Optional[aiohttp.ClientSession] = None
+        self._session_lock = asyncio.Lock()
         if not self.endpoint:
             logger.warning("translator_service_disabled: AZURE_TRANSLATOR_ENDPOINT not set")
 
@@ -67,43 +71,71 @@ class TranslatorService:
     async def _get_token(self) -> str:
         """Obtain a bearer token via Managed Identity."""
         if self._credential is None:
-            self._credential = DefaultAzureCredential()
+            import os
+            client_id = os.getenv("AZURE_CLIENT_ID")
+            if client_id:
+                from azure.identity.aio import ManagedIdentityCredential
+                self._credential = ManagedIdentityCredential(client_id=client_id)
+                logger.info("translator_using_user_assigned_identity", client_id=client_id[:8])
+            else:
+                self._credential = DefaultAzureCredential()
         token = await self._credential.get_token(_TRANSLATOR_SCOPE)
         return token.token
 
     async def _get_session(self) -> aiohttp.ClientSession:
-        if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession()
-        return self._session
+        async with self._session_lock:
+            if self._session is None or self._session.closed:
+                self._session = aiohttp.ClientSession()
+            return self._session
 
     async def detect_and_translate(
         self,
         text: str,
         target_lang: str = "en",
+        source_lang: Optional[str] = None,
     ) -> TranslationResult:
-        """Auto-detect source language and translate to target_lang.
+        """Detect source language and translate to target_lang.
 
-        If the detected language prefix matches target_lang, returns the
+        Args:
+            text: Text to translate.
+            target_lang: Target language code (e.g. ``"en"``, ``"ja"``).
+            source_lang: Optional source language hint.  When provided the
+                Azure Translator ``from`` parameter is set explicitly,
+                skipping auto-detection (saves ~50 ms per call).
+
+        If the source language prefix matches target_lang, returns the
         original text with was_translated=False.
         """
         if not self.endpoint:
             return TranslationResult(
                 original_text=text,
                 translated_text=text,
-                detected_language="unknown",
+                detected_language=source_lang or "unknown",
                 target_language=target_lang,
                 was_translated=False,
                 characters=0,
             )
 
-        url = f"{self.endpoint}/translate"
-        params = {"api-version": _API_VERSION, "to": target_lang}
+        logger.info("translator_attempt", target_lang=target_lang, source_lang=source_lang,
+                     text_len=len(text), has_resource_id=bool(self.resource_id))
+        # Custom subdomain uses /translator/text/v3.0/ path; global uses /translate?api-version=
+        if ".cognitiveservices.azure.com" in self.endpoint:
+            url = f"{self.endpoint}/translator/text/v3.0/translate"
+            params: dict = {"to": target_lang}
+        else:
+            url = f"{self.endpoint}/translate"
+            params = {"api-version": _API_VERSION, "to": target_lang}
+        if source_lang:
+            params["from"] = source_lang
         token = await self._get_token()
         headers = {
             "Authorization": f"Bearer {token}",
-            "Ocp-Apim-Subscription-Region": self.region,
             "Content-Type": "application/json",
         }
+        if self.resource_id:
+            headers["Ocp-Apim-ResourceId"] = self.resource_id
+        if ".cognitiveservices.azure.com" not in self.endpoint:
+            headers["Ocp-Apim-Subscription-Region"] = self.region
         body = [{"Text": text}]
 
         session = await self._get_session()
@@ -128,7 +160,7 @@ class TranslatorService:
 
         result = data[0]
         detected = result.get("detectedLanguage", {})
-        detected_lang = detected.get("language", "unknown")
+        detected_lang = detected.get("language") or source_lang or "unknown"
         translations = result.get("translations", [])
         translated_text = translations[0]["text"] if translations else text
 

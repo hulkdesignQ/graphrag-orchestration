@@ -55,15 +55,15 @@
         "stopStreaming": "Stop streaming",
         "askWithVoice": "Vraag stellen met stem",
         "stopRecording": "Opname stoppen",
-        "showSupportingContent": "Ondersteunende inhoud tonen",
         "speakAnswer": "Antwoord uitspreken",
         "info": "Info",
         "save": "Opslaan",
         "copy": "Kopieer",
-        "copied": "Gekopieerd!"
+        "copied": "Gekopieerd!",
+        "showOriginal": "Origineel antwoord tonen",
+        "showTranslated": "Vertaald antwoord tonen"
     },
     "headerTexts": {
-        "supportingContent": "Ondersteunende Inhoud",
         "citation": "Citaat"
     },
     "labels": {
@@ -231,7 +231,12 @@
         "deleteAnalysisConfirm": "Dit verwijdert permanent alle analysegegevens (grafiek, entiteiten, embeddings) voor deze map. Originele bestanden blijven behouden. Doorgaan?",
         "analysisDeleted": "Analysegegevens succesvol verwijderd",
         "deleteAnalysisFailed": "Verwijderen van analyse mislukt: {{message}}",
-        "storageReminder": "💡 Analysegegevens gebruiken opslagruimte. Verwijder de analyse wanneer deze niet meer nodig is om kosten te besparen."
+        "storageReminder": "💡 Analysegegevens gebruiken opslagruimte. Verwijder de analyse wanneer deze niet meer nodig is om kosten te besparen.",
+        "zoneAnalysisResults": "Analyseresultaten",
+        "zoneAnalyzed": "Geanalyseerd",
+        "zoneFolders": "Mappen",
+        "expandZone": "Uitvouwen",
+        "collapseZone": "Invouwen"
     },
     "viewer": {
         "loadingFile": "Bestand laden",
@@ -279,35 +284,27 @@
         "creditsUsed": "Gebruikte credits",
         "documents": "Documenten",
         "storageUsed": "Gebruikte opslag",
-        "dailyLimit": "van {{limit}} dagelijks limiet",
         "monthlyLimit": "van {{limit}} maandelijks limiet",
         "monthlyCredits": "van {{limit}} maandelijkse credits",
         "unlimitedCredits": "Onbeperkte credits",
         "translated": "{{count}} vertaald",
         "voice": "{{count}} stem",
         "personalShared": "({{personal}} persoonlijk + {{shared}} gedeeld) van {{limit}} limiet",
-        "ofLimit": "van {{limit}} limiet",
         "gbLimit": "van {{limit}} GB limiet",
         "recentActivity": "Recente activiteit",
         "time": "Tijd",
         "tokens": "Tokens",
         "credits": "Credits",
         "language": "Taal",
-        "yourFeatures": "Jouw functies",
         "plans": "Abonnementen",
         "currentPlan": "Huidig abonnement",
         "contactSales": "Contact verkoop",
-        "queriesPerDay": "{{count}} zoekopdrachten/dag",
-        "maxDocuments": "{{count}} documenten",
         "maxStorage": "{{count}} GB opslag",
         "creditsPerMonth": "{{count}} credits/maand",
-        "featureGraphrag": "Evidoc Search",
         "featureAdvancedAnalytics": "Geavanceerde analyses",
-        "featureCustomModels": "Aangepaste modellen",
         "featureApiAccess": "API-toegang",
-        "featurePrioritySupport": "Prioriteitsondersteuning",
-        "featureSso": "SSO-integratie",
-        "featureCustomBranding": "Eigen huisstijl"
+        "featureCentralizedBilling": "Gecentraliseerde facturering",
+        "featureAuditLogs": "Auditlogboeken"
     },
     "admin": {
         "signInRequired": "Inloggen vereist",
@@ -335,5 +332,12 @@
         "plan": "Abonnement",
         "lastActive": "Laatst actief",
         "noUserActivity": "Nog geen gebruikersactiviteit. Gegevens verschijnen zodra analyses zijn verbonden."
+    },
+    "folderSelector": {
+        "label": "Kennisbank:",
+        "placeholder": "Selecteer een kennisbank…",
+        "noFolders": "Nog geen geanalyseerde mappen",
+        "loadError": "Could not load folders",
+        "demo": "Demo"
     }
 }

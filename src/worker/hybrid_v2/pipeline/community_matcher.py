@@ -184,17 +184,37 @@ class CommunityMatcher:
             group_id=self.group_id,
         )
         return True
-    
+
+    async def get_all_communities(self) -> List[Dict[str, Any]]:
+        """Return all loaded communities (no filtering).
+
+        Used by Route 6 when the corpus is small enough to LLM-rate every
+        community instead of pre-filtering by embedding similarity.
+        """
+        if not self._loaded:
+            await self.load_communities()
+        return list(self._communities)
+
     async def match_communities(
         self,
         query: str,
-        top_k: int = 3
+        top_k: int = 3,
+        *,
+        relative_threshold: float | None = None,
+        max_k: int | None = None,
+        folder_id: Optional[str] = None,
     ) -> List[Tuple[Dict[str, Any], float]]:
         """Find communities most relevant to the query via embedding similarity.
 
         Args:
             query: The user's thematic query.
-            top_k: Number of communities to return.
+            top_k: Hard cap on communities when *relative_threshold* is not set.
+            relative_threshold: When set (0-1), include all communities whose
+                similarity is >= *relative_threshold* × best_score, up to
+                *max_k*.  Overrides *top_k*.
+            max_k: Safety cap when using *relative_threshold* (default 10).
+            folder_id: Per-query folder scope override.  When provided, takes
+                priority over ``self.folder_id`` (pipeline default).
 
         Returns:
             List of (community_data, similarity_score) tuples, ordered by
@@ -222,13 +242,18 @@ class CommunityMatcher:
                 "_ensure_embeddings must have failed — check VOYAGE_API_KEY."
             )
 
-        results = await self._semantic_match(query, top_k)
+        results = await self._semantic_match(
+            query, top_k, relative_threshold=relative_threshold, max_k=max_k,
+        )
 
         # Post-filter: prune communities whose entities have no content
         # in the target folder.  Only runs when folder_id is set AND we
         # have a Neo4j service for the verification query.
-        if results and self.folder_id is not None and self.neo4j_service:
-            results = await self._filter_communities_by_folder(results)
+        effective_folder = folder_id if folder_id is not None else self.folder_id
+        if results and effective_folder is not None and self.neo4j_service:
+            results = await self._filter_communities_by_folder(
+                results, folder_id=effective_folder,
+            )
 
         if not results:
             logger.info(
@@ -241,9 +266,17 @@ class CommunityMatcher:
     async def _semantic_match(
         self,
         query: str,
-        top_k: int
+        top_k: int,
+        *,
+        relative_threshold: float | None = None,
+        max_k: int | None = None,
     ) -> List[Tuple[Dict[str, Any], float]]:
-        """Match using embedding similarity."""
+        """Match using embedding similarity.
+
+        When *relative_threshold* is set, all communities whose similarity
+        >= best_score × relative_threshold are returned (up to *max_k*).
+        Otherwise the classic hard *top_k* slice is used.
+        """
         query_embedding = await self._get_embedding(query)
         if not query_embedding:
             raise RuntimeError(
@@ -287,16 +320,30 @@ class CommunityMatcher:
                 "Community embeddings are likely from a different model than the query embedder."
             )
 
+        # Adaptive selection: keep all communities within relative_threshold
+        # of the top score, capped by max_k.  Falls back to hard top_k.
+        if relative_threshold is not None and meaningful:
+            best_score = meaningful[0][1]
+            cutoff = best_score * relative_threshold
+            _max = max_k or 10
+            selected = [(c, s) for c, s in meaningful if s >= cutoff][:_max]
+        else:
+            selected = meaningful[:top_k]
+
         logger.info("semantic_community_match",
                    query=query[:50],
-                   top_scores=[round(s, 4) for _, s in meaningful[:5]],
-                   top_matches=[c.get("title", c.get("id", "?"))[:30] for c, _ in meaningful[:top_k]])
+                   mode="adaptive" if relative_threshold else "top_k",
+                   cutoff=round(meaningful[0][1] * relative_threshold, 4) if relative_threshold and meaningful else None,
+                   selected_count=len(selected),
+                   top_scores=[round(s, 4) for _, s in meaningful[:6]],
+                   top_matches=[c.get("title", c.get("id", "?"))[:40] for c, _ in selected])
 
-        return meaningful[:top_k]
+        return selected
 
     async def _filter_communities_by_folder(
         self,
         candidates: List[Tuple[Dict[str, Any], float]],
+        folder_id: Optional[str] = None,
     ) -> List[Tuple[Dict[str, Any], float]]:
         """Remove communities that have no member entities in the target folder.
 
@@ -305,8 +352,12 @@ class CommunityMatcher:
         belongs to the target folder.  Communities that fail this check are
         pruned from the candidate list.
 
-        Only called when ``self.folder_id is not None``.
+        Args:
+            candidates: (community_dict, score) tuples to filter.
+            folder_id: Per-query folder scope.  Falls back to ``self.folder_id``
+                when ``None``.
         """
+        effective_folder = folder_id if folder_id is not None else self.folder_id
         community_ids = [
             c.get("id", c.get("title", ""))
             for c, _ in candidates
@@ -314,6 +365,7 @@ class CommunityMatcher:
         if not community_ids:
             return candidates
 
+        # IN_FOLDER relationships not created during indexing; group_id provides isolation
         query = """
         UNWIND $community_ids AS cid
         MATCH (c:Community {id: cid})
@@ -321,10 +373,9 @@ class CommunityMatcher:
         MATCH (c)<-[:BELONGS_TO]-(e:Entity)
               <-[:MENTIONS]-(tc:Sentence)
               -[:IN_DOCUMENT]->(d:Document)
-              -[:IN_FOLDER]->(f:Folder {id: $folder_id})
         WHERE tc.group_id IN $group_ids
           AND d.group_id IN $group_ids
-          AND f.group_id IN $group_ids
+          
         RETURN DISTINCT cid
         """
         try:
@@ -333,7 +384,7 @@ class CommunityMatcher:
                     query,
                     community_ids=community_ids,
                     group_ids=self.group_ids,
-                    folder_id=self.folder_id,
+                    folder_id=effective_folder,
                 )
                 records = await result.data()
 
@@ -347,7 +398,7 @@ class CommunityMatcher:
             if len(filtered) < before:
                 logger.info(
                     "community_folder_filter",
-                    folder_id=self.folder_id,
+                    folder_id=effective_folder,
                     before=before,
                     after=len(filtered),
                     pruned=before - len(filtered),
@@ -357,6 +408,33 @@ class CommunityMatcher:
             logger.warning("community_folder_filter_failed", error=str(exc))
             # On failure, return unfiltered to avoid data loss
             return candidates
+
+    async def filter_communities_by_folder(
+        self,
+        communities: List[Dict[str, Any]],
+        folder_id: str,
+    ) -> List[Dict[str, Any]]:
+        """Public API to prune communities that have no content in a folder.
+
+        Wraps ``_filter_communities_by_folder`` for callers that hold a plain
+        list of community dicts (without scores), e.g. Route 6's "rate all"
+        path.  Returns the filtered list preserving original order.
+
+        Args:
+            communities: Community dicts (must have 'id' field).
+            folder_id: Target folder to check against.
+
+        Returns:
+            Filtered community list.  On failure, returns the original list.
+        """
+        if not self.neo4j_service or not communities:
+            return communities
+        # Wrap as (dict, score) tuples for the internal method
+        as_tuples = [(c, 1.0) for c in communities]
+        filtered_tuples = await self._filter_communities_by_folder(
+            as_tuples, folder_id=folder_id,
+        )
+        return [c for c, _ in filtered_tuples]
 
     async def _get_embedding(self, text: str) -> Optional[List[float]]:
         """Get embedding for text using the configured embedding client."""
@@ -372,7 +450,7 @@ class CommunityMatcher:
             return await self.embedding_client.aget_text_embedding(text)
         elif hasattr(self.embedding_client, 'embed_query'):
             # VoyageEmbedService / LangChain style (sync)
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             return await loop.run_in_executor(
                 None, self.embedding_client.embed_query, text
             )
@@ -392,7 +470,7 @@ class CommunityMatcher:
 
         # VoyageEmbedService has embed_query_batch
         if hasattr(self.embedding_client, 'embed_query_batch'):
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             results = await loop.run_in_executor(
                 None, self.embedding_client.embed_query_batch, texts
             )

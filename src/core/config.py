@@ -114,7 +114,7 @@ class Settings(BaseSettings):
     SKELETON_SIMILARITY_THRESHOLD: float = 0.45  # Min cosine similarity for sentence retrieval
     SKELETON_MIN_SENTENCE_CHARS: int = 20  # Minimum characters for a valid sentence (lowered from 30 — was dropping informative KVP lines like "Phone: (813) 902-4455")
     SKELETON_MIN_SENTENCE_WORDS: int = 2  # Minimum words for a valid sentence (lowered from 3 — was dropping 2-word KVP lines like "Email: user@example.com")
-    SKELETON_LLM_SENTENCE_REVIEW: bool = True  # Enable bundled LLM post-review of sentence boundaries (gpt-4.1, zero-risk verified)
+    SKELETON_LLM_SENTENCE_REVIEW: bool = False  # Disabled: non-deterministic splits break index reproducibility
     
     # Phase 2: Sparse sentence-to-sentence RELATED_TO edges
     # Separate from GDS KNN (Entity/Figure/KVP/Chunk). Bounded: threshold 0.86, max k=2.
@@ -182,6 +182,20 @@ class Settings(BaseSettings):
     AURA_DS_CLIENT_ID: Optional[str] = None
     AURA_DS_CLIENT_SECRET: Optional[str] = None
     
+    # Local graph algorithms threshold: when entity count is below this value,
+    # run KNN/Louvain/PageRank in-process (numpy + networkx) instead of
+    # provisioning an Aura GDS session. Eliminates 60-120s GDS overhead for
+    # small graphs. Set to 0 to always use GDS sessions.
+    GDS_LOCAL_THRESHOLD: int = 2000
+
+    # Pipeline concurrency limits (tune per deployment tier)
+    NEO4J_WRITE_CONCURRENCY: int = 3       # Max concurrent Neo4j write sessions
+    OPENIE_LLM_CONCURRENCY: int = 8        # Max concurrent OpenIE LLM calls (gpt-4.1 50K TPM)
+    COMMUNITY_LLM_CONCURRENCY: int = 5     # Max concurrent community summary LLM calls
+    SECTION_LLM_CONCURRENCY: int = 5       # Max concurrent section summary LLM calls
+    LLM_TIMEOUT_SECONDS: int = 90          # Timeout for individual LLM achat() calls
+    LLM_MAX_RETRIES: int = 3               # Max retries for LLM achat() calls
+    
     # Cosmos DB (Schema Vault)
     COSMOS_ENDPOINT: Optional[str] = None
     COSMOS_KEY: Optional[str] = None
@@ -215,9 +229,17 @@ class Settings(BaseSettings):
     # Azure Translator (query translation for multilingual chat)
     AZURE_TRANSLATOR_ENDPOINT: Optional[str] = None
     AZURE_TRANSLATOR_REGION: str = "swedencentral"
+    AZURE_TRANSLATOR_RESOURCE_ID: Optional[str] = None
 
     # Azure Key Vault (optional — secrets auto-loaded at module import when set)
     AZURE_KEY_VAULT_URL: Optional[str] = None
+
+    # Stripe Billing (opt-in — set keys to enable self-service plan upgrades)
+    STRIPE_SECRET_KEY: Optional[str] = None
+    STRIPE_PUBLISHABLE_KEY: Optional[str] = None
+    STRIPE_WEBHOOK_SECRET: Optional[str] = None
+    STRIPE_PRICE_PRO: Optional[str] = None          # price_xxx from Stripe Dashboard
+    STRIPE_PRICE_PRO_PLUS: Optional[str] = None      # price_xxx from Stripe Dashboard
 
     # Authentication & Security
     AUTH_TYPE: str = "B2B"  # B2B (Azure AD with groups) or B2C (Azure AD B2C with oid)
@@ -225,6 +247,7 @@ class Settings(BaseSettings):
     ALLOW_LEGACY_GROUP_HEADER: bool = False  # Allow X-Group-ID header (deprecated, only for local dev)
     GROUP_ID_OVERRIDE: Optional[str] = Field(default=None)  # Optional fixed group_id override for auth testing
     GLOBAL_GROUP_ID: str = "__global__"  # Sentinel group_id for shared/public documents
+    DEMO_GROUP_ID: Optional[str] = Field(default=None)  # Group_id for demo/sample documents (shown with Demo option)
     
     # Performance & Rate Limiting
     # Set to 1 for serial processing (10K TPM), 4 for parallel (50K+ TPM)

@@ -55,15 +55,15 @@
         "stopStreaming": "Parar transmissão",
         "askWithVoice": "Faça uma pergunta com voz",
         "stopRecording": "Parar de gravar a pergunta",
-        "showSupportingContent": "Mostrar conteúdo de suporte",
         "speakAnswer": "Falar a resposta",
         "info": "Info",
         "save": "Salvar",
         "copy": "Copiar",
-        "copied": "Copiado!"
+        "copied": "Copiado!",
+        "showOriginal": "Mostrar resposta original",
+        "showTranslated": "Mostrar resposta traduzida"
     },
     "headerTexts": {
-        "supportingContent": "Conteúdo de suporte",
         "citation": "Citação"
     },
     "labels": {
@@ -231,7 +231,12 @@
         "deleteAnalysisConfirm": "Isso removerá permanentemente todos os dados de análise (grafo, entidades, embeddings) desta pasta. Os arquivos originais serão mantidos. Continuar?",
         "analysisDeleted": "Dados de análise excluídos com sucesso",
         "deleteAnalysisFailed": "Falha ao excluir análise: {{message}}",
-        "storageReminder": "💡 Dados de análise usam armazenamento. Exclua a análise quando não for mais necessária para economizar custos."
+        "storageReminder": "💡 Dados de análise usam armazenamento. Exclua a análise quando não for mais necessária para economizar custos.",
+        "zoneAnalysisResults": "Resultados da análise",
+        "zoneAnalyzed": "Analisados",
+        "zoneFolders": "Pastas",
+        "expandZone": "Expandir",
+        "collapseZone": "Recolher"
     },
     "viewer": {
         "loadingFile": "Carregando arquivo",
@@ -279,35 +284,27 @@
         "creditsUsed": "Créditos utilizados",
         "documents": "Documentos",
         "storageUsed": "Armazenamento utilizado",
-        "dailyLimit": "de {{limit}} limite diário",
         "monthlyLimit": "de {{limit}} limite mensal",
         "monthlyCredits": "de {{limit}} créditos mensais",
         "unlimitedCredits": "Créditos ilimitados",
         "translated": "{{count}} traduzidos",
         "voice": "{{count}} voz",
         "personalShared": "({{personal}} pessoais + {{shared}} compartilhados) de {{limit}} limite",
-        "ofLimit": "de {{limit}} limite",
         "gbLimit": "de {{limit}} GB limite",
         "recentActivity": "Atividade recente",
         "time": "Hora",
         "tokens": "Tokens",
         "credits": "Créditos",
         "language": "Idioma",
-        "yourFeatures": "Suas funcionalidades",
         "plans": "Planos",
         "currentPlan": "Plano atual",
         "contactSales": "Contatar vendas",
-        "queriesPerDay": "{{count}} consultas/dia",
-        "maxDocuments": "{{count}} documentos",
         "maxStorage": "{{count}} GB armazenamento",
         "creditsPerMonth": "{{count}} créditos/mês",
-        "featureGraphrag": "Evidoc Search",
         "featureAdvancedAnalytics": "Análises avançadas",
-        "featureCustomModels": "Modelos personalizados",
         "featureApiAccess": "Acesso à API",
-        "featurePrioritySupport": "Suporte prioritário",
-        "featureSso": "Integração SSO",
-        "featureCustomBranding": "Marca personalizada"
+        "featureCentralizedBilling": "Faturamento centralizado",
+        "featureAuditLogs": "Logs de auditoria"
     },
     "admin": {
         "signInRequired": "Login necessário",
@@ -335,5 +332,12 @@
         "plan": "Plano",
         "lastActive": "Última atividade",
         "noUserActivity": "Ainda não há dados de atividade de usuários. Os dados aparecerão quando as análises estiverem conectadas."
+    },
+    "folderSelector": {
+        "label": "Base de conhecimento:",
+        "placeholder": "Selecionar uma base de conhecimento…",
+        "noFolders": "Nenhuma pasta analisada ainda",
+        "loadError": "Could not load folders",
+        "demo": "Demo"
     }
 }

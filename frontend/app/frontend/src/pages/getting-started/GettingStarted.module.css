@@ -1,0 +1,189 @@
+.container {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 2rem 1.5rem 4rem;
+    overflow-y: auto;
+    max-height: calc(100vh - 5rem);
+}
+
+/* ── Hero ── */
+
+.hero {
+    text-align: center;
+    max-width: 640px;
+    margin-bottom: 2.5rem;
+}
+
+.heroTitle {
+    font-size: 2rem;
+    font-weight: 700;
+    margin: 0 0 0.5rem;
+    color: var(--colorNeutralForeground1);
+}
+
+.heroSubtitle {
+    font-size: 1.05rem;
+    line-height: 1.6;
+    color: var(--colorNeutralForeground2);
+    margin: 0;
+}
+
+/* ── Steps ── */
+
+.stepsSection {
+    width: 100%;
+    max-width: 860px;
+    margin-bottom: 2.5rem;
+}
+
+.sectionTitle {
+    font-size: 1.25rem;
+    font-weight: 600;
+    margin: 0 0 1.25rem;
+    color: var(--colorNeutralForeground1);
+}
+
+.stepsGrid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1.25rem;
+}
+
+.stepCard {
+    position: relative;
+    background: var(--colorNeutralBackground1);
+    border: 1px solid var(--colorNeutralStroke1);
+    border-radius: 12px;
+    padding: 1.5rem 1.25rem 1.25rem;
+    transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.stepCard:hover {
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+    transform: translateY(-2px);
+}
+
+.stepNumber {
+    position: absolute;
+    top: -12px;
+    left: 16px;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: var(--colorBrandBackground);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.85rem;
+    font-weight: 700;
+}
+
+.stepIcon {
+    color: var(--colorBrandForeground1);
+    margin-bottom: 0.5rem;
+}
+
+.stepTitle {
+    font-size: 1rem;
+    font-weight: 600;
+    margin: 0 0 0.5rem;
+    color: var(--colorNeutralForeground1);
+}
+
+.stepDescription {
+    font-size: 0.875rem;
+    line-height: 1.5;
+    color: var(--colorNeutralForeground2);
+    margin: 0;
+}
+
+/* ── Tips ── */
+
+.tipsSection {
+    width: 100%;
+    max-width: 860px;
+    margin-bottom: 2.5rem;
+}
+
+.tipsGrid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1rem;
+}
+
+.tipCard {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    background: var(--colorNeutralBackground1);
+    border: 1px solid var(--colorNeutralStroke1);
+    border-radius: 10px;
+    padding: 1rem 1.25rem;
+}
+
+.tipEmoji {
+    font-size: 1.25rem;
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+
+.tipText {
+    font-size: 0.875rem;
+    line-height: 1.5;
+    color: var(--colorNeutralForeground2);
+    margin: 0;
+}
+
+/* ── Actions ── */
+
+.actions {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+
+/* ── First-visit banner (used in Chat.tsx) ── */
+
+.welcomeBanner {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: var(--colorBrandBackground2);
+    border: 1px solid var(--colorBrandStroke1);
+    border-radius: 10px;
+    padding: 12px 20px;
+    margin-bottom: 1rem;
+    max-width: 640px;
+    width: 100%;
+    animation: fadeIn 0.3s ease-out;
+}
+
+.welcomeBannerText {
+    flex: 1;
+    font-size: 0.875rem;
+    color: var(--colorNeutralForeground1);
+    margin: 0;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-8px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Responsive ── */
+
+@media (max-width: 768px) {
+    .stepsGrid {
+        grid-template-columns: 1fr;
+    }
+    .tipsGrid {
+        grid-template-columns: 1fr;
+    }
+    .heroTitle {
+        font-size: 1.5rem;
+    }
+}

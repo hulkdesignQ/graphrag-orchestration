@@ -1,4 +1,4 @@
-import { IHistoryProvider, Answers, HistoryProviderOptions, HistoryMetaData } from "./IProvider";
+import { IHistoryProvider, Answers, HistoryProviderOptions, HistoryMetaData, HistoryItemData } from "./IProvider";
 import { deleteChatHistoryApi, getChatHistoryApi, getChatHistoryListApi, postChatHistoryApi } from "../../api";
 
 export class CosmosDBProvider implements IHistoryProvider {
@@ -34,14 +34,14 @@ export class CosmosDBProvider implements IHistoryProvider {
         }
     }
 
-    async addItem(id: string, answers: Answers, idToken?: string): Promise<void> {
-        await postChatHistoryApi({ id, answers }, idToken || "");
+    async addItem(id: string, answers: Answers, idToken?: string, folder_id?: string): Promise<void> {
+        await postChatHistoryApi({ id, answers, folder_id }, idToken || "");
         return;
     }
 
-    async getItem(id: string, idToken?: string): Promise<Answers | null> {
+    async getItem(id: string, idToken?: string): Promise<HistoryItemData | null> {
         const response = await getChatHistoryApi(id, idToken || "");
-        return response.answers || null;
+        return response.answers ? { answers: response.answers, folder_id: response.folder_id } : null;
     }
 
     async deleteItem(id: string, idToken?: string): Promise<void> {

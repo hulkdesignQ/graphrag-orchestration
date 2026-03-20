@@ -106,6 +106,7 @@ export type ResponseContext = {
     followup_questions: string[] | null;
     thoughts: Thoughts[];
     answer?: string;
+    original_answer?: string;
 };
 
 export type ChatAppResponseOrError = {
@@ -185,4 +186,5 @@ export type HistoryApiResponse = {
     id: string;
     entra_oid: string;
     answers: any;
+    folder_id?: string;
 };

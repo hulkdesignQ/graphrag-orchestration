@@ -34,7 +34,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import structlog
 
 from src.core.config import settings
-from .base import BaseRouteHandler, Citation, RouteResult
+from .base import BaseRouteHandler, Citation, RouteResult, rerank_with_retry, make_voyage_client
 from ..services.neo4j_retry import retry_session
 
 logger = structlog.get_logger(__name__)
@@ -148,7 +148,6 @@ def _get_voyage_service():
         return _voyage_service
     with _voyage_init_lock:
         if not _voyage_init_attempted:
-            _voyage_init_attempted = True
             try:
                 from src.core.config import settings
 
@@ -156,10 +155,14 @@ def _get_voyage_service():
                     from src.worker.hybrid_v2.embeddings.voyage_embed import VoyageEmbedService
 
                     _voyage_service = VoyageEmbedService()
+                    _voyage_init_attempted = True
                     logger.info("route7_voyage_service_initialized")
                 else:
+                    # Missing API key is a permanent config issue — don't retry
+                    _voyage_init_attempted = True
                     logger.warning("route7_voyage_service_no_api_key")
             except Exception as e:
+                # Transient failure — allow retry on next call
                 logger.warning("route7_voyage_service_init_failed", error=str(e))
     return _voyage_service
 
@@ -186,10 +189,11 @@ class HippoRAG2Handler(BaseRouteHandler):
     # adjusts parameters to match the query type's needs.  Without query_mode
     # (backward-compatible default), all values come from env vars as before.
     QUERY_MODE_PRESETS: Dict[str, Dict[str, Any]] = {
-        "local_search": {              # Factual extraction — fast & concise
+        "local_search": {              # Factual extraction — focused retrieval
             "ppr_passage_top_k": 5,
-            "prompt_variant": "v1_concise",
-            "max_tokens": 150,
+            "prompt_variant": None,    # use default (v10_comprehensive) to preserve [N] citations
+            "max_tokens": None,        # use default — v1_concise's 150 was too low for cited answers
+            "sentence_window": False,  # skip ±1 enrichment — keeps table-cell citations precise
         },
         "global_search": {             # Thematic/community-level — needs breadth
             "ppr_passage_top_k": 15,
@@ -200,6 +204,14 @@ class HippoRAG2Handler(BaseRouteHandler):
             "ppr_passage_top_k": 20,
             "prompt_variant": None,
             "max_tokens": None,
+        },
+        "community_search": {          # Community-dominant (abstract themes, exhaustive)
+            "ppr_passage_top_k": 100,  # wider net — dynamic reranker handles filtering
+            "prompt_variant": None,
+            "max_tokens": None,
+            "community_passage_seeds": True,   # inject Community→Entity→Sentence into passage seeds
+            "community_guided_instruction": True,  # guide embed + reranker with community summaries
+            "rerank_dynamic_cutoff": True,  # relevance-score threshold instead of fixed top-K
         },
     }
 
@@ -234,7 +246,7 @@ class HippoRAG2Handler(BaseRouteHandler):
                 os.getenv("ROUTE7_PASSAGE_NODE_WEIGHT", "0.05")
             )
             synonym_threshold = float(
-                os.getenv("ROUTE7_SYNONYM_THRESHOLD", "0.65")
+                os.getenv("ROUTE7_SYNONYM_THRESHOLD", "0.70")
             )
 
             # Load triple store and PPR graph in parallel
@@ -276,8 +288,13 @@ class HippoRAG2Handler(BaseRouteHandler):
         language: Optional[str] = None,
         query_mode: Optional[str] = None,
         folder_id: Optional[str] = None,
+        config_overrides: Optional[Dict[str, str]] = None,
+        user_id: Optional[str] = None,
     ) -> RouteResult:
         """Execute Route 7: True HippoRAG 2 retrieval pipeline."""
+        # Resolve per-query folder scope (overrides pipeline default)
+        folder_id = self._resolve_folder_id(folder_id)
+
         enable_timings = os.getenv(
             "ROUTE7_RETURN_TIMINGS", "0"
         ).strip().lower() in {"1", "true", "yes"}
@@ -286,70 +303,129 @@ class HippoRAG2Handler(BaseRouteHandler):
 
         # Apply query_mode preset (router-adaptive parameters)
         preset = self.QUERY_MODE_PRESETS.get(query_mode or "", {})
+        _co = config_overrides or {}
 
-        # Config from env, with preset overrides
-        triple_top_k = int(os.getenv("ROUTE7_TRIPLE_TOP_K", "15"))
-        dpr_top_k = int(os.getenv("ROUTE7_DPR_TOP_K", "50"))  # upstream default; set -1 to disable
-        dpr_sentence_top_k = int(os.getenv("ROUTE7_DPR_SENTENCE_TOP_K", "0"))
-        ppr_damping = float(os.getenv("ROUTE7_DAMPING", "0.5"))
-        passage_node_weight = float(os.getenv("ROUTE7_PASSAGE_NODE_WEIGHT", "0.05"))
-        ppr_passage_top_k = preset.get("ppr_passage_top_k") or int(
-            os.getenv("ROUTE7_PPR_PASSAGE_TOP_K", "30")
-        )
-        # Reranker: disabled by default to match upstream HippoRAG 2 (no passage reranker)
-        rerank_enabled = os.getenv(
-            "ROUTE7_RERANK", "0"
-        ).strip().lower() in {"1", "true", "yes"}
-        rerank_top_k = int(os.getenv("ROUTE7_RERANK_TOP_K", "30"))
+        # Config from env, with per-request overrides taking precedence
+        def _ov(key: str, env_var: str, default: str) -> str:
+            """Return config_overrides[key] → env_var → default."""
+            return _co.get(key) or os.getenv(env_var, default)
+
+        triple_top_k = int(_ov("triple_top_k", "ROUTE7_TRIPLE_TOP_K", "15"))
+        dpr_top_k = int(_ov("dpr_top_k", "ROUTE7_DPR_TOP_K", "50"))  # upstream default; set -1 to disable
+        dpr_sentence_top_k = int(_ov("dpr_sentence_top_k", "ROUTE7_DPR_SENTENCE_TOP_K", "0"))
+        ppr_damping = float(_ov("damping", "ROUTE7_DAMPING", "0.5"))
+        passage_node_weight = float(_ov("passage_node_weight", "ROUTE7_PASSAGE_NODE_WEIGHT", "0.05"))
+        ppr_passage_top_k = int(_ov(
+            "ppr_passage_top_k", "ROUTE7_PPR_PASSAGE_TOP_K",
+            str(preset.get("ppr_passage_top_k", 50))
+        ))
+        # Reranker: enabled by default — cross-encoder on PPR output improves Q-D10 accuracy
+        rerank_enabled = _ov("rerank", "ROUTE7_RERANK", "1").strip().lower() in {"1", "true", "yes"}
+        rerank_top_k = int(_ov("rerank_top_k", "ROUTE7_RERANK_TOP_K", "30"))
         # Corpus-wide reranker: cross-encoder on ALL passages as parallel retrieval channel
-        rerank_all_enabled = os.getenv(
-            "ROUTE7_RERANK_ALL", "0"
-        ).strip().lower() in {"1", "true", "yes"}
-        rerank_all_top_k = int(os.getenv("ROUTE7_RERANK_ALL_TOP_K", "50"))
+        rerank_all_enabled = _ov("rerank_all", "ROUTE7_RERANK_ALL", "0").strip().lower() in {"1", "true", "yes"}
+        rerank_all_top_k = int(_ov("rerank_all_top_k", "ROUTE7_RERANK_ALL_TOP_K", "50"))
 
         # Preset can override prompt_variant (only if caller didn't explicitly set one)
         if prompt_variant is None and preset.get("prompt_variant"):
             prompt_variant = preset["prompt_variant"]
         # Env var default for hipporag2_search (when no preset/caller override)
         if prompt_variant is None:
-            prompt_variant = os.getenv("ROUTE7_PROMPT_VARIANT", "v3_keypoints") or None
+            prompt_variant = os.getenv("ROUTE7_PROMPT_VARIANT", "v10_comprehensive") or None
 
         # Synthesis max_tokens cap (only local_search preset sets this)
         synthesis_max_tokens: Optional[int] = preset.get("max_tokens")
 
         # Phase 2 feature flags
-        structural_seeds_enabled = os.getenv(
-            "ROUTE7_STRUCTURAL_SEEDS", "0"
+        structural_seeds_enabled = _ov(
+            "structural_seeds", "ROUTE7_STRUCTURAL_SEEDS", "0"
         ).strip().lower() in {"1", "true", "yes"}
-        community_seeds_enabled = os.getenv(
-            "ROUTE7_COMMUNITY_SEEDS", "0"
+        community_seeds_enabled = _ov(
+            "community_seeds", "ROUTE7_COMMUNITY_SEEDS", "0"
         ).strip().lower() in {"1", "true", "yes"}
-        sentence_search_enabled = os.getenv(
-            "ROUTE7_SENTENCE_SEARCH", "0"
+        sentence_search_enabled = _ov(
+            "sentence_search", "ROUTE7_SENTENCE_SEARCH", "0"
         ).strip().lower() in {"1", "true", "yes"}
+
+        # Community passage seeding: Community→Entity→Sentence IDs injected
+        # into passage_seeds for PPR.  Activated by community_search preset
+        # or env var.  Gives community-dominant queries thematic coverage.
+        community_passage_seeds_enabled = _ov(
+            "community_passage_seeds", "ROUTE7_COMMUNITY_PASSAGE_SEEDS",
+            "1" if preset.get("community_passage_seeds", False) else "0"
+        ).strip().lower() in {"1", "true", "yes"}
+        community_sentence_weight = float(
+            _ov("community_sentence_weight", "ROUTE7_COMMUNITY_SENTENCE_WEIGHT", "0.03")
+        )
+
+        # Adaptive community selection: instead of a hard top-k, include all
+        # communities scoring >= ratio × best_score, up to max_k.
+        community_adaptive_ratio = float(
+            _ov("community_adaptive_ratio", "ROUTE7_COMMUNITY_ADAPTIVE_RATIO", "0.85")
+        )
+        community_max_k = int(
+            _ov("community_max_k", "ROUTE7_COMMUNITY_MAX_K", "10")
+        )
+
+        # Community-guided instruction: use community summaries to steer
+        # embedding and reranker queries for thematic precision.
+        community_guided_enabled = _ov(
+            "community_guided_instruction", "ROUTE7_COMMUNITY_GUIDED_INSTRUCTION",
+            "1" if preset.get("community_guided_instruction", False) else "0"
+        ).strip().lower() in {"1", "true", "yes"}
+
+        # Dynamic relevance cutoff: use reranker relevance_score instead
+        # of fixed top-K.  Keeps all passages above threshold, drops noise.
+        rerank_dynamic_cutoff = _ov(
+            "rerank_dynamic_cutoff", "ROUTE7_RERANK_DYNAMIC_CUTOFF",
+            "1" if preset.get("rerank_dynamic_cutoff", True) else "0"
+        ).strip().lower() in {"1", "true", "yes"}
+        rerank_relevance_threshold = float(
+            _ov("rerank_relevance_threshold", "ROUTE7_RERANK_RELEVANCE_THRESHOLD", "0.15")
+        )
+        rerank_dynamic_max = int(
+            _ov("rerank_dynamic_max", "ROUTE7_RERANK_DYNAMIC_MAX", "80")
+        )
+
+        # Semantic pre-filter: use embedding cosine similarity to densify
+        # PPR candidates before cross-encoder reranking.  Reduces noise and
+        # keeps context tight so the LLM enumerates all relevant details.
+        semantic_prefilter_enabled = _ov(
+            "semantic_prefilter", "ROUTE7_SEMANTIC_PREFILTER", "0"
+        ).strip().lower() in {"1", "true", "yes"}
+        semantic_prefilter_top_n = int(
+            _ov("semantic_prefilter_top_n", "ROUTE7_SEMANTIC_PREFILTER_TOP_N", "30")
+        )
 
         # Cross-encoder passage seeding: rerank ALL passages and feed top results
         # into passage_seeds BEFORE PPR, so the graph walk starts from semantically
         # relevant passages (catches graph-isolated sentences that DPR misses).
-        semantic_passage_seeds_enabled = os.getenv(
-            "ROUTE7_SEMANTIC_PASSAGE_SEEDS", "1"
+        semantic_passage_seeds_enabled = _ov(
+            "semantic_passage_seeds", "ROUTE7_SEMANTIC_PASSAGE_SEEDS", "1"
         ).strip().lower() in {"1", "true", "yes"}
-        semantic_seed_top_k = int(os.getenv("ROUTE7_SEMANTIC_SEED_TOP_K", "20"))
-        semantic_seed_weight = float(os.getenv("ROUTE7_SEMANTIC_SEED_WEIGHT", "0.05"))
+        semantic_seed_top_k = int(_ov("semantic_seed_top_k", "ROUTE7_SEMANTIC_SEED_TOP_K", "20"))
+        semantic_seed_weight = float(_ov("semantic_seed_weight", "ROUTE7_SEMANTIC_SEED_WEIGHT", "0.05"))
 
         # Triple reranking config (read early for logging)
-        triple_rerank_enabled = os.getenv(
-            "ROUTE7_TRIPLE_RERANK", "1"
+        triple_rerank_enabled = _ov(
+            "triple_rerank", "ROUTE7_TRIPLE_RERANK", "1"
         ).strip().lower() in {"1", "true", "yes"}
-        triple_candidates_k = int(os.getenv("ROUTE7_TRIPLE_CANDIDATES_K", "500"))
+        triple_candidates_k = int(_ov("triple_candidates_k", "ROUTE7_TRIPLE_CANDIDATES_K", "500"))
 
         # PPR coverage fixes (ref: standard PageRank literature)
-        ppr_dangling = os.getenv(
-            "ROUTE7_PPR_DANGLING", "0"
+        ppr_dangling = _ov(
+            "ppr_dangling", "ROUTE7_PPR_DANGLING", "0"
         ).strip().lower() in {"1", "true", "yes"}
-        ppr_self_loops = float(os.getenv("ROUTE7_PPR_SELF_LOOPS", "0.0"))
-        ppr_hub_deval = os.getenv(
-            "ROUTE7_PPR_HUB_DEVAL", "0"
+        ppr_self_loops = float(_ov("ppr_self_loops", "ROUTE7_PPR_SELF_LOOPS", "0.0"))
+        ppr_hub_deval = _ov(
+            "ppr_hub_deval", "ROUTE7_PPR_HUB_DEVAL", "0"
+        ).strip().lower() in {"1", "true", "yes"}
+
+        # Sentence window: preset provides the default; config_overrides / env
+        # can still override (e.g. re-enable windowing for local_search).
+        sentence_window_enabled = _ov(
+            "sentence_window", "ROUTE7_SENTENCE_WINDOW",
+            "1" if preset.get("sentence_window", True) else "0"
         ).strip().lower() in {"1", "true", "yes"}
 
         logger.info(
@@ -360,11 +436,14 @@ class HippoRAG2Handler(BaseRouteHandler):
             triple_top_k=triple_top_k,
             dpr_top_k=dpr_top_k,
             rerank_enabled=rerank_enabled,
+            rerank_top_k=rerank_top_k,
             triple_rerank=triple_rerank_enabled,
             triple_candidates_k=triple_candidates_k if triple_rerank_enabled else triple_top_k,
             query_mode=query_mode,
             ppr_passage_top_k=ppr_passage_top_k,
             prompt_variant=prompt_variant,
+            sentence_window=sentence_window_enabled,
+            config_overrides=bool(_co),
         )
 
         # ------------------------------------------------------------------
@@ -373,11 +452,76 @@ class HippoRAG2Handler(BaseRouteHandler):
         await self._ensure_initialized()
 
         # ------------------------------------------------------------------
+        # Step 0.5: Early community matching for guided instruction
+        #
+        # When community_guided_instruction is enabled, fetch the actual
+        # sentence texts from matched communities (Community→Entity→Sentence)
+        # and use them to guide the reranker.  Concrete sentences give the
+        # reranker specific content to match against, unlike abstract summaries.
+        # ------------------------------------------------------------------
+        community_guided_query = query  # default: unchanged
+        if community_guided_enabled and self.pipeline.community_matcher:
+            try:
+                t0_cg = time.perf_counter()
+                _cm = self.pipeline.community_matcher
+                _matched_tuples = await _cm.match_communities(
+                    query, relative_threshold=community_adaptive_ratio,
+                    max_k=community_max_k, folder_id=folder_id,
+                )
+                if _matched_tuples:
+                    community_ids = [
+                        c.get("id") for c, _s in _matched_tuples if c.get("id")
+                    ]
+                    if community_ids and self._async_neo4j:
+                        # Fetch top sentence texts from matched communities
+                        sent_cypher = """
+                        UNWIND $community_ids AS cid
+                        MATCH (e:Entity)-[:BELONGS_TO]->(c:Community {id: cid})
+                        WHERE c.group_id IN $group_ids AND e.group_id IN $group_ids
+                        MATCH (e)<-[:MENTIONS]-(s:Sentence)
+                        WHERE s.group_id IN $group_ids
+                        OPTIONAL MATCH (s)-[:IN_DOCUMENT]->(d:Document)
+                        WHERE d.group_id IN $group_ids
+                        RETURN DISTINCT s.text AS text, s.sent_index AS idx
+                        ORDER BY idx
+                        LIMIT 20
+                        """
+                        async with self._async_neo4j._get_session() as session:
+                            sent_result = await session.run(
+                                sent_cypher,
+                                community_ids=community_ids,
+                                group_ids=self.group_ids,
+                                folder_id=folder_id,
+                            )
+                            sent_records = await sent_result.data()
+                        sent_texts = [
+                            r["text"][:150] for r in sent_records
+                            if r.get("text")
+                        ]
+                        if sent_texts:
+                            community_instruction = (
+                                "Focus on passages covering: "
+                                + " | ".join(sent_texts)
+                                + " "
+                            )
+                            community_guided_query = community_instruction + query
+                            logger.info(
+                                "step_0.5_community_sentence_instruction",
+                                communities=len(community_ids),
+                                sentences=len(sent_texts),
+                                instruction_len=len(community_instruction),
+                                instruction_text=community_instruction[:500],
+                                elapsed_ms=int((time.perf_counter() - t0_cg) * 1000),
+                            )
+            except Exception as e:
+                logger.warning("community_guided_instruction_failed", error=str(e))
+
+        # ------------------------------------------------------------------
         # Step 1: Embed query
         # ------------------------------------------------------------------
         t0 = time.perf_counter()
         voyage_service = _get_voyage_service()
-        query_embedding = voyage_service.embed_query(query)
+        query_embedding = await asyncio.to_thread(voyage_service.embed_query, query)
         timings_ms["step_1_embed_ms"] = int((time.perf_counter() - t0) * 1000)
 
         # ------------------------------------------------------------------
@@ -398,7 +542,7 @@ class HippoRAG2Handler(BaseRouteHandler):
 
         # 2b. DPR passage search (sentence-level Small-to-Big)
         dpr_task = asyncio.create_task(
-            self._dpr_passage_search(query_embedding, dpr_top_k, dpr_sentence_top_k)
+            self._dpr_passage_search(query_embedding, dpr_top_k, dpr_sentence_top_k, folder_id=folder_id)
         )
 
         # 2c. Optional sentence search for evidence augmentation (Phase 2)
@@ -406,14 +550,19 @@ class HippoRAG2Handler(BaseRouteHandler):
         if sentence_search_enabled:
             sentence_top_k = int(os.getenv("ROUTE7_SENTENCE_TOP_K", "30"))
             sentence_task = asyncio.create_task(
-                self._retrieve_sentence_evidence(query, top_k=sentence_top_k)
+                self._retrieve_sentence_evidence(query, top_k=sentence_top_k, folder_id=folder_id)
             )
 
         # 2d. Optional cross-encoder passage seeding (Priority 2A)
         semantic_seed_task = None
         if semantic_passage_seeds_enabled:
             semantic_seed_task = asyncio.create_task(
-                self._rerank_all_passages(query, top_k=semantic_seed_top_k)
+                self._rerank_all_passages(
+                    query, top_k=semantic_seed_top_k,
+                    relevance_threshold=rerank_relevance_threshold if rerank_dynamic_cutoff else 0.0,
+                    dynamic_max=rerank_dynamic_max if rerank_dynamic_cutoff else 0,
+                    user_id=user_id,
+                )
             )
 
         # Await parallel tasks
@@ -499,15 +648,29 @@ class HippoRAG2Handler(BaseRouteHandler):
                 for eid in (triple.subject_id, triple.object_id):
                     entity_seeds[eid] = entity_seeds.get(eid, 0) + fact_score
 
+        # Track triple-derived entity IDs — these represent direct query
+        # relevance from triple embedding search and should survive the
+        # community entity filter (Option A: preserve direct evidence).
+        triple_entity_ids: set = set(entity_seeds.keys())
+
         # Phase 2+3: Add structural seeds (Tier 2) and community seeds (Tier 3) in parallel
         structural_sections: List[str] = []
+        community_entity_ids: List[str] = []
         community_data: List[Dict[str, Any]] = []
+        community_sentence_ids: List[str] = []
 
         _seed_tasks: List[Tuple[str, Any]] = []
         if structural_seeds_enabled and self._async_neo4j:
-            _seed_tasks.append(("structural", self._resolve_structural_seeds(query)))
-        if community_seeds_enabled and self.pipeline.community_matcher:
-            _seed_tasks.append(("community", self._resolve_community_seeds(query)))
+            _seed_tasks.append(("structural", self._resolve_structural_seeds(query, folder_id=folder_id)))
+        # Activate community seeds when either entity seeding OR passage seeding is enabled
+        _need_community = (community_seeds_enabled or community_passage_seeds_enabled) and self.pipeline.community_matcher
+        if _need_community:
+            _seed_tasks.append(("community", self._resolve_community_seeds(
+                query, include_sentences=community_passage_seeds_enabled,
+                adaptive_ratio=community_adaptive_ratio,
+                max_k=community_max_k,
+                folder_id=folder_id,
+            )))
 
         if _seed_tasks:
             _seed_results = await asyncio.gather(*[t[1] for t in _seed_tasks])
@@ -518,10 +681,40 @@ class HippoRAG2Handler(BaseRouteHandler):
                     for eid in structural_entity_ids:
                         entity_seeds[eid] = entity_seeds.get(eid, 0) + w_structural
                 else:
-                    community_entity_ids, community_data = result
-                    w_community = float(os.getenv("ROUTE7_W_COMMUNITY", "0.1"))
-                    for eid in community_entity_ids:
-                        entity_seeds[eid] = entity_seeds.get(eid, 0) + w_community
+                    community_entity_ids, community_data, community_sentence_ids = result
+                    if community_seeds_enabled:
+                        w_community = float(os.getenv("ROUTE7_W_COMMUNITY", "0.1"))
+                        for eid in community_entity_ids:
+                            entity_seeds[eid] = entity_seeds.get(eid, 0) + w_community
+
+        # Community entity filter: when community_passage_seeds is active,
+        # restrict entity seeds to those belonging to the matched community.
+        # This scopes PPR's walk to the community subgraph, preventing
+        # dense clusters from dominating over minority documents.
+        #
+        # Option A: Triple-derived entity seeds are PRESERVED through the
+        # filter — they represent direct query-to-content relevance from
+        # triple embedding search and should not be overridden by the
+        # indirect community membership signal.  Only community/structural
+        # seeds that lack triple backing get filtered.
+        if community_passage_seeds_enabled and community_entity_ids:
+            community_entity_set = set(community_entity_ids)
+            pre_filter = len(entity_seeds)
+            entity_seeds = {
+                eid: score for eid, score in entity_seeds.items()
+                if eid in community_entity_set or eid in triple_entity_ids
+            }
+            triple_preserved = len([
+                eid for eid in entity_seeds
+                if eid in triple_entity_ids and eid not in community_entity_set
+            ])
+            logger.info(
+                "step_3_community_entity_filter",
+                before=pre_filter,
+                after=len(entity_seeds),
+                community_entities=len(community_entity_set),
+                triple_preserved=triple_preserved,
+            )
 
         # P2: Keep only top-5 entity seeds (upstream alignment)
         # Concentrates PPR mass on the most relevant entities.
@@ -566,6 +759,22 @@ class HippoRAG2Handler(BaseRouteHandler):
                 top_score=round(_ss_max, 4),
             )
 
+        # Community passage seeds: inject Community→Entity→Sentence IDs
+        # as low-weight passage seeds so PPR walks from community-linked passages.
+        community_seeds_added = 0
+        if community_passage_seeds_enabled and community_sentence_ids:
+            for sent_eid in community_sentence_ids:
+                if sent_eid not in passage_seeds:
+                    passage_seeds[sent_eid] = community_sentence_weight
+                    community_seeds_added += 1
+                # Don't overwrite higher-weighted DPR/semantic seeds
+            logger.info(
+                "step_3_community_passage_seeds",
+                community_sentences=len(community_sentence_ids),
+                new_seeds=community_seeds_added,
+                weight=community_sentence_weight,
+            )
+
         timings_ms["step_3_seed_build_ms"] = int((time.perf_counter() - t0) * 1000)
 
         logger.info(
@@ -573,6 +782,7 @@ class HippoRAG2Handler(BaseRouteHandler):
             entity_seeds=len(entity_seeds),
             passage_seeds=len(passage_seeds),
             semantic_seeds_added=semantic_seeds_added,
+            community_seeds_added=community_seeds_added,
         )
 
         # ------------------------------------------------------------------
@@ -634,21 +844,40 @@ class HippoRAG2Handler(BaseRouteHandler):
             t0_rerank = time.perf_counter()
             # Take PPR's top passages as the candidate pool
             candidate_ids = [cid for cid, _ in passage_scores[:ppr_passage_top_k]]
+
+            # Step 4.4: Semantic pre-filter — densify candidates via embedding similarity
+            if semantic_prefilter_enabled and len(candidate_ids) > semantic_prefilter_top_n:
+                t0_pf = time.perf_counter()
+                try:
+                    filtered_ids = await self._semantic_prefilter_passages(
+                        community_guided_query, candidate_ids, top_n=semantic_prefilter_top_n,
+                    )
+                    if filtered_ids:
+                        logger.info(
+                            "step_4.4_semantic_prefilter_complete",
+                            input=len(candidate_ids),
+                            output=len(filtered_ids),
+                            elapsed_ms=int((time.perf_counter() - t0_pf) * 1000),
+                        )
+                        candidate_ids = filtered_ids
+                except Exception as e:
+                    logger.warning("step_4.4_prefilter_failed_fallback", error=str(e))
+
             if len(candidate_ids) >= 2:
                 try:
-                    reranked_ids = await self._rerank_passages(
-                        query, candidate_ids, top_k=rerank_top_k,
+                    reranked_scored = await self._rerank_passages(
+                        community_guided_query, candidate_ids, top_k=rerank_top_k,
+                        relevance_threshold=rerank_relevance_threshold if rerank_dynamic_cutoff else 0.0,
+                        dynamic_max=rerank_dynamic_max if rerank_dynamic_cutoff else 0,
+                        user_id=user_id,
                     )
-                    if reranked_ids:
-                        reranked_list = [
-                            (cid, 1.0 - i * 0.01)
-                            for i, cid in enumerate(reranked_ids)
-                        ]
-                        passage_scores = reranked_list
+                    if reranked_scored:
+                        passage_scores = reranked_scored
                         logger.info(
                             "step_4.5_rerank_ppr_output",
                             candidates=len(candidate_ids),
-                            output=len(reranked_ids),
+                            output=len(reranked_scored),
+                            dynamic=rerank_dynamic_cutoff,
                             elapsed_ms=int((time.perf_counter() - t0_rerank) * 1000),
                         )
                 except Exception as e:
@@ -667,7 +896,10 @@ class HippoRAG2Handler(BaseRouteHandler):
             t0_ra = time.perf_counter()
             try:
                 rerank_all_results = await self._rerank_all_passages(
-                    query, top_k=rerank_all_top_k,
+                    community_guided_query, top_k=rerank_all_top_k,
+                    relevance_threshold=rerank_relevance_threshold if rerank_dynamic_cutoff else 0.0,
+                    dynamic_max=rerank_dynamic_max if rerank_dynamic_cutoff else 0,
+                    user_id=user_id,
                 )
                 if rerank_all_results:
                     # Only dedup against PPR TOP-K (not all PPR passages,
@@ -748,7 +980,12 @@ class HippoRAG2Handler(BaseRouteHandler):
         # Sentence text fetch (always needed for synthesis)
         _parallel_tasks.append((
             "chunks",
-            self._fetch_sentences_by_ids(top_sentence_ids, ppr_scores_map=ppr_scores_map),
+            self._fetch_sentences_by_ids(
+                top_sentence_ids,
+                ppr_scores_map=ppr_scores_map,
+                sentence_window_enabled=sentence_window_enabled,
+                folder_id=folder_id,
+            ),
         ))
 
         # Entity-doc map (conditional: only for exhaustive enumeration queries)
@@ -757,7 +994,7 @@ class HippoRAG2Handler(BaseRouteHandler):
             if detected_types:
                 _parallel_tasks.append((
                     "entity_doc_map",
-                    self._query_entity_doc_map(detected_types),
+                    self._query_entity_doc_map(detected_types, folder_id=folder_id),
                 ))
 
         _parallel_results = await asyncio.gather(
@@ -772,6 +1009,26 @@ class HippoRAG2Handler(BaseRouteHandler):
         )
         if isinstance(_parallel_results[0], BaseException):
             logger.warning("route7_chunk_fetch_failed", error=str(_parallel_results[0]))
+
+        logger.info(
+            "route7_pre_fetched_chunks",
+            num_ids_sent=len(top_sentence_ids),
+            num_chunks_received=len(pre_fetched_chunks),
+            folder_id=folder_id,
+            group_ids=self.group_ids,
+        )
+
+        # DEBUG: dump all fetched chunk texts for PPR output analysis
+        if pre_fetched_chunks:
+            _debug_texts = []
+            for _ch in pre_fetched_chunks:
+                _t = _ch.get("text", _ch.get("sentence_text", ""))
+                _debug_texts.append(_t[:200])
+            logger.info(
+                "debug_ppr_fetched_texts",
+                num_chunks=len(pre_fetched_chunks),
+                texts=_debug_texts,
+            )
 
         # Unpack entity-doc map result (if launched)
         for i, (label, _) in enumerate(_parallel_tasks):
@@ -857,6 +1114,7 @@ class HippoRAG2Handler(BaseRouteHandler):
         # Use entity_scores as evidence_nodes for the synthesizer
         evidence_nodes = entity_scores[:20]
 
+        t0 = time.perf_counter()
         synthesis_result = await self.pipeline.synthesizer.synthesize(
             query=query,
             evidence_nodes=evidence_nodes,
@@ -922,7 +1180,29 @@ class HippoRAG2Handler(BaseRouteHandler):
             self._narrow_citations_to_sentences(
                 citations, synthesis_result.get("response", ""), sentence_map
             )
-        self._enrich_citations_with_geometry(citations)
+        await self._enrich_citations_with_geometry(citations)
+
+        # Diagnostic: log citation geometry state for debugging highlight issues
+        for _ci, _cit in enumerate(citations):
+            _poly_count = len(_cit.sentences) if _cit.sentences else 0
+            _total_polys = sum(
+                len(sp.get("polygons", [])) if isinstance(sp, dict) else 0
+                for sp in (_cit.sentences or [])
+            )
+            logger.info(
+                "citation_geometry_debug",
+                query_mode=query_mode,
+                sentence_window=sentence_window_enabled,
+                citation_index=_cit.index,
+                sentence_id=_cit.sentence_id,
+                text_preview_len=len(_cit.text_preview or ""),
+                text_preview_snippet=(_cit.text_preview or "")[:80],
+                has_sentences=bool(_cit.sentences),
+                sentence_spans=_poly_count,
+                total_polygons=_total_polys,
+                has_page_dimensions=bool(_cit.page_dimensions),
+                page_number=_cit.page_number,
+            )
 
         # ------------------------------------------------------------------
         # Assemble metadata
@@ -955,10 +1235,12 @@ class HippoRAG2Handler(BaseRouteHandler):
         # Phase 2 metadata
         if structural_seeds_enabled:
             metadata["structural_sections"] = structural_sections
-        if community_seeds_enabled and community_data:
+        if community_data:
             metadata["matched_communities"] = [
                 c.get("title", "?") for c in community_data[:5]
             ]
+        metadata["community_passage_seeds_added"] = community_seeds_added
+        metadata["triple_entity_ids_count"] = len(triple_entity_ids)
 
         # Entity-doc map metadata
         if graph_structural_header:
@@ -993,6 +1275,34 @@ class HippoRAG2Handler(BaseRouteHandler):
 
         if enable_timings:
             metadata["timings_ms"] = timings_ms
+
+        # Debug: citation geometry summary in response metadata
+        metadata["_citation_debug"] = {
+            "query_mode": query_mode,
+            "sentence_window_enabled": sentence_window_enabled,
+            "citations": [
+                {
+                    "idx": ct.index,
+                    "sid": ct.sentence_id,
+                    "text_len": len(ct.text_preview or ""),
+                    "text_snippet": (ct.text_preview or "")[:60],
+                    "has_sentences": bool(ct.sentences),
+                    "polygon_count": sum(
+                        len(sp.get("polygons", []))
+                        if isinstance(sp, dict) else 0
+                        for sp in (ct.sentences or [])
+                    ),
+                    "sentence_texts": [
+                        (sp.get("text", "") or "")[:60]
+                        for sp in (ct.sentences or [])
+                        if isinstance(sp, dict)
+                    ][:3],
+                    "has_page_dims": bool(ct.page_dimensions),
+                    "page": ct.page_number,
+                }
+                for ct in citations
+            ],
+        }
 
         return RouteResult(
             response=synthesis_result.get("response", ""),
@@ -1118,10 +1428,11 @@ class HippoRAG2Handler(BaseRouteHandler):
             half = max_chars // 2
             t_start = max(0, entity_pos - half)
             t_end = min(len(window_text), t_start + max_chars)
+            original_len = len(window_text)
             window_text = window_text[t_start:t_end].strip()
             if t_start > 0:
                 window_text = "..." + window_text
-            if t_end < len(window_text):
+            if t_end < original_len:
                 window_text = window_text + "..."
 
         return window_text
@@ -1129,6 +1440,7 @@ class HippoRAG2Handler(BaseRouteHandler):
     async def _query_entity_doc_map(
         self,
         entity_types: List[str],
+        folder_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Query ALL entities of given types with per-document granularity.
 
@@ -1154,8 +1466,6 @@ class HippoRAG2Handler(BaseRouteHandler):
           AND tc.group_id IN $group_ids
           AND d.group_id IN $group_ids
           AND e.type IN $entity_types
-          AND ($folder_id IS NULL
-               OR EXISTS { MATCH (d)-[:IN_FOLDER]->(f:Folder) WHERE f.id = $folder_id AND f.group_id IN $group_ids })
         WITH e, d, count(tc) AS doc_mentions,
              collect(tc.text)[0] AS doc_sample_chunk
         OPTIONAL MATCH (e)-[r:RELATED_TO]-(e2:Entity)
@@ -1182,7 +1492,7 @@ class HippoRAG2Handler(BaseRouteHandler):
                     group_ids=group_ids,
                     entity_types=entity_types,
                     role_rel_types=_STRUCTURED_ROLE_TYPES,
-                    folder_id=self.folder_id,
+                    folder_id=folder_id,
                 )
                 return [
                     {
@@ -1247,12 +1557,11 @@ class HippoRAG2Handler(BaseRouteHandler):
         ).strip()
 
         if triple_instruction:
-            import voyageai
             from src.core.config import settings
 
             instructed_text = f"{triple_instruction}{query}"
             try:
-                vc = voyageai.Client(api_key=settings.VOYAGE_API_KEY)
+                vc = make_voyage_client()
                 loop = asyncio.get_running_loop()
                 result = await loop.run_in_executor(
                     None,
@@ -1324,9 +1633,6 @@ class HippoRAG2Handler(BaseRouteHandler):
         Prepends an instruction to the query to steer the cross-encoder
         toward abstract category membership (e.g., "time windows" → "3 business days").
         """
-        import voyageai
-        from src.core.config import settings
-
         rerank_model = os.getenv("ROUTE7_RERANK_MODEL", "rerank-2.5")
         documents = [triple.triple_text for triple, _ in candidates]
 
@@ -1339,16 +1645,10 @@ class HippoRAG2Handler(BaseRouteHandler):
         )
 
         try:
-            vc = voyageai.Client(api_key=settings.VOYAGE_API_KEY)
-            loop = asyncio.get_running_loop()
-            rr_result = await loop.run_in_executor(
-                None,
-                lambda: vc.rerank(
-                    query=instructed_query,
-                    documents=documents,
-                    model=rerank_model,
-                    top_k=min(top_k, len(documents)),
-                ),
+            vc = make_voyage_client()
+            rr_result = await rerank_with_retry(
+                vc, query=instructed_query, documents=documents,
+                model=rerank_model, top_k=min(top_k, len(documents)),
             )
 
             # Map results back to (Triple, rerank_score) tuples
@@ -1390,6 +1690,7 @@ class HippoRAG2Handler(BaseRouteHandler):
         query_embedding: List[float],
         top_k: int = 0,
         sentence_top_k: int = 0,
+        folder_id: Optional[str] = None,
     ) -> List[Tuple[str, float]]:
         """Dense Passage Retrieval via sentence-level vector search.
 
@@ -1406,7 +1707,7 @@ class HippoRAG2Handler(BaseRouteHandler):
             return []
 
         group_ids = self.group_ids
-        folder_id = self.folder_id
+        folder_id = folder_id if folder_id is not None else self.folder_id
         driver = self.neo4j_driver
 
         # When top_k=0, resolve actual corpus size so we seed all passages
@@ -1429,7 +1730,7 @@ class HippoRAG2Handler(BaseRouteHandler):
                 sentence_top_k = corpus_size
 
         sentence_cypher = """CYPHER 25
-        CALL {
+        CALL () {
             MATCH (s:Sentence)
             SEARCH s IN (VECTOR INDEX sentence_embedding FOR $embedding WHERE s.group_id = $group_id LIMIT $sentence_top_k)
             SCORE AS score
@@ -1443,9 +1744,6 @@ class HippoRAG2Handler(BaseRouteHandler):
         WITH s, max(score) AS score
         OPTIONAL MATCH (s)-[:IN_DOCUMENT]->(d:Document)
         WHERE d.group_id IN $group_ids
-        WITH s, score, d
-        WHERE $folder_id IS NULL OR d IS NULL
-           OR EXISTS { MATCH (d)-[:IN_FOLDER]->(f:Folder) WHERE f.id = $folder_id AND f.group_id IN $group_ids }
         RETURN s.id AS sentence_id, score
         ORDER BY score DESC
         LIMIT $top_k
@@ -1483,6 +1781,8 @@ class HippoRAG2Handler(BaseRouteHandler):
         sentence_ids: List[str],
         ppr_scores_map: Optional[Dict[str, float]] = None,
         entity_names: Optional[List[str]] = None,
+        sentence_window_enabled: Optional[bool] = None,
+        folder_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Fetch sentence text + metadata from Neo4j by sentence IDs.
 
@@ -1490,6 +1790,10 @@ class HippoRAG2Handler(BaseRouteHandler):
         *entity_names* is provided, builds focused 3-sentence windows
         around sentences that mention those entities (via graph MENTIONS
         edges), falling back to full sentence text otherwise.
+
+        When *sentence_window_enabled* is ``False``, the ±1 neighbour
+        expansion is skipped — useful for local_search where retrieved
+        sentences are already concise and widening would dilute citations.
 
         Returns flat list of sentence dicts in the format expected by the
         synthesizer's ``pre_fetched_chunks`` parameter, sorted by PPR
@@ -1501,17 +1805,21 @@ class HippoRAG2Handler(BaseRouteHandler):
         group_ids = self.group_ids
         driver = self.neo4j_driver
 
-        # ── Pass 1: Sentence metadata ──
+        # ── Pass 1: Sentence metadata (with ±1 window via NEXT_IN_SECTION) ──
+        if sentence_window_enabled is None:
+            sentence_window_enabled = os.getenv(
+                "ROUTE7_SENTENCE_WINDOW", "1"
+            ).strip().lower() in {"1", "true", "yes"}
+
         cypher_sentences = """
         UNWIND $sentence_ids AS cid
         MATCH (node:Sentence {id: cid})
         WHERE node.group_id IN $group_ids
         OPTIONAL MATCH (node)-[:IN_DOCUMENT]->(d:Document)
         WHERE d.group_id IN $group_ids
-        WITH cid, node, d
-        WHERE $folder_id IS NULL OR d IS NULL
-           OR EXISTS { MATCH (d)-[:IN_FOLDER]->(f:Folder) WHERE f.id = $folder_id AND f.group_id IN $group_ids }
         OPTIONAL MATCH (node)-[:IN_SECTION]->(s:Section)
+        OPTIONAL MATCH (node)-[:NEXT_IN_SECTION]->(next_sent:Sentence)
+        OPTIONAL MATCH (prev_sent:Sentence)-[:NEXT_IN_SECTION]->(node)
         RETURN cid AS sentence_id,
                coalesce(node.text, '') AS text,
                coalesce(node.index_in_doc, 0) AS index_in_doc,
@@ -1519,8 +1827,20 @@ class HippoRAG2Handler(BaseRouteHandler):
                node.page AS page,
                d.id AS document_id, d.title AS document_title,
                d.source AS document_source,
-               s.title AS section_title, s.id AS section_id
+               s.title AS section_title, s.id AS section_id,
+               prev_sent.text AS prev_text, prev_sent.id AS prev_id,
+               next_sent.text AS next_text, next_sent.id AS next_id
         """
+
+        folder_id = folder_id if folder_id is not None else self.folder_id
+
+        logger.info(
+            "route7_fetch_sentences_params",
+            num_ids=len(sentence_ids),
+            group_ids=group_ids,
+            folder_id=folder_id,
+            sample_ids=sentence_ids[:3] if sentence_ids else [],
+        )
 
         try:
             def _run():
@@ -1529,7 +1849,7 @@ class HippoRAG2Handler(BaseRouteHandler):
                         cypher_sentences,
                         sentence_ids=sentence_ids,
                         group_ids=group_ids,
-                        folder_id=self.folder_id,
+                        folder_id=folder_id,
                     )
                     return [dict(r) for r in records]
             results = await asyncio.to_thread(_run)
@@ -1537,42 +1857,95 @@ class HippoRAG2Handler(BaseRouteHandler):
             logger.warning("route7_fetch_chunks_failed", error=str(e))
             return []
 
+        logger.info(
+            "route7_fetch_sentences_result",
+            num_input=len(sentence_ids),
+            num_output=len(results),
+            folder_id=folder_id,
+        )
+
         scores = ppr_scores_map or {}
 
-        # ── Merge adjacent same-section sentences ──
+        # ── Merge contiguous runs + ±1 sentence window expansion ──
         from collections import defaultdict
+
+        retrieved_ids = {r.get("sentence_id", "") for r in results}
 
         section_groups: dict[tuple, list] = defaultdict(list)
         for r in results:
             key = (r.get("document_id", ""), r.get("section_title", ""))
             section_groups[key].append(r)
 
-        _MAX_MERGE = 2
-
         merged_results: list[dict] = []
         for _key, group in section_groups.items():
             group.sort(key=lambda x: x.get("index_in_doc", 0))
-            merged = [group[0]]
-            for r in group[1:]:
-                prev = merged[-1]
-                prev_idx = prev.get("index_in_doc", 0)
-                curr_idx = r.get("index_in_doc", 0)
-                merge_count = len(prev.get("_merged_ids", [prev.get("sentence_id", "")]))
-                # Option B: use hierarchical_id section prefix for merge guard
-                prev_sec = (prev.get("hierarchical_id") or "").rsplit("-S", 1)[0]
-                curr_sec = (r.get("hierarchical_id") or "").rsplit("-S", 1)[0]
-                same_section = (prev_sec == curr_sec) and bool(prev_sec)
-                if same_section and curr_idx == prev_idx + 1 and merge_count < _MAX_MERGE:
-                    prev["text"] = (
-                        (prev.get("text", "") + " " + r.get("text", ""))
-                        .strip()
-                    )
-                    prev["index_in_doc"] = curr_idx
-                    prev.setdefault("_merged_ids", [prev.get("sentence_id", "")])
-                    prev["_merged_ids"].append(r.get("sentence_id", ""))
-                else:
-                    merged.append(r)
-            merged_results.extend(merged)
+
+            # Detect contiguous runs using hierarchical_id section prefix.
+            # When sentence_window is disabled (local_search), skip merging
+            # so each sentence stays a separate citation — keeps table-row
+            # and element-level citations precise.
+            if not sentence_window_enabled:
+                runs = [[r] for r in group]
+            else:
+                runs = []
+                current_run = [group[0]]
+                for r in group[1:]:
+                    prev = current_run[-1]
+                    prev_idx = prev.get("index_in_doc", 0)
+                    curr_idx = r.get("index_in_doc", 0)
+                    prev_sec = (prev.get("hierarchical_id") or "").rsplit("-S", 1)[0]
+                    curr_sec = (r.get("hierarchical_id") or "").rsplit("-S", 1)[0]
+                    same_section = (prev_sec == curr_sec) and bool(prev_sec)
+                    if same_section and curr_idx == prev_idx + 1:
+                        current_run.append(r)
+                    else:
+                        runs.append(current_run)
+                        current_run = [r]
+                runs.append(current_run)
+
+                # Cap run length to prevent merging entire tables into one
+                # citation.  The ±1 window still provides context at the
+                # edges of each sub-run.  Default 2 matches the original
+                # _MAX_MERGE=2 that was proven in production.
+                max_run = int(os.getenv("ROUTE7_MAX_MERGE_RUN", "1"))
+                if max_run > 0:
+                    capped: list[list[dict]] = []
+                    for run in runs:
+                        for i in range(0, len(run), max_run):
+                            capped.append(run[i:i + max_run])
+                    runs = capped
+
+            for run in runs:
+                first, last = run[0], run[-1]
+                all_ids = [r.get("sentence_id", "") for r in run]
+
+                # Assemble passage text
+                parts: list[str] = []
+                if sentence_window_enabled:
+                    # Prepend prev of first sentence (section-bounded,
+                    # skip if it is itself a retrieved sentence to avoid
+                    # duplication across passages)
+                    prev_txt = (first.get("prev_text") or "").strip()
+                    prev_id = first.get("prev_id") or ""
+                    if prev_txt and prev_id not in retrieved_ids:
+                        parts.append(prev_txt)
+
+                for r in run:
+                    parts.append((r.get("text") or "").strip())
+
+                if sentence_window_enabled:
+                    # Append next of last sentence (same rules)
+                    next_txt = (last.get("next_text") or "").strip()
+                    next_id = last.get("next_id") or ""
+                    if next_txt and next_id not in retrieved_ids:
+                        parts.append(next_txt)
+
+                passage = " ".join(p for p in parts if p)
+
+                merged_result = dict(first)
+                merged_result["text"] = passage
+                merged_result["_merged_ids"] = all_ids
+                merged_results.append(merged_result)
 
         chunks_list: List[Dict[str, Any]] = []
         for r in merged_results:
@@ -1580,9 +1953,11 @@ class HippoRAG2Handler(BaseRouteHandler):
             merged_ids = r.get("_merged_ids", [cid])
             best_score = max(scores.get(mid, 0.0) for mid in merged_ids) if scores else 0.0
 
+            _doc_title = r.get("document_title", "Unknown")
             chunks_list.append({
                 "id": cid,
-                "source": r.get("document_title", "Unknown"),
+                "source": _doc_title,
+                "document_title": _doc_title,
                 "text": r.get("text", ""),
                 "entity": "__ppr_passage__",
                 "_entity_score": 1.0,
@@ -1592,7 +1967,9 @@ class HippoRAG2Handler(BaseRouteHandler):
                 "page_number": r.get("page"),
                 "metadata": {
                     "document_id": r.get("document_id", ""),
+                    "document_title": _doc_title,
                     "section_path": r.get("section_title", ""),
+                    "page_number": r.get("page"),
                     "index_in_doc": r.get("index_in_doc", 0),
                     "hierarchical_id": r.get("hierarchical_id", ""),
                 },
@@ -1601,6 +1978,26 @@ class HippoRAG2Handler(BaseRouteHandler):
         # Preserve PPR ranking: sort by PPR score descending.
         if scores:
             chunks_list.sort(key=lambda c: c.get("_ppr_score", 0.0), reverse=True)
+
+        # Text-based dedup: when group_ids spans multiple groups with
+        # overlapping content (e.g. own group + __global__ sharing the
+        # same PDFs), PPR returns duplicate passages.  Keep the highest-
+        # scored copy of each unique text to maximise evidence diversity.
+        seen_texts: set[str] = set()
+        deduped: list[dict] = []
+        for chunk in chunks_list:
+            txt_key = chunk.get("text", "").strip()[:200]
+            if txt_key not in seen_texts:
+                seen_texts.add(txt_key)
+                deduped.append(chunk)
+        if len(deduped) < len(chunks_list):
+            logger.info(
+                "route7_fetch_text_dedup",
+                before=len(chunks_list),
+                after=len(deduped),
+                removed=len(chunks_list) - len(deduped),
+            )
+        chunks_list = deduped
 
         return chunks_list
 
@@ -1611,6 +2008,7 @@ class HippoRAG2Handler(BaseRouteHandler):
     async def _resolve_structural_seeds(
         self,
         query: str,
+        folder_id: Optional[str] = None,
     ) -> Tuple[List[str], List[str]]:
         """Resolve structural seeds via section embedding matching.
 
@@ -1669,11 +2067,12 @@ class HippoRAG2Handler(BaseRouteHandler):
                     logger.debug("route7_child_section_expansion_failed", error=str(e))
 
             # Resolve entities from expanded sections
+            folder_id = folder_id if folder_id is not None else self.folder_id
             section_entities = await resolve_section_entities(
                 async_neo4j=self._async_neo4j,
                 section_paths=expanded_sections,
                 group_id=self.group_id,
-                folder_id=self.folder_id,
+                folder_id=folder_id,
                 group_ids=self.group_ids,
             )
 
@@ -1697,41 +2096,42 @@ class HippoRAG2Handler(BaseRouteHandler):
     async def _resolve_community_seeds(
         self,
         query: str,
-    ) -> Tuple[List[str], List[Dict[str, Any]]]:
+        include_sentences: bool = False,
+        *,
+        adaptive_ratio: float | None = None,
+        max_k: int | None = None,
+        folder_id: Optional[str] = None,
+    ) -> Tuple[List[str], List[Dict[str, Any]], List[str]]:
         """Resolve community seeds via community embedding matching.
 
         Returns:
-            Tuple of (entity_ids, community_data).
+            Tuple of (entity_ids, community_data, sentence_ids).
+            sentence_ids is populated only when include_sentences=True.
         """
         try:
+            folder_id = folder_id if folder_id is not None else self.folder_id
             community_matcher = self.pipeline.community_matcher
             if not community_matcher or not self._async_neo4j:
-                return [], []
+                return [], [], []
 
             # Match communities (returns list of (community_dict, score) tuples)
-            matched_tuples = await community_matcher.match_communities(query, top_k=3)
+            matched_tuples = await community_matcher.match_communities(
+                query, relative_threshold=adaptive_ratio, max_k=max_k,
+                folder_id=folder_id,
+            )
             if not matched_tuples:
-                return [], []
+                return [], [], []
 
             matched = [t[0] for t in matched_tuples]
             # Resolve entities from matched communities
             community_ids = [c.get("id") for c in matched if c.get("id")]
             if not community_ids:
-                return [], matched
+                return [], matched, []
 
             cypher = """
             UNWIND $community_ids AS cid
             MATCH (e:Entity)-[:BELONGS_TO]->(c:Community {id: cid})
-            WHERE e.group_id IN $group_ids
-              AND ($folder_id IS NULL
-               OR EXISTS {
-                 MATCH (e)<-[:MENTIONS]-(s2:Sentence)
-                       -[:IN_DOCUMENT]->(d:Document)
-                       -[:IN_FOLDER]->(f:Folder)
-                 WHERE s2.group_id IN $group_ids
-                   AND d.group_id IN $group_ids
-                   AND f.id = $folder_id AND f.group_id IN $group_ids
-               })
+            WHERE c.group_id IN $group_ids AND e.group_id IN $group_ids
             RETURN e.id AS entity_id, e.name AS entity_name, c.id AS community_id
             ORDER BY e.degree DESC
             LIMIT 15
@@ -1742,22 +2142,44 @@ class HippoRAG2Handler(BaseRouteHandler):
                     cypher,
                     community_ids=community_ids,
                     group_ids=self.group_ids,
-                    folder_id=self.folder_id,
+                    folder_id=folder_id,
                 )
                 records = await result.data()
 
             entity_ids = list({r["entity_id"] for r in records if r.get("entity_id")})
 
+            # Resolve sentence IDs via Community→Entity→Sentence traversal
+            sentence_ids: List[str] = []
+            if include_sentences and community_ids:
+                sent_cypher = """
+                UNWIND $community_ids AS cid
+                MATCH (e:Entity)-[:BELONGS_TO]->(c:Community {id: cid})
+                WHERE e.group_id IN $group_ids
+                MATCH (e)<-[:MENTIONS]-(s:Sentence)
+                WHERE s.group_id IN $group_ids
+                RETURN DISTINCT s.id AS sentence_eid
+                """
+                async with self._async_neo4j._get_session() as session:
+                    sent_result = await session.run(
+                        sent_cypher,
+                        community_ids=community_ids,
+                        group_ids=self.group_ids,
+                        folder_id=folder_id,
+                    )
+                    sent_records = await sent_result.data()
+                sentence_ids = [r["sentence_eid"] for r in sent_records if r.get("sentence_eid")]
+
             logger.info(
                 "route7_community_seeds",
                 communities=len(matched),
                 entities=len(entity_ids),
+                sentences=len(sentence_ids),
             )
-            return entity_ids, matched
+            return entity_ids, matched, sentence_ids
 
         except Exception as e:
             logger.warning("route7_community_seeds_failed", error=str(e))
-            return [], []
+            return [], [], []
 
     # ======================================================================
     # Phase 2: Sentence Vector Search (copied from Route 5 pattern)
@@ -1767,6 +2189,7 @@ class HippoRAG2Handler(BaseRouteHandler):
         self,
         query: str,
         top_k: int = 30,
+        folder_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Retrieve sentence-level evidence via Voyage vector search.
 
@@ -1778,16 +2201,17 @@ class HippoRAG2Handler(BaseRouteHandler):
             return []
 
         try:
-            query_embedding = voyage_service.embed_query(query)
+            query_embedding = await asyncio.to_thread(voyage_service.embed_query, query)
         except Exception as e:
             logger.warning("route7_sentence_embed_failed", error=str(e))
             return []
 
         threshold = float(os.getenv("ROUTE7_SENTENCE_THRESHOLD", "0.2"))
         group_ids = self.group_ids
+        folder_id = folder_id if folder_id is not None else self.folder_id
 
         cypher = """CYPHER 25
-        CALL {
+        CALL () {
             MATCH (sent:Sentence)
             SEARCH sent IN (VECTOR INDEX sentence_embedding FOR $embedding WHERE sent.group_id = $group_id LIMIT $top_k)
             SCORE AS score
@@ -1803,9 +2227,6 @@ class HippoRAG2Handler(BaseRouteHandler):
 
         OPTIONAL MATCH (sent)-[:IN_DOCUMENT]->(doc:Document)
         WHERE doc.group_id IN $group_ids
-        WITH sent, score, doc
-        WHERE $folder_id IS NULL
-           OR (doc IS NOT NULL AND EXISTS { MATCH (doc)-[:IN_FOLDER]->(f:Folder) WHERE f.id = $folder_id AND f.group_id IN $group_ids })
 
         RETURN sent.id AS sentence_id,
                sent.text AS text,
@@ -1834,7 +2255,7 @@ class HippoRAG2Handler(BaseRouteHandler):
                         group_ids=group_ids,
                         top_k=top_k,
                         threshold=threshold,
-                        folder_id=self.folder_id,
+                        folder_id=folder_id,
                     )
                     return [dict(r) for r in records]
 
@@ -1882,25 +2303,34 @@ class HippoRAG2Handler(BaseRouteHandler):
         query: str,
         candidate_ids: List[str],
         top_k: int = 20,
-    ) -> List[str]:
+        relevance_threshold: float = 0.0,
+        dynamic_max: int = 0,
+        user_id: Optional[str] = None,
+    ) -> List[Tuple[str, float]]:
         """Rerank candidate sentence IDs using voyage-rerank-2.5.
 
         Fetches sentence text from Neo4j, calls the Voyage cross-encoder,
-        and returns reranked sentence IDs (best first).
+        and returns reranked sentence IDs with relevance scores (best first).
+
+        When relevance_threshold > 0, uses dynamic cutoff: keeps all passages
+        above the threshold instead of a fixed top-K.  dynamic_max caps
+        the total to avoid context overflow.
 
         Args:
             query: The user query.
             candidate_ids: Sentence node IDs to rerank.
-            top_k: Max passages to return after reranking.
+            top_k: Max passages to return (used when threshold is 0).
+            relevance_threshold: Min relevance_score to keep (0 = disabled).
+            dynamic_max: Hard cap when using dynamic cutoff (0 = top_k).
 
         Returns:
-            Reranked list of sentence IDs (up to top_k).
+            Reranked list of (sentence_id, relevance_score) tuples.
         """
         rerank_model = os.getenv("ROUTE7_RERANK_MODEL", "rerank-2.5")
 
         # Fetch sentence texts from Neo4j
         if not self.neo4j_driver:
-            return candidate_ids[:top_k]
+            return [(cid, 1.0 - i * 0.01) for i, cid in enumerate(candidate_ids[:top_k])]
 
         group_ids = self.group_ids
 
@@ -1928,26 +2358,36 @@ class HippoRAG2Handler(BaseRouteHandler):
                 valid_ids.append(cid)
 
         if not documents:
-            return candidate_ids[:top_k]
+            return [(cid, 1.0 - i * 0.01) for i, cid in enumerate(candidate_ids[:top_k])]
+
+        # Request enough results to satisfy dynamic cutoff: when dynamic_max
+        # exceeds top_k, Voyage must return the larger amount so the threshold
+        # filter has enough candidates to work with.
+        effective_k = max(top_k, dynamic_max) if dynamic_max > 0 else top_k
+        request_k = min(effective_k, len(documents))
 
         # Call Voyage reranker
-        import voyageai
-        from src.core.config import settings
+        vc = make_voyage_client()
 
-        vc = voyageai.Client(api_key=settings.VOYAGE_API_KEY)
-
-        loop = asyncio.get_running_loop()
-        rr_result = await loop.run_in_executor(
-            None,
-            lambda: vc.rerank(
-                query=query,
-                documents=documents,
-                model=rerank_model,
-                top_k=min(top_k, len(documents)),
-            ),
+        rr_result = await rerank_with_retry(
+            vc, query=query, documents=documents,
+            model=rerank_model, top_k=request_k,
         )
 
-        reranked_ids = [valid_ids[rr.index] for rr in rr_result.results]
+        # Apply dynamic relevance cutoff or fixed top-K
+        if relevance_threshold > 0:
+            scored = [
+                (valid_ids[rr.index], rr.relevance_score)
+                for rr in rr_result.results
+                if rr.relevance_score >= relevance_threshold
+            ]
+            if dynamic_max > 0:
+                scored = scored[:dynamic_max]
+        else:
+            scored = [
+                (valid_ids[rr.index], rr.relevance_score)
+                for rr in rr_result.results
+            ]
 
         # Track reranker usage (fire-and-forget)
         try:
@@ -1958,101 +2398,104 @@ class HippoRAG2Handler(BaseRouteHandler):
             from src.core.services.usage_tracker import get_usage_tracker
             _tracker = get_usage_tracker()
             asyncio.ensure_future(_tracker.log_rerank_usage(
-                partition_id=self.group_id,
+                partition_id=user_id if user_id else self.group_id,
                 model=rerank_model,
                 total_tokens=_rerank_tokens,
                 documents_reranked=len(documents),
                 route="route_7",
+                user_id=user_id,
             ))
         except Exception:
             pass
 
+        # Log ALL scores from Voyage (before threshold filter) for diagnosis
+        all_scores_desc = sorted(
+            [(valid_ids[rr.index], round(rr.relevance_score, 4)) for rr in rr_result.results],
+            key=lambda x: -x[1],
+        )
+
+        min_score = round(scored[-1][1], 4) if scored else 0
         logger.info(
             "route7_rerank_complete",
             model=rerank_model,
             input=len(documents),
-            output=len(reranked_ids),
-            top_score=round(rr_result.results[0].relevance_score, 4)
-            if rr_result.results
-            else 0,
+            output=len(scored),
+            ids_without_text=len(candidate_ids) - len(valid_ids),
+            top_score=round(scored[0][1], 4) if scored else 0,
+            min_score=min_score,
+            threshold=relevance_threshold,
+            dynamic=relevance_threshold > 0,
+            all_scores=[s for _, s in all_scores_desc],
         )
 
-        return reranked_ids
+        # DEBUG: dump kept vs dropped with texts for pipeline analysis
+        scored_ids = {sid for sid, _ in scored}
+        dropped_with_text = [
+            {"id": sid, "score": sc, "text": text_map.get(sid, "")[:200]}
+            for sid, sc in all_scores_desc if sid not in scored_ids
+        ]
+        if dropped_with_text:
+            logger.info(
+                "debug_reranker_dropped",
+                count=len(dropped_with_text),
+                items=dropped_with_text,
+            )
+
+        return scored
 
     # ==================================================================
-    # Step 2 helper: Semantic search via sentence vector index
+    # Step 4.4 helper: Semantic pre-filter via embedding similarity
     # ==================================================================
 
-    async def _semantic_search_passages(
+    async def _semantic_prefilter_passages(
         self,
         query: str,
-        top_k: int = 30,
-    ) -> List[Tuple[str, float]]:
-        """Search sentences via sentence_embedding vector index.
+        candidate_ids: List[str],
+        top_n: int = 30,
+    ) -> List[str]:
+        """Pre-filter PPR candidates by instructed embedding similarity.
 
-        Uses contextual embeddings (voyage-context-3) which handle short
-        metadata sentences (names, addresses) much better than the cross-
-        encoder reranker, because each sentence was embedded with its
-        surrounding document context during indexing.
-
-        Returns list of (sentence_id, score) sorted best-first.
+        Embeds the query WITH a retrieval instruction using voyage-context-3,
+        then computes cosine similarity against stored sentence_embeddings.
+        The instruction broadens the embedding to capture related content
+        beyond what the query literally asks about.
         """
         voyage_service = _get_voyage_service()
         if not voyage_service or not self.neo4j_driver:
-            return []
+            return candidate_ids[:top_n]
 
-        try:
-            query_embedding = voyage_service.embed_query(query)
-        except Exception as e:
-            logger.warning("route7_semantic_search_embed_failed", error=str(e))
-            return []
-
-        threshold = float(os.getenv("ROUTE7_SEMANTIC_THRESHOLD", "0.2"))
-
-        cypher = """CYPHER 25
-        CALL {
-            MATCH (sent:Sentence)
-            SEARCH sent IN (VECTOR INDEX sentence_embedding FOR $embedding WHERE sent.group_id = $group_id LIMIT $top_k)
-            SCORE AS score
-            WHERE score >= $threshold
-            RETURN sent, score
-            UNION ALL
-            MATCH (sent:Sentence)
-            SEARCH sent IN (VECTOR INDEX sentence_embedding FOR $embedding WHERE sent.group_id = $global_group_id LIMIT $top_k)
-            SCORE AS score
-            WHERE score >= $threshold
-            RETURN sent, score
-        }
-        RETURN sent.id AS sentence_id, score
-        ORDER BY score DESC
-        """
-
-        try:
-            driver = self.neo4j_driver
-
-            def _run_search():
-                with retry_session(driver, read_only=True) as session:
-                    records = session.run(
-                        cypher,
-                        embedding=query_embedding,
-                        group_id=self.group_id,
-                        global_group_id=settings.GLOBAL_GROUP_ID,
-                        top_k=top_k,
-                        threshold=threshold,
-                    )
-                    return [(r["sentence_id"], float(r["score"])) for r in records]
-
-            results = await asyncio.to_thread(_run_search)
-        except Exception as e:
-            logger.warning("route7_semantic_search_failed", error=str(e))
-            return []
-
-        logger.info(
-            "route7_semantic_search_complete",
-            results=len(results),
-            top_k=top_k,
+        instruction = os.getenv(
+            "ROUTE7_SEMANTIC_PREFILTER_INSTRUCTION",
+            "Retrieve all sentences relevant to answering the following query.",
         )
-        return results
+        try:
+            instructed_query = instruction + " " + query
+            query_embedding = await asyncio.to_thread(voyage_service.embed_query, instructed_query)
+        except Exception as e:
+            logger.warning("prefilter_embed_failed", error=str(e))
+            return candidate_ids[:top_n]
+
+        group_ids = self.group_ids
+        driver = self.neo4j_driver
+
+        def _compute_similarities():
+            with retry_session(driver, read_only=True) as session:
+                result = session.run(
+                    "UNWIND $ids AS sid "
+                    "MATCH (s:Sentence {id: sid}) "
+                    "WHERE s.group_id IN $group_ids "
+                    "  AND s.sentence_embedding IS NOT NULL "
+                    "RETURN s.id AS id, "
+                    "  vector.similarity.cosine(s.sentence_embedding, $qemb) AS sim",
+                    ids=candidate_ids,
+                    group_ids=group_ids,
+                    qemb=query_embedding,
+                )
+                return [(r["id"], r["sim"]) for r in result]
+
+        sim_results = await asyncio.to_thread(_compute_similarities)
+        sim_results.sort(key=lambda x: -x[1])
+        return [sid for sid, _ in sim_results[:top_n]]
 
     # ==================================================================
     # Step 2 helper: Rerank ALL sentences using PPR-cached texts (legacy)
@@ -2062,6 +2505,9 @@ class HippoRAG2Handler(BaseRouteHandler):
         self,
         query: str,
         top_k: int = 20,
+        relevance_threshold: float = 0.0,
+        dynamic_max: int = 0,
+        user_id: Optional[str] = None,
     ) -> List[Tuple[str, float]]:
         """Rerank ALL sentences using cached texts from the PPR engine.
 
@@ -2069,6 +2515,9 @@ class HippoRAG2Handler(BaseRouteHandler):
         sentence and can match conceptual queries (e.g. "day-based
         timeframes" → "90 days labor warranty") that embedding similarity
         misses entirely.
+
+        When relevance_threshold > 0, returns all passages above threshold
+        (up to dynamic_max) instead of a fixed top-K.
 
         Returns list of (sentence_id, relevance_score) sorted best-first.
         """
@@ -2089,43 +2538,28 @@ class HippoRAG2Handler(BaseRouteHandler):
         if not documents:
             return []
 
-        import voyageai
-        from src.core.config import settings
+        effective_k = max(top_k, dynamic_max) if dynamic_max > 0 else top_k
+        request_k = min(effective_k, len(documents))
 
-        vc = voyageai.Client(api_key=settings.VOYAGE_API_KEY)
+        vc = make_voyage_client()
 
-        loop = asyncio.get_running_loop()
+        rr_result = await rerank_with_retry(
+            vc, query=query, documents=documents,
+            model=rerank_model, top_k=request_k,
+        )
 
-        max_retries = 2
-        for attempt in range(max_retries + 1):
-            try:
-                rr_result = await loop.run_in_executor(
-                    None,
-                    lambda: vc.rerank(
-                        query=query,
-                        documents=documents,
-                        model=rerank_model,
-                        top_k=min(top_k, len(documents)),
-                    ),
-                )
-                break
-            except Exception as e:
-                err_msg = str(e).lower()
-                if "rate limit" in err_msg and attempt < max_retries:
-                    wait_secs = 30 * (attempt + 1)
-                    logger.warning(
-                        "route7_rerank_rate_limited_retrying",
-                        attempt=attempt + 1,
-                        wait_secs=wait_secs,
-                    )
-                    await asyncio.sleep(wait_secs)
-                    continue
-                raise
-
-        results = [
-            (ids[rr.index], rr.relevance_score)
-            for rr in rr_result.results
-        ]
+        # Apply dynamic relevance cutoff or return all
+        if relevance_threshold > 0:
+            results = [
+                (ids[rr.index], rr.relevance_score)
+                for rr in rr_result.results
+                if rr.relevance_score >= relevance_threshold
+            ]
+        else:
+            results = [
+                (ids[rr.index], rr.relevance_score)
+                for rr in rr_result.results
+            ]
 
         # Track reranker usage (fire-and-forget)
         try:
@@ -2136,21 +2570,26 @@ class HippoRAG2Handler(BaseRouteHandler):
             from src.core.services.usage_tracker import get_usage_tracker
             _tracker = get_usage_tracker()
             asyncio.ensure_future(_tracker.log_rerank_usage(
-                partition_id=self.group_id,
+                partition_id=user_id if user_id else self.group_id,
                 model=rerank_model,
                 total_tokens=_rerank_tokens,
                 documents_reranked=len(documents),
                 route="route_7",
+                user_id=user_id,
             ))
         except Exception:
             pass
 
+        min_score = round(results[-1][1], 4) if results else 0
         logger.info(
             "route7_rerank_all_complete",
             model=rerank_model,
             input=len(documents),
             output=len(results),
             top_score=round(results[0][1], 4) if results else 0,
+            min_score=min_score,
+            threshold=relevance_threshold,
+            dynamic=relevance_threshold > 0,
         )
 
         return results

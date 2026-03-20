@@ -1,5 +1,5 @@
 import { IDBPDatabase, openDB } from "idb";
-import { IHistoryProvider, Answers, HistoryProviderOptions, HistoryMetaData } from "./IProvider";
+import { IHistoryProvider, Answers, HistoryProviderOptions, HistoryMetaData, HistoryItemData } from "./IProvider";
 
 export class IndexedDBProvider implements IHistoryProvider {
     getProviderName = () => HistoryProviderOptions.IndexedDB;
@@ -74,26 +74,26 @@ export class IndexedDBProvider implements IHistoryProvider {
         return loadedItems;
     }
 
-    async addItem(id: string, answers: Answers): Promise<void> {
+    async addItem(id: string, answers: Answers, _idToken?: string, folder_id?: string): Promise<void> {
         const timestamp = new Date().getTime();
-        const db = await this.init(); // 自動的に初期化
+        const db = await this.init();
         const tx = db.transaction(this.storeName, "readwrite");
         const current = await tx.objectStore(this.storeName).get(id);
         if (current) {
-            await tx.objectStore(this.storeName).put({ ...current, id, timestamp, answers });
+            await tx.objectStore(this.storeName).put({ ...current, id, timestamp, answers, folder_id });
         } else {
             const title = answers[0][0].length > 50 ? answers[0][0].substring(0, 50) + "..." : answers[0][0];
-            await tx.objectStore(this.storeName).add({ id, title, timestamp, answers });
+            await tx.objectStore(this.storeName).add({ id, title, timestamp, answers, folder_id });
         }
         await tx.done;
         return;
     }
 
-    async getItem(id: string): Promise<Answers | null> {
+    async getItem(id: string): Promise<HistoryItemData | null> {
         const db = await this.init();
         const tx = db.transaction(this.storeName, "readonly");
         const item = await tx.objectStore(this.storeName).get(id);
-        return item ? item.answers : null;
+        return item ? { answers: item.answers, folder_id: item.folder_id } : null;
     }
 
     async deleteItem(id: string): Promise<void> {

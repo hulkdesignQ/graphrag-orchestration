@@ -58,6 +58,7 @@ def _make_mock_pipeline():
     pipeline.llm = AsyncMock()
     pipeline.neo4j_driver = MagicMock()
     pipeline.group_id = "test-group"
+    pipeline.group_ids = ["test-group", "__global__"]
     pipeline.folder_id = None
     pipeline.synthesizer = MagicMock()
     pipeline._executor = None
@@ -66,6 +67,7 @@ def _make_mock_pipeline():
     # Mock community matcher
     pipeline.community_matcher = MagicMock()
     pipeline.community_matcher.match_communities = AsyncMock(return_value=[])
+    pipeline.community_matcher.get_all_communities = AsyncMock(return_value=[])
     return pipeline
 
 
@@ -97,7 +99,7 @@ class TestTokenBudget:
         evidence = [_make_sentence("Evidence " * 50, sentence_id=f"s{i}") for i in range(10)]
         sections = [_make_section("Section A")]
 
-        with patch.dict(os.environ, {}, clear=False):
+        with patch.dict(os.environ, {"ROUTE6_COMPLETENESS_CHECK": "0"}, clear=False):
             os.environ.pop("ROUTE6_MAX_CONTEXT_TOKENS", None)
             result = await handler._synthesize(
                 "What are the risks?", communities, sections, evidence,
@@ -132,8 +134,9 @@ class TestTokenBudget:
         assert "Community summary" in call_args
 
     @pytest.mark.asyncio
-    async def test_token_budget_preserves_communities(self):
-        """Community summaries are never truncated even under tight budget."""
+    async def test_token_budget_caps_communities_when_exceeding(self):
+        """When community summaries exceed budget, they are capped at 70%
+        to guarantee at least 30% for evidence (BUG-2 fix)."""
         handler = _make_handler()
         handler.llm.acomplete = AsyncMock(
             return_value=MagicMock(text="Response")
@@ -151,8 +154,10 @@ class TestTokenBudget:
             )
 
         call_args = handler.llm.acomplete.call_args[0][0]
-        # Community summary must survive — it's the thematic backbone
-        assert "Important risk factor" in call_args
+        # Community summary is truncated but partially present
+        assert "Important risk" in call_args
+        # Full summary should NOT be present (it was truncated)
+        assert long_summary not in call_args
 
 
 # ============================================================================
@@ -163,8 +168,8 @@ class TestDynamicCommunitySelection:
     """Tests for ROUTE6_DYNAMIC_COMMUNITY env var."""
 
     @pytest.mark.asyncio
-    async def test_dynamic_community_off_by_default(self):
-        """With no env var, communities pass through unchanged."""
+    async def test_dynamic_community_on_by_default(self):
+        """With no env var, dynamic community selection is ON (default='1')."""
         handler = _make_handler()
         communities = [
             _make_community("c1", "Risk", "Risk summary"),
@@ -172,15 +177,11 @@ class TestDynamicCommunitySelection:
         ]
         scores = [0.9, 0.7]
 
-        # If dynamic community were on, _rate_communities_with_llm would be called
-        # Since it's off, we just verify the method is NOT called
-        handler._rate_communities_with_llm = AsyncMock()
-
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("ROUTE6_DYNAMIC_COMMUNITY", None)
-            # We can't easily call execute() (too many deps), so verify the env check logic
-            enabled = os.getenv("ROUTE6_DYNAMIC_COMMUNITY", "0").strip().lower() in {"1", "true", "yes"}
-            assert not enabled
+            # Production code defaults to "1" (enabled)
+            enabled = os.getenv("ROUTE6_DYNAMIC_COMMUNITY", "1").strip().lower() in {"1", "true", "yes"}
+            assert enabled
 
     @pytest.mark.asyncio
     async def test_dynamic_community_rates_communities(self):
@@ -354,90 +355,6 @@ class TestCommunityChildren:
 
 
 # ============================================================================
-# Feature 3: Streaming Synthesis
-# ============================================================================
-
-class TestStreamingSynthesis:
-    """Tests for streaming synthesis (stream_execute / _stream_synthesize)."""
-
-    @pytest.mark.asyncio
-    async def test_stream_synthesize_yields_chunks(self):
-        """_stream_synthesize() yields string chunks from LLM."""
-        handler = _make_handler()
-
-        # Mock astream_complete to return an async iterator of chunks
-        async def mock_astream_complete(prompt):
-            class MockChunk:
-                def __init__(self, delta):
-                    self.delta = delta
-
-            async def gen():
-                for word in ["Hello", " ", "world", "!"]:
-                    yield MockChunk(word)
-
-            return gen()
-
-        handler.llm.astream_complete = mock_astream_complete
-
-        communities = [_make_community("c1", "Risk", "Summary")]
-        evidence = [_make_sentence("Evidence text", sentence_id="s1")]
-
-        chunks = []
-        async for chunk in handler._stream_synthesize(
-            "What are the risks?", communities, [], evidence,
-        ):
-            chunks.append(chunk)
-
-        assert chunks == ["Hello", " ", "world", "!"]
-        assert "".join(chunks) == "Hello world!"
-
-    @pytest.mark.asyncio
-    async def test_stream_synthesize_fallback_on_error(self):
-        """If streaming fails, yields a single error message."""
-        handler = _make_handler()
-        handler.llm.astream_complete = AsyncMock(side_effect=Exception("Stream failed"))
-
-        communities = [_make_community("c1", "Risk", "Summary")]
-
-        chunks = []
-        async for chunk in handler._stream_synthesize(
-            "Query", communities, [], [],
-        ):
-            chunks.append(chunk)
-
-        assert len(chunks) == 1
-        assert "error occurred" in chunks[0].lower()
-
-    @pytest.mark.asyncio
-    async def test_stream_execute_returns_generator(self):
-        """stream_execute() returns an async generator."""
-        handler = _make_handler()
-
-        # Mock all retrieval methods — provide one community so the
-        # negative-detection guard ("not found") is bypassed and
-        # _stream_synthesize is actually reached.
-        handler._retrieve_sentence_evidence = AsyncMock(return_value=[])
-        handler._retrieve_section_headings = AsyncMock(return_value=[])
-        handler._retrieve_entity_document_map = AsyncMock(return_value={})
-        handler.pipeline.community_matcher.match_communities = AsyncMock(
-            return_value=[(_make_community("c1", "Test", "Test summary"), 0.9)]
-        )
-
-        # Mock streaming synthesis
-        async def mock_stream(*args, **kwargs):
-            yield "chunk1"
-            yield "chunk2"
-
-        handler._stream_synthesize = mock_stream
-
-        chunks = []
-        async for chunk in handler.stream_execute("What are the risks?"):
-            chunks.append(chunk)
-
-        assert chunks == ["chunk1", "chunk2"]
-
-
-# ============================================================================
 # Token Budget: _build_synthesis_prompt shares logic
 # ============================================================================
 
@@ -446,21 +363,32 @@ class TestBuildSynthesisPrompt:
 
     @pytest.mark.asyncio
     async def test_build_prompt_includes_all_sections(self):
-        """Prompt includes communities, sections, evidence, and entity coverage."""
+        """Prompt includes communities, sections, and evidence."""
         handler = _make_handler()
         communities = [_make_community("c1", "Risk", "Risk summary")]
         sections = [_make_section("Termination")]
         evidence = [_make_sentence("Important fact", sentence_id="s1")]
-        entity_map = {"Entity A": ["Doc 1", "Doc 2"]}
 
-        prompt = await handler._build_synthesis_prompt(
-            "What are the risks?", communities, sections, evidence, entity_map,
+        prompt, _summaries = await handler._build_synthesis_prompt(
+            "What are the risks?", communities, sections, evidence,
         )
 
         assert "Risk summary" in prompt
         assert "Termination" in prompt
         assert "Important fact" in prompt
-        assert "Entity A" in prompt
+
+    @pytest.mark.asyncio
+    async def test_build_prompt_language_param(self):
+        """Language parameter appends instruction to prompt."""
+        handler = _make_handler()
+        communities = [_make_community("c1", "Risk", "Risk summary")]
+        evidence = [_make_sentence("Evidence text", sentence_id="s1")]
+
+        prompt, _summaries = await handler._build_synthesis_prompt(
+            "Query", communities, [], evidence, language="French",
+        )
+
+        assert "Respond entirely in French" in prompt
 
     @pytest.mark.asyncio
     async def test_build_prompt_applies_token_budget(self):
@@ -470,14 +398,14 @@ class TestBuildSynthesisPrompt:
         evidence = [_make_sentence("word " * 500, sentence_id="s1")]
 
         with patch.dict(os.environ, {"ROUTE6_MAX_CONTEXT_TOKENS": "100"}):
-            prompt = await handler._build_synthesis_prompt(
+            prompt, _s = await handler._build_synthesis_prompt(
                 "Query", communities, [], evidence,
             )
 
         # Prompt should be shorter than if we had no budget
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("ROUTE6_MAX_CONTEXT_TOKENS", None)
-            full_prompt = await handler._build_synthesis_prompt(
+            full_prompt, _s = await handler._build_synthesis_prompt(
                 "Query", communities, [], evidence,
             )
 

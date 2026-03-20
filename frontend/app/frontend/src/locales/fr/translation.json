@@ -55,15 +55,15 @@
         "stopStreaming": "Arrêter la diffusion",
         "askWithVoice": "Poser une question à l'aide de la voix",
         "stopRecording": "Arrêter l'enregistrement de la question",
-        "showSupportingContent": "Montrer le contenu de soutien",
         "speakAnswer": "Parler réponse",
         "info": "Info",
         "save": "Sauvegarder",
         "copy": "Copier",
-        "copied": "Copié!"
+        "copied": "Copié!",
+        "showOriginal": "Afficher la réponse originale",
+        "showTranslated": "Afficher la réponse traduite"
     },
     "headerTexts": {
-        "supportingContent": "Contenu d'Appui",
         "citation": "Citation"
     },
     "labels": {
@@ -231,7 +231,12 @@
         "deleteAnalysisConfirm": "Cela supprimera définitivement toutes les données d'analyse (graphe, entités, embeddings) de ce dossier. Les fichiers originaux seront conservés. Continuer ?",
         "analysisDeleted": "Données d'analyse supprimées avec succès",
         "deleteAnalysisFailed": "Échec de la suppression de l'analyse : {{message}}",
-        "storageReminder": "💡 Les données d'analyse utilisent du stockage. Supprimez l'analyse quand elle n'est plus nécessaire pour réduire les coûts."
+        "storageReminder": "💡 Les données d'analyse utilisent du stockage. Supprimez l'analyse quand elle n'est plus nécessaire pour réduire les coûts.",
+        "zoneAnalysisResults": "Résultats d'analyse",
+        "zoneAnalyzed": "Analysés",
+        "zoneFolders": "Dossiers",
+        "expandZone": "Développer",
+        "collapseZone": "Réduire"
     },
     "viewer": {
         "loadingFile": "Chargement du fichier",
@@ -279,35 +284,27 @@
         "creditsUsed": "Crédits utilisés",
         "documents": "Documents",
         "storageUsed": "Stockage utilisé",
-        "dailyLimit": "sur {{limit}} limite quotidienne",
         "monthlyLimit": "sur {{limit}} limite mensuelle",
         "monthlyCredits": "sur {{limit}} crédits mensuels",
         "unlimitedCredits": "Crédits illimités",
         "translated": "{{count}} traduits",
         "voice": "{{count}} voix",
         "personalShared": "({{personal}} personnels + {{shared}} partagés) sur {{limit}} limite",
-        "ofLimit": "sur {{limit}} limite",
         "gbLimit": "sur {{limit}} Go limite",
         "recentActivity": "Activité récente",
         "time": "Heure",
         "tokens": "Tokens",
         "credits": "Crédits",
         "language": "Langue",
-        "yourFeatures": "Vos fonctionnalités",
         "plans": "Plans",
         "currentPlan": "Plan actuel",
         "contactSales": "Contacter les ventes",
-        "queriesPerDay": "{{count}} requêtes/jour",
-        "maxDocuments": "{{count}} documents",
         "maxStorage": "{{count}} Go stockage",
         "creditsPerMonth": "{{count}} crédits/mois",
-        "featureGraphrag": "Evidoc Search",
         "featureAdvancedAnalytics": "Analytique avancée",
-        "featureCustomModels": "Modèles personnalisés",
         "featureApiAccess": "Accès API",
-        "featurePrioritySupport": "Support prioritaire",
-        "featureSso": "Intégration SSO",
-        "featureCustomBranding": "Image de marque personnalisée"
+        "featureCentralizedBilling": "Facturation centralisée",
+        "featureAuditLogs": "Journaux d'audit"
     },
     "admin": {
         "signInRequired": "Connexion requise",
@@ -335,5 +332,12 @@
         "plan": "Plan",
         "lastActive": "Dernière activité",
         "noUserActivity": "Aucune donnée d'activité utilisateur pour le moment. Les données apparaîtront une fois les analyses connectées."
+    },
+    "folderSelector": {
+        "label": "Base de connaissances :",
+        "placeholder": "Sélectionner une base de connaissances…",
+        "noFolders": "Aucun dossier analysé pour le moment",
+        "loadError": "Could not load folders",
+        "demo": "Demo"
     }
 }

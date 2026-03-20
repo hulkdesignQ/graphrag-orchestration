@@ -28,6 +28,7 @@ Reference: HippoRAG 2 (ICML '25) — https://arxiv.org/abs/2502.14802
 from __future__ import annotations
 
 import asyncio
+import math
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -63,7 +64,11 @@ class HippoRAG2PPR:
         self._node_types: Dict[int, str] = {}  # index -> "entity"|"passage"
         self._node_names: Dict[int, str] = {}  # index -> display name
         self._passage_full_texts: Dict[str, str] = {}  # node_id -> full text (for reranker)
+        self._passage_embeddings: Dict[str, List[float]] = {}  # node_id -> embedding vector (for pre-filter)
         self._entity_mention_counts: Dict[str, int] = {}  # entity_id -> # passages mentioning it
+        # Community metadata for community-balanced personalization
+        self._community_id: Dict[int, int] = {}  # node_idx -> community_id
+        self._community_sizes: Dict[int, int] = {}  # community_id -> member_count
         # Weighted adjacency: source_idx -> [(target_idx, weight)]
         self._adj: Dict[int, List[Tuple[int, float]]] = {}
         # Precomputed sum of outgoing weights per node (for rank distribution)
@@ -85,6 +90,67 @@ class HippoRAG2PPR:
         Used by the cross-encoder reranker to avoid a separate Neo4j fetch.
         """
         return self._passage_full_texts
+
+    def get_all_passage_embeddings(self) -> Dict[str, List[float]]:
+        """Return all passage node IDs mapped to their embedding vectors.
+
+        Used for fast cosine pre-filtering before cross-encoder reranking.
+        """
+        return self._passage_embeddings
+
+    def cosine_prefilter(
+        self,
+        query_embedding: List[float],
+        top_k: int = 100,
+        candidate_ids: Optional[List[str]] = None,
+    ) -> List[Tuple[str, float]]:
+        """Fast in-memory cosine similarity pre-filter for passages.
+
+        Uses cached passage embeddings (loaded at graph init) to rank
+        passages by cosine similarity to the query embedding. This avoids
+        a Neo4j roundtrip and can reduce cross-encoder reranker input
+        from N to top_k, cutting reranker token usage proportionally.
+
+        Args:
+            query_embedding: Query vector (same dim as passage embeddings).
+            top_k: Number of top passages to return.
+            candidate_ids: If provided, only score these IDs (skip others).
+
+        Returns:
+            List of (sentence_id, cosine_similarity) sorted best-first.
+        """
+        import numpy as np
+
+        if not self._passage_embeddings:
+            return []
+
+        q = np.array(query_embedding, dtype=np.float32)
+        q_norm = np.linalg.norm(q)
+        if q_norm == 0:
+            return []
+        q = q / q_norm
+
+        if candidate_ids is not None:
+            ids = [sid for sid in candidate_ids if sid in self._passage_embeddings]
+        else:
+            ids = list(self._passage_embeddings.keys())
+
+        if not ids:
+            return []
+
+        # Build matrix and compute cosine in one vectorized operation
+        mat = np.array([self._passage_embeddings[sid] for sid in ids], dtype=np.float32)
+        norms = np.linalg.norm(mat, axis=1, keepdims=True)
+        norms = np.maximum(norms, 1e-10)
+        mat = mat / norms
+        scores = mat @ q  # cosine similarities
+
+        # Get top-k indices
+        k = min(top_k, len(ids))
+        top_indices = np.argpartition(scores, -k)[-k:]
+        top_indices = top_indices[np.argsort(scores[top_indices])[::-1]]
+
+        return [(ids[i], float(scores[i])) for i in top_indices]
 
     @property
     def entity_mention_counts(self) -> Dict[str, int]:
@@ -110,10 +176,15 @@ class HippoRAG2PPR:
         self._adj[tgt_idx].append((src_idx, weight))
 
     def _finalize_graph(self) -> None:
-        """Precompute outgoing weight sums for efficient PPR iteration."""
+        """Precompute outgoing weight sums and community sizes."""
         for idx in range(self._node_count):
             edges = self._adj.get(idx, [])
             self._out_weight_sum[idx] = sum(w for _, w in edges) if edges else 0.0
+
+        # Compute community sizes from loaded community_id metadata
+        self._community_sizes.clear()
+        for idx, cid in self._community_id.items():
+            self._community_sizes[cid] = self._community_sizes.get(cid, 0) + 1
 
     async def load_graph(
         self,
@@ -124,6 +195,8 @@ class HippoRAG2PPR:
         include_section_graph: bool = False,
         section_edge_weight: float = 0.1,
         section_sim_threshold: float = 0.5,
+        include_appears_in_section: bool = False,
+        include_next_in_section: bool = False,
     ) -> None:
         """Load Entity + Sentence nodes and edges from Neo4j.
 
@@ -137,6 +210,10 @@ class HippoRAG2PPR:
             section_edge_weight: Weight for IN_SECTION edges (default 0.1).
             section_sim_threshold: Min similarity for section SEMANTICALLY_SIMILAR
                 edges (default 0.5).
+            include_appears_in_section: Load Entity→Section APPEARS_IN_SECTION
+                edges as shortcuts (bypasses Sentence→Section hop).
+            include_next_in_section: Load Sentence→Sentence NEXT_IN_SECTION
+                edges for sequential sentence bridging.
         """
         t0 = time.perf_counter()
 
@@ -149,6 +226,8 @@ class HippoRAG2PPR:
             include_section_graph,
             section_edge_weight,
             section_sim_threshold,
+            include_appears_in_section,
+            include_next_in_section,
         )
 
         self._finalize_graph()
@@ -186,6 +265,8 @@ class HippoRAG2PPR:
         include_section_graph: bool,
         section_edge_weight: float,
         section_sim_threshold: float,
+        include_appears_in_section: bool = False,
+        include_next_in_section: bool = False,
     ) -> None:
         """Synchronous graph loading from Neo4j."""
         entity_edge_count = 0
@@ -201,24 +282,29 @@ class HippoRAG2PPR:
 
         with retry_session(neo4j_driver) as session:
             # ----------------------------------------------------------
-            # 1. Load Entity nodes
+            # 1. Load Entity nodes (with community_id for balanced seeds)
             # ----------------------------------------------------------
             result = session.run(
                 "MATCH (e:Entity) "
                 "WHERE e.group_id IN $group_ids "
-                "RETURN e.id AS id, e.name AS name",
+                "RETURN e.id AS id, e.name AS name, "
+                "e.community_id AS community_id",
                 group_ids=group_ids,
             )
             for record in result:
-                self._add_node(record["id"], "entity", record["name"] or "")
+                idx = self._add_node(record["id"], "entity", record["name"] or "")
+                cid = record["community_id"]
+                if cid is not None:
+                    self._community_id[idx] = int(cid)
 
             # ----------------------------------------------------------
-            # 2. Load Sentence (passage) nodes
+            # 2. Load Sentence (passage) nodes + embeddings
             # ----------------------------------------------------------
             result = session.run(
                 "MATCH (c:Sentence) "
                 "WHERE c.group_id IN $group_ids "
-                "RETURN c.id AS id, c.text AS text",
+                "RETURN c.id AS id, c.text AS text, "
+                "c.sentence_embedding AS emb",
                 group_ids=group_ids,
             )
             for record in result:
@@ -226,6 +312,9 @@ class HippoRAG2PPR:
                 full_text = record["text"] or ""
                 self._add_node(record["id"], "passage", full_text[:80])
                 self._passage_full_texts[record["id"]] = full_text
+                emb = record["emb"]
+                if emb is not None:
+                    self._passage_embeddings[record["id"]] = list(emb)
 
             # ----------------------------------------------------------
             # 3. Entity-Entity edges via RELATED_TO
@@ -332,12 +421,56 @@ class HippoRAG2PPR:
                     session, group_ids, section_edge_weight, section_sim_threshold
                 )
 
+            # ----------------------------------------------------------
+            # 7. APPEARS_IN_SECTION: Entity→Section shortcut (optional)
+            #    Bypasses the Sentence→IN_SECTION→Section path, giving
+            #    entities direct access to sections for cross-doc bridging.
+            # ----------------------------------------------------------
+            appears_in_section_count = 0
+            if include_appears_in_section and include_section_graph:
+                result = session.run(
+                    "MATCH (e:Entity)-[:APPEARS_IN_SECTION]->(s:Section) "
+                    "WHERE e.group_id IN $group_ids "
+                    "AND s.group_id IN $group_ids "
+                    "RETURN e.id AS entity_id, s.id AS section_id",
+                    group_ids=group_ids,
+                )
+                for record in result:
+                    src_idx = self._node_to_idx.get(record["entity_id"])
+                    tgt_idx = self._node_to_idx.get(record["section_id"])
+                    if src_idx is not None and tgt_idx is not None:
+                        self._add_edge(src_idx, tgt_idx, section_edge_weight)
+                        appears_in_section_count += 1
+
+            # ----------------------------------------------------------
+            # 8. NEXT_IN_SECTION: sequential sentence links (optional)
+            #    Connects consecutive sentences within sections so PPR
+            #    can walk from a found sentence to its neighbors.
+            # ----------------------------------------------------------
+            next_in_section_count = 0
+            if include_next_in_section:
+                result = session.run(
+                    "MATCH (s1:Sentence)-[:NEXT_IN_SECTION]->(s2:Sentence) "
+                    "WHERE s1.group_id IN $group_ids "
+                    "AND s2.group_id IN $group_ids "
+                    "RETURN s1.id AS src, s2.id AS tgt",
+                    group_ids=group_ids,
+                )
+                for record in result:
+                    src_idx = self._node_to_idx.get(record["src"])
+                    tgt_idx = self._node_to_idx.get(record["tgt"])
+                    if src_idx is not None and tgt_idx is not None:
+                        self._add_edge(src_idx, tgt_idx, section_edge_weight)
+                        next_in_section_count += 1
+
         logger.debug(
             "hipporag2_ppr_edges_loaded",
             entity_edges=entity_edge_count,
             mentions_edges=mentions_edge_count,
             synonym_edges=synonym_edge_count,
             sentence_sim_edges=sentence_sim_count,
+            appears_in_section_edges=appears_in_section_count if include_appears_in_section else 0,
+            next_in_section_edges=next_in_section_count if include_next_in_section else 0,
         )
 
     def _load_section_graph_sync(
@@ -376,6 +509,8 @@ class HippoRAG2PPR:
                 self._add_edge(src_idx, tgt_idx, section_edge_weight)
 
         # Section <-> Section via SEMANTICALLY_SIMILAR — ordinal-weighted
+        # Bug 14 fix: deduplicate undirected edges (same pattern as entity edges).
+        seen_section_sim_edges: set = set()
         result = session.run(
             "MATCH (s1:Section)-[sim:SEMANTICALLY_SIMILAR]->(s2:Section) "
             "WHERE s1.group_id IN $group_ids "
@@ -390,13 +525,41 @@ class HippoRAG2PPR:
             src_idx = self._node_to_idx.get(record["src"])
             tgt_idx = self._node_to_idx.get(record["tgt"])
             if src_idx is not None and tgt_idx is not None:
-                base_weight = float(record["weight"])
-                # Decay by ordinal distance (closer siblings = higher weight)
-                src_ord = section_ordinals.get(record["src"], 0)
-                tgt_ord = section_ordinals.get(record["tgt"], 0)
-                ordinal_distance = abs(src_ord - tgt_ord)
-                decay = 1.0 / (1.0 + ordinal_distance * 0.2)
-                self._add_edge(src_idx, tgt_idx, base_weight * decay)
+                edge_key = (min(src_idx, tgt_idx), max(src_idx, tgt_idx))
+                if edge_key not in seen_section_sim_edges:
+                    seen_section_sim_edges.add(edge_key)
+                    base_weight = float(record["weight"])
+                    # Decay by ordinal distance (closer siblings = higher weight)
+                    src_ord = section_ordinals.get(record["src"], 0)
+                    tgt_ord = section_ordinals.get(record["tgt"], 0)
+                    ordinal_distance = abs(src_ord - tgt_ord)
+                    decay = 1.0 / (1.0 + ordinal_distance * 0.2)
+                    self._add_edge(src_idx, tgt_idx, base_weight * decay)
+
+        # Section <-> Section via SHARES_ENTITY — cross-document bridge.
+        # Sections sharing entities across documents form thematic bridges
+        # that PPR can traverse to reach sentences in related sections.
+        shares_entity_count = 0
+        result = session.run(
+            "MATCH (s1:Section)-[r:SHARES_ENTITY]->(s2:Section) "
+            "WHERE s1.group_id IN $group_ids "
+            "AND s2.group_id IN $group_ids "
+            "RETURN s1.id AS src, s2.id AS tgt, "
+            "r.shared_count AS shared_count",
+            group_ids=group_ids,
+        )
+        for record in result:
+            src_idx = self._node_to_idx.get(record["src"])
+            tgt_idx = self._node_to_idx.get(record["tgt"])
+            if src_idx is not None and tgt_idx is not None:
+                edge_key = (min(src_idx, tgt_idx), max(src_idx, tgt_idx))
+                if edge_key not in seen_section_sim_edges:
+                    seen_section_sim_edges.add(edge_key)
+                    # Weight proportional to shared entity count, capped
+                    shared = record["shared_count"] or 1
+                    weight = min(shared * 0.05, section_edge_weight)
+                    self._add_edge(src_idx, tgt_idx, weight)
+                    shares_entity_count += 1
 
     def run_ppr(
         self,
@@ -408,6 +571,14 @@ class HippoRAG2PPR:
         dangling_redistribution: bool = False,
         passage_self_loops: float = 0.0,
         hub_devaluation: bool = False,
+        hub_penalty_mode: str = "none",
+        hub_penalty_alpha: float = 1.0,
+        hub_penalty_base: float = 2.0,
+        symmetric_norm: str = "off",
+        community_balance: bool = False,
+        community_balance_alpha: float = 0.0,
+        neural_teleportation: Optional[List[float]] = None,
+        neural_weight: float = 0.5,
     ) -> Tuple[List[Tuple[str, float]], List[Tuple[str, float]]]:
         """Run Personalized PageRank with weighted seeds.
 
@@ -426,11 +597,35 @@ class HippoRAG2PPR:
                 (zero out-degree) teleports back to the personalization
                 vector instead of being lost.
             passage_self_loops: If > 0, add virtual self-loops of this
-                weight to passage nodes during the walk. Prevents passage
-                mass from draining entirely to entities.
-            hub_devaluation: If True, normalize entity→passage walk
-                contributions by entity degree (IDF-style), preventing
-                high-degree hubs from diluting mass.
+                weight to passage nodes during the walk.
+            hub_devaluation: Legacy flag — if True, uses raw-degree IDF.
+                Prefer hub_penalty_mode="log" instead.
+            hub_penalty_mode: Hub penalty strategy for entity nodes.
+                "none" = no penalty (default, backward compat).
+                "log"  = 1/log(B+degree)^alpha — tunable hub tax.
+            hub_penalty_alpha: Exponent for log hub penalty (default 1.0).
+                Higher values (1.5, 2.0) create stronger hub suppression.
+            hub_penalty_base: Base for log hub penalty (default 2.0).
+                Lower values (1.1) create sharper differentiation.
+            symmetric_norm: Symmetric normalization mode.
+                "off" = standard row normalization D⁻¹·A (default).
+                "all" = D^(-½)·A·D^(-½) on all edges.
+                "entity_only" = symmetric norm only for entity↔entity
+                    edges, standard norm for MENTIONS (passage↔entity).
+            community_balance: If True, weight entity seeds inversely
+                by community density.
+            community_balance_alpha: Exponent for community balance.
+                0.0 (default) = use log formula: seed /= log(2+size).
+                >0  = use power-law: seed /= size^alpha.
+                E.g. 0.3 gives 1.87x ratio, 0.5 gives 2.83x ratio.
+            neural_teleportation: Query embedding vector for Neural PPR.
+                When provided, every passage node gets a teleportation
+                weight proportional to cosine(query_emb, passage_emb).
+                Blended with structural seeds via neural_weight.
+            neural_weight: Blend ratio for neural teleportation [0,1].
+                0.0 = structural seeds only (original behavior).
+                1.0 = pure neural teleportation (cosine-only).
+                0.5 = equal blend (recommended starting point).
 
         Returns:
             Tuple of:
@@ -440,18 +635,83 @@ class HippoRAG2PPR:
         if self._node_count == 0:
             return [], []
 
-        # Build personalization vector
-        personalization = [0.0] * self._node_count
+        # Build structural personalization vector (entity + passage seeds)
+        structural_p = [0.0] * self._node_count
 
         for node_id, weight in entity_seeds.items():
             idx = self._node_to_idx.get(node_id)
             if idx is not None:
-                personalization[idx] += weight
+                structural_p[idx] += weight
 
         for node_id, weight in passage_seeds.items():
             idx = self._node_to_idx.get(node_id)
             if idx is not None:
-                personalization[idx] += weight
+                structural_p[idx] += weight
+
+        # Neural teleportation: cosine(query, passage_emb) for all passages
+        neural_p = [0.0] * self._node_count
+        neural_active = False
+        if neural_teleportation is not None and self._passage_embeddings and neural_weight > 0:
+            import numpy as np
+            q = np.array(neural_teleportation, dtype=np.float32)
+            q_norm = np.linalg.norm(q)
+            if q_norm > 0:
+                q = q / q_norm
+                passage_indices = []
+                passage_embs = []
+                for node_id, emb in self._passage_embeddings.items():
+                    idx = self._node_to_idx.get(node_id)
+                    if idx is not None:
+                        passage_indices.append(idx)
+                        passage_embs.append(emb)
+                if passage_embs:
+                    mat = np.array(passage_embs, dtype=np.float32)
+                    norms = np.linalg.norm(mat, axis=1, keepdims=True)
+                    norms = np.maximum(norms, 1e-10)
+                    mat = mat / norms
+                    cosines = mat @ q  # shape: (n_passages,)
+                    # ReLU: only positive similarities contribute
+                    cosines = np.maximum(cosines, 0.0)
+                    for i, idx in enumerate(passage_indices):
+                        neural_p[idx] = float(cosines[i])
+                    neural_active = True
+                    logger.info(
+                        "neural_teleportation_computed",
+                        passages=len(passage_indices),
+                        max_cosine=float(np.max(cosines)),
+                        min_cosine=float(np.min(cosines)),
+                        mean_cosine=float(np.mean(cosines)),
+                        neural_weight=neural_weight,
+                    )
+
+        # Blend structural and neural personalization
+        if neural_active:
+            # Normalize each component independently before blending
+            s_total = sum(structural_p)
+            n_total = sum(neural_p)
+            if s_total > 0:
+                structural_p = [p / s_total for p in structural_p]
+            if n_total > 0:
+                neural_p = [p / n_total for p in neural_p]
+            personalization = [
+                (1.0 - neural_weight) * structural_p[i] + neural_weight * neural_p[i]
+                for i in range(self._node_count)
+            ]
+        else:
+            personalization = structural_p
+
+        # Community-balanced personalization: boost sparse communities
+        if community_balance and self._community_sizes:
+            for idx in range(self._node_count):
+                if personalization[idx] > 0 and idx in self._community_id:
+                    cid = self._community_id[idx]
+                    c_size = self._community_sizes.get(cid, 1)
+                    if community_balance_alpha > 0:
+                        # Power-law: 1/size^alpha — sharper differentiation
+                        personalization[idx] /= c_size ** community_balance_alpha
+                    else:
+                        # Log formula (legacy default): 1/log(2+size)
+                        personalization[idx] /= math.log(2 + c_size)
 
         # Normalize personalization to sum to 1
         total_p = sum(personalization)
@@ -467,12 +727,27 @@ class HippoRAG2PPR:
                 if self._node_types.get(idx) == "passage":
                     effective_out_sum[idx] = effective_out_sum.get(idx, 0.0) + passage_self_loops
 
-        # Precompute hub-devaluation divisors (entity degree for IDF-style)
-        hub_divisor: Dict[int, float] = {}
-        if hub_devaluation:
+        # Precompute hub penalty factors (entity nodes only)
+        hub_factor: Dict[int, float] = {}
+        effective_hub_mode = hub_penalty_mode
+        if hub_devaluation and hub_penalty_mode == "none":
+            effective_hub_mode = "raw"  # legacy backward compat
+        if effective_hub_mode != "none":
             for idx in range(self._node_count):
                 if self._node_types.get(idx) == "entity":
-                    hub_divisor[idx] = max(len(self._adj.get(idx, [])), 1.0)
+                    degree = max(len(self._adj.get(idx, [])), 1)
+                    if effective_hub_mode == "log":
+                        hub_factor[idx] = 1.0 / math.log(hub_penalty_base + degree) ** hub_penalty_alpha
+                    elif effective_hub_mode == "raw":
+                        hub_factor[idx] = 1.0 / degree
+
+        # Precompute sqrt of out-weight sums for symmetric normalization
+        sqrt_out: Dict[int, float] = {}
+        use_symmetric = symmetric_norm in ("all", "entity_only")
+        if use_symmetric:
+            for idx in range(self._node_count):
+                s = effective_out_sum.get(idx, 0.0)
+                sqrt_out[idx] = math.sqrt(s) if s > 0 else 0.0
 
         # Initialize rank to personalization vector
         rank = list(personalization)
@@ -501,10 +776,34 @@ class HippoRAG2PPR:
                     new_rank[src] += self_share
 
                 for tgt, edge_weight in self._adj[src]:
-                    share = damping * rank[src] * edge_weight / out_sum
-                    # Hub devaluation: reduce share from high-degree entities
-                    if hub_devaluation and src in hub_divisor:
-                        share /= hub_divisor[src]
+                    # Determine if symmetric norm applies to this edge
+                    apply_sym = False
+                    if use_symmetric:
+                        if symmetric_norm == "all":
+                            apply_sym = True
+                        elif symmetric_norm == "entity_only":
+                            # Only entity↔entity edges get symmetric norm
+                            apply_sym = (
+                                self._node_types.get(src) == "entity"
+                                and self._node_types.get(tgt) == "entity"
+                            )
+
+                    if apply_sym:
+                        # D^(-½)·A·D^(-½): divide by sqrt(deg_src * deg_tgt)
+                        sqrt_src = sqrt_out.get(src, 0.0)
+                        sqrt_tgt = sqrt_out.get(tgt, 0.0)
+                        if sqrt_src > 0 and sqrt_tgt > 0:
+                            share = damping * rank[src] * edge_weight / (sqrt_src * sqrt_tgt)
+                        else:
+                            continue
+                    else:
+                        # Standard row normalization: D⁻¹·A
+                        share = damping * rank[src] * edge_weight / out_sum
+
+                    # Hub penalty: reduce share from high-degree entity nodes
+                    if src in hub_factor:
+                        share *= hub_factor[src]
+
                     new_rank[tgt] += share
 
             # Redistribute dangling mass to personalization vector
@@ -548,6 +847,13 @@ class HippoRAG2PPR:
             iterations=min(iteration + 1, max_iterations) if self._node_count > 0 else 0,
             entity_seeds=len(entity_seeds),
             passage_seeds=len(passage_seeds),
+            hub_penalty=effective_hub_mode,
+            hub_penalty_alpha=hub_penalty_alpha,
+            hub_penalty_base=hub_penalty_base,
+            symmetric_norm=symmetric_norm,
+            community_balance=community_balance,
+            community_balance_alpha=community_balance_alpha,
+            community_count=len(self._community_sizes),
             top_passage_score=passage_scores[0][1] if passage_scores else 0.0,
             top_entity_score=entity_scores[0][1] if entity_scores else 0.0,
         )

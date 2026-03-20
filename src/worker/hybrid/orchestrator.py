@@ -1111,7 +1111,7 @@ Instructions:
             stopwords = {'this', 'that', 'with', 'from', 'have', 'been', 'were', 'what', 'when',
                         'where', 'which', 'there', 'their', 'about', 'would', 'could', 'should',
                         'found', 'document', 'provided', 'documents'}
-            words = re.findall(r'[a-z]{4,}', answer_lower)
+            words = re.findall(r'[\w]{2,}', answer_lower)
             grounding_tokens = {w for w in words if w not in stopwords}
         
         # If still no tokens, the answer is too generic - reject
@@ -1656,7 +1656,7 @@ Instructions:
         }
         
         # Tokenize and filter
-        words = re.findall(r'\b[a-zA-Z]{3,}\b', query.lower())
+        words = re.findall(r'[\w]{2,}', query.lower())
         search_terms = [w for w in words if w not in STOPWORDS]
         
         if not search_terms:
@@ -2446,7 +2446,7 @@ Instructions:
         """
         Search TextChunk nodes by vector similarity using Neo4j native vector index.
         
-        Uses db.index.vector.queryNodes() for efficient vector search (Neo4j 5.11+).
+        Uses SEARCH ... IN (VECTOR INDEX ...) for efficient vector search (Cypher 25).
         This uses proper vector indexes instead of computing similarity for all nodes,
         providing O(log n) retrieval via HNSW index rather than O(n) full scan.
         
@@ -3091,7 +3091,7 @@ Instructions:
         # Extract significant words from query (4+ chars, not stopwords)
         stopwords = {"what", "when", "where", "which", "about", "does", "there", "their", "have", "this", "that", "with", "from", "they", "been", "were", "will", "would", "could", "should", "across", "list", "summarize", "identify"}
         query_terms = [
-            w.lower() for w in re.findall(r"[A-Za-z]{4,}", query)
+            w.lower() for w in re.findall(r"[\w]{2,}", query)
             if w.lower() not in stopwords
         ]
         

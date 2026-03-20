@@ -19,6 +19,7 @@ import structlog
 from src.worker.hybrid_v2.services.extraction_service import ExtractionService
 from src.worker.hybrid_v2.pipeline.enhanced_graph_retriever import EnhancedGraphContext
 from src.worker.hybrid_v2.pipeline.chunk_filters import apply_noise_filters
+from src.worker.hybrid_v2.routes.base import acomplete_with_retry
 
 logger = structlog.get_logger(__name__)
 
@@ -357,6 +358,20 @@ class EvidenceSynthesizer:
         if effective_variant == "v1_concise":
             response = re.sub(r"\s*\[\d+[a-z]?\]", "", response).strip()
 
+        # Step 4c: Normalize non-numeric bracket references.
+        # Despite explicit instructions, LLMs sometimes produce descriptive
+        # citations like [document_name, section 2] instead of [1].  Strip
+        # any bracket content that isn't a valid numeric or sentence-level
+        # citation marker to keep the answer text clean.
+        if effective_variant != "v1_concise":
+            def _keep_valid_citation(m: re.Match) -> str:
+                inner = m.group(1)
+                if re.match(r'^\d+[a-z]?$', inner):
+                    return m.group(0)  # keep [1], [2], [1a], etc.
+                return ''  # strip everything else
+            response = re.sub(r'\[([^\]]+)\]', _keep_valid_citation, response)
+            response = re.sub(r'  +', ' ', response).strip()
+
         # Step 5: Build citations
         if effective_variant == "v1_concise" and citation_map:
             # v1_concise: LLM does pure extraction, no citation markup.
@@ -375,7 +390,50 @@ class EvidenceSynthesizer:
                 response, citation_map,
                 sentence_citation_map=sentence_citation_map if sentence_citation_map else None,
             )
-        
+
+        # Step 5b: Fallback — when the LLM produced [N] markers that don't
+        # match citation_map keys (e.g. hallucinated numbers), the bottom
+        # citation list would be empty.  Attach ALL citation_map entries so
+        # the user always sees source references.  Also re-number any stale
+        # [N] markers in the response to match the fallback list.
+        citation_fallback_used = False
+        if not citations and citation_map:
+            logger.warning(
+                "citation_fallback_triggered",
+                citation_map_keys=sorted(citation_map.keys()),
+                response_bracket_matches=re.findall(r'\[\d+\]', response)[:10],
+                response_preview=response[:200],
+            )
+            citations = []
+            sorted_keys = sorted(
+                citation_map.keys(),
+                key=lambda k: int(k.strip("[]")),
+            )
+            for cite_key in sorted_keys:
+                citations.append({
+                    "citation": cite_key,
+                    "citation_type": "chunk",
+                    **citation_map[cite_key],
+                })
+            citation_fallback_used = True
+
+            # Re-number stale [N] markers: replace ALL [digit] in the
+            # response with [1] cycling through available citations.  This
+            # is imperfect but ensures inline badges can match.
+            existing_nums = re.findall(r'\[(\d+)\]', response)
+            if existing_nums:
+                valid_keys = {k.strip("[]") for k in citation_map}
+                for num in set(existing_nums):
+                    if num not in valid_keys:
+                        # Map hallucinated number to nearest valid key
+                        nearest = min(valid_keys, key=lambda v: abs(int(v) - int(num)))
+                        response = response.replace(f"[{num}]", f"[{nearest}]")
+                        logger.info(
+                            "citation_renumber",
+                            old=num,
+                            new=nearest,
+                        )
+
         # Measure final context (after sparse-retrieval injection + sentence hints)
         final_context_chars = len(context)
         final_context_tokens = self._estimate_tokens(context)
@@ -388,6 +446,8 @@ class EvidenceSynthesizer:
         logger.info("synthesis_complete",
                    query=query,
                    num_citations=len(citations),
+                   citation_fallback=citation_fallback_used,
+                   citation_map_size=len(citation_map),
                    response_length=len(response),
                    response_type=response_type,
                    is_drift_mode=sub_questions is not None,
@@ -781,7 +841,7 @@ class EvidenceSynthesizer:
                     
                     # Format as individually-citable sentences: [1a], [1b], [1c]...
                     chunk_num = original_idx + 1
-                    entry_lines = [f"{citation_id} [Section: {section_str}] [Entity: {chunk.entity_name}]"]
+                    entry_lines = [f"{citation_id} (Section: {section_str}) (Entity: {chunk.entity_name})"]
                     for s_idx, sent in enumerate(chunk_sentences):
                         suffix = chr(ord('a') + s_idx) if s_idx < 26 else str(s_idx)
                         sent_citation_id = f"[{chunk_num}{suffix}]"
@@ -806,7 +866,7 @@ class EvidenceSynthesizer:
                     entry = "\n".join(entry_lines)
                 else:
                     # Fallback: standard chunk-level citation
-                    entry = f"{citation_id} [Section: {section_str}] [Entity: {chunk.entity_name}]\n{chunk.text}"
+                    entry = f"{citation_id} (Section: {section_str}) (Entity: {chunk.entity_name})\n{chunk.text}"
                 context_parts.append(entry)
             
             context_parts.append("")  # Blank line between documents
@@ -999,7 +1059,7 @@ Use this output format:
 Response:"""
 
         try:
-            response = await self.llm.acomplete(prompt)
+            response = await acomplete_with_retry(self.llm, prompt)
             return response.text.strip()
         except Exception as e:
             logger.error("graph_response_generation_failed", error=str(e))
@@ -2087,7 +2147,8 @@ Response:"""
                 or meta.get("document_source", "")
             ).strip()
             if source:
-                name = source.rsplit("/", 1)[-1]
+                from urllib.parse import unquote
+                name = unquote(source.rsplit("/", 1)[-1])
                 name = name.rsplit(".", 1)[0]
                 name = name.replace("_", " ").replace("-", " ").strip()
                 if name:
@@ -2167,7 +2228,7 @@ Response:"""
                         chunk_sentences = chunk_sentences[:_max_sent]
                     
                     chunk_num = original_idx + 1
-                    entry_lines = [f"{citation_id} [Section: {section_str}]"]
+                    entry_lines = [f"{citation_id} (Section: {section_str})"]
                     for s_idx, sent in enumerate(chunk_sentences):
                         suffix = chr(ord('a') + s_idx) if s_idx < 26 else str(s_idx)
                         sent_citation_id = f"[{chunk_num}{suffix}]"
@@ -2194,7 +2255,7 @@ Response:"""
                     # which section each chunk belongs to.
                     if section_str and section_str != "General":
                         context_parts.append(
-                            f"{citation_id} [Section: {section_str}] {text}"
+                            f"{citation_id} (Section: {section_str}) {text}"
                         )
                     else:
                         context_parts.append(f"{citation_id} {text}")
@@ -2287,7 +2348,7 @@ Response:"""
             acomplete_kwargs: Dict[str, Any] = {}
             if max_tokens is not None:
                 acomplete_kwargs["max_tokens"] = max_tokens
-            response = await llm.acomplete(prompt, **acomplete_kwargs)
+            response = await acomplete_with_retry(llm, prompt, **acomplete_kwargs)
             return response.text.strip()
         except Exception as e:
             logger.error("response_generation_failed", error=str(e))
@@ -2439,13 +2500,13 @@ Respond using this format:
 
 ## Answer
 
-[Direct answer to the question with citations [N] for every factual claim]
+Direct answer to the question with citations [1], [2] for every factual claim.
 
 ## Details
 
-- [Specific detail with citation [N]]
-- [Connection between entities with citation [N]]
-- [Important highlights from source documents with citation [N]]
+- Specific detail with citation [1]
+- Connection between entities with citation [2]
+- Important highlights from source documents with citation [3]
 
 Response:"""
 
@@ -2486,6 +2547,7 @@ Response:"""
             document_guidance = """
 IMPORTANT for Per-Document Queries:
 - The Evidence Context contains chunks grouped by "=== DOCUMENT: <title> ===" headers.
+- You MUST cover EVERY unique document present in the Evidence Context. Do NOT stop early.
 - Count UNIQUE top-level documents only - do NOT create separate summaries for:
   * Document sections (e.g., "Section 2: Arbitration" belongs to parent document)
   * Exhibits, Appendices, Schedules (e.g., "Exhibit A" belongs to parent contract)
@@ -2550,6 +2612,88 @@ QUESTION: {query}
 | Fact | Source Document | Citation |
 |------|-----------------|----------|"""
         
+        # ---- V10: Comprehensive — exhaustive extraction, relaxed merging ----
+        if variant == "v10_comprehensive":
+            return f"""You are an expert analyst. Answer with bullet points only.
+
+Question: {query}
+
+Evidence Context:
+{context}
+
+Instructions:
+1. Answer the question using ONLY information from the Evidence Context.
+2. REFUSE only for specific lookups where the exact data point is absent:
+   - Question asks for "bank routing number" but evidence has no routing number → Refuse
+   - Question asks for "SWIFT code" but evidence has no SWIFT/IBAN → Refuse
+   - Question asks for "California law" but evidence shows a different state → Refuse
+   - Question asks about a specific term, clause, or concept by name (e.g. "mold damage", "force majeure") but that exact term does NOT appear anywhere in the evidence → Refuse. Do NOT infer that an unnamed concept falls under a broader or related category.
+   When refusing, respond ONLY with: "The requested information was not found in the available documents."
+3. For general questions (warranty terms, agreement details, fees, obligations, etc.),
+   synthesize all relevant information from the evidence even if the text is
+   fragmentary or OCR-imperfect. Do NOT refuse when partial evidence is available.
+4. **RESPECT ALL QUALIFIERS** in the question. If the question asks for a specific type, category, or unit:
+   - Include ONLY items matching that qualifier
+   - EXCLUDE items that don't match, even if they seem related
+   - If the question specifies a unit (e.g. "day-based"), do NOT include items in other units (weeks, months) even if convertible
+5. Cite sources using ONLY the numbered markers [1], [2], [3], etc. that appear at the start of each evidence chunk. Do NOT invent citation formats — never put document names, file paths, or section names inside square brackets.
+6. **Be EXHAUSTIVE within scope.** Include every distinct fact, clause, obligation, amount, or condition from the evidence that is relevant to the question. Do not summarize multiple distinct items into one bullet — give each its own bullet.
+7. If the evidence contains explicit numeric values (e.g., dollar amounts, time periods/deadlines, percentages, counts), include them verbatim.
+8. **Completeness over brevity.** If the question characterizes a topic one way (e.g. "percentage-based fees") but the evidence shows additional dimensions (e.g. fixed charges alongside percentages), include ALL dimensions — do not limit to the question's framing.
+9. **Expand categories, not count.** When the question lists categories in parentheses (e.g. "risk of loss, liability limitations, non-transferability"), treat each as a CATEGORY that may contain multiple items. List ALL items found in each category — do not cap at the number of categories mentioned.
+10. When the specific information requested is absent from the evidence, **lead with** an explicit statement that it was not found before mentioning any related information.
+11. Entities with different legal names are DIFFERENT entities (e.g. "Contoso Lifts LLC" ≠ "Contoso Ltd."). Do NOT conflate them.
+12. **Prefer exact lexical matches over semantic paraphrases.** If the question asks about "non-transferability" and the evidence contains a clause saying something "is not transferable", cite THAT clause rather than a loosely related clause (e.g. "may not assign"). Match the question's specific terminology to the evidence's wording.
+{document_guidance}
+
+Respond using ONLY bullet points — no summary paragraph, no headers, no preamble:
+
+- Fact from evidence [1]
+- Another fact from evidence [2]
+
+Response:"""
+
+        # ---- V9: Hybrid — scope-control + consolidation for precise answers ----
+        if variant == "v9_hybrid":
+            return f"""You are an expert analyst. Answer with bullet points only.
+
+Question: {query}
+
+Evidence Context:
+{context}
+
+Instructions:
+1. Answer the question using ONLY information from the Evidence Context.
+2. REFUSE only for specific lookups where the exact data point is absent:
+   - Question asks for "bank routing number" but evidence has no routing number → Refuse
+   - Question asks for "SWIFT code" but evidence has no SWIFT/IBAN → Refuse
+   - Question asks for "California law" but evidence shows a different state → Refuse
+   - Question asks about a specific term, clause, or concept by name (e.g. "mold damage", "force majeure") but that exact term does NOT appear anywhere in the evidence → Refuse. Do NOT infer that an unnamed concept falls under a broader or related category.
+   When refusing, respond ONLY with: "The requested information was not found in the available documents."
+3. For general questions (warranty terms, agreement details, fees, obligations, etc.),
+   synthesize all relevant information from the evidence even if the text is
+   fragmentary or OCR-imperfect. Do NOT refuse when partial evidence is available.
+4. **RESPECT ALL QUALIFIERS** in the question. If the question asks for a specific type, category, or unit:
+   - Include ONLY items matching that qualifier
+   - EXCLUDE items that don't match, even if they seem related
+   - If the question specifies a unit (e.g. "day-based"), do NOT include items in other units (weeks, months) even if convertible
+5. Cite sources using ONLY the numbered markers [1], [2], [3], etc. that appear at the start of each evidence chunk. Do NOT invent citation formats — never put document names, file paths, or section names inside square brackets.
+6. If the question asks about items **explicitly described as X**, include ONLY items the document actually LABELS or CATEGORIZES as X — not items that merely relate to X in practice.
+7. **ONE bullet = one distinct top-level answer.** If multiple passages describe the same item, MERGE them into a single bullet. Do NOT create separate bullets for supporting details of the same item.
+8. Answer ONLY what was asked — no extra items, no tangential information.
+   If the question asks for N items (e.g. "list the three"), return exactly N bullets.
+9. When the specific information requested is absent from the evidence, **lead with** an explicit statement that it was not found before mentioning any related information.
+10. Entities with different legal names are DIFFERENT entities (e.g. "Contoso Lifts LLC" ≠ "Contoso Ltd."). Do NOT conflate them.
+11. **Prefer exact lexical matches over semantic paraphrases.** If the question asks about "non-transferability" and the evidence contains a clause saying something "is not transferable", cite THAT clause rather than a loosely related clause (e.g. "may not assign"). Match the question's specific terminology to the evidence's wording.
+{document_guidance}
+
+Respond using ONLY bullet points — no summary paragraph, no headers, no preamble:
+
+- Fact from evidence [1]
+- Another fact from evidence [2]
+
+Response:"""
+
         # ---- V3: Key-points only — drops Summary to eliminate duplication ----
         if variant == "v3_keypoints":
             return f"""You are an expert analyst. Answer with bullet points only.
@@ -2574,19 +2718,20 @@ Instructions:
    - Include ONLY items matching that qualifier
    - EXCLUDE items that don't match, even if they seem related
    - If the question specifies a unit (e.g. "day-based"), do NOT include items in other units (weeks, months) even if convertible
-5. Include citations [N] for factual claims.
+5. Cite sources using ONLY the numbered markers [1], [2], [3], etc. that appear at the start of each evidence chunk. Do NOT invent citation formats — never put document names, file paths, or section names inside square brackets.
 6. If the evidence contains explicit numeric values (e.g., dollar amounts, time periods/deadlines, percentages, counts), include them verbatim.
 7. Prefer concrete obligations/thresholds over general paraphrases.
 8. Answer ONLY what was asked — no extra items, no tangential information.
    If the question asks for N items (e.g. "list the three"), return exactly N bullets.
 9. When the specific information requested is absent from the evidence, **lead with** an explicit statement that it was not found before mentioning any related information.
 10. Entities with different legal names are DIFFERENT entities (e.g. "Contoso Lifts LLC" ≠ "Contoso Ltd."). Do NOT conflate them.
+11. **Prefer exact lexical matches over semantic paraphrases.** If the question asks about "non-transferability" and the evidence contains a clause saying something "is not transferable", cite THAT clause rather than a loosely related clause (e.g. "may not assign"). Match the question's specific terminology to the evidence's wording.
 {document_guidance}
 
 Respond using ONLY bullet points — no summary paragraph, no headers, no preamble:
 
-- [Fact with citation [N]]
-- [Fact with citation [N]]
+- Fact from evidence [1]
+- Another fact from evidence [2]
 
 Response:"""
 
@@ -2613,25 +2758,26 @@ Instructions:
    - Include ONLY items matching that qualifier
    - EXCLUDE items that don't match, even if they seem related
    - If the question specifies a unit (e.g. "day-based"), do NOT include items in other units (weeks, months) even if convertible
-5. Include citations [N] for factual claims (aim for every sentence that states a fact).
+5. Cite sources using ONLY the numbered markers [1], [2], [3], etc. that appear at the start of each evidence chunk. Do NOT invent citation formats — never put document names, file paths, or section names inside square brackets. Aim for a citation on every sentence that states a fact.
 6. If the evidence contains explicit numeric values (e.g., dollar amounts, time periods/deadlines, percentages, counts), include them verbatim.
 7. Prefer concrete obligations/thresholds over general paraphrases.
 8. If the question is asking for obligations, reporting/record-keeping, remedies, default/breach, or dispute-resolution: enumerate each distinct obligation/mechanism that is explicitly present in the Evidence Context; do not omit items just because another item is more prominent.
 9. Answer precisely what was asked. Do not volunteer additional conditions, exceptions, or tangential information that was not requested.
 10. When the specific information requested is absent from the evidence, always **lead with** an explicit statement that it was not found (e.g. "The documents do not provide X") before mentioning any related information.
+11. **Prefer exact lexical matches over semantic paraphrases.** If the question asks about "non-transferability" and the evidence contains a clause saying something "is not transferable", cite THAT clause rather than a loosely related clause (e.g. "may not assign"). Match the question's specific terminology to the evidence's wording.
 {document_guidance}
 
 Respond using this format:
 
 ## Summary
 
-[Summary with citations [N] for every factual claim. Include explicit numeric values verbatim. Cover provisions from ALL source documents, not just the most prominent one.]
+Concise summary with numbered citations like [1], [2] for every factual claim. Include explicit numeric values verbatim. Cover provisions from ALL source documents, not just the most prominent one.
 
 ## Key Points
 
-- [Distinct item/obligation 1 with citation [N]]
-- [Distinct item/obligation 2 with citation [N]]
-- [Additional items from each source document as needed]
+- Distinct item/obligation with citation [1]
+- Another distinct item with citation [2]
+- Additional items from each source document as needed
 
 Response:"""
 
@@ -2649,18 +2795,18 @@ Respond using this format:
 
 ## Findings
 
-- **Finding 1:** [Statement with exact source citation [N]]
-- **Finding 2:** [Statement with exact source citation [N]]
-- [Additional findings as needed]
+- **Finding 1:** Statement with exact source citation [1]
+- **Finding 2:** Statement with exact source citation [2]
+- Additional findings as needed
 
 ## Evidence Chain
 
-[Logical chain showing how evidence connects, with citations [N]]
+Logical chain showing how evidence connects, with citations [1], [2]
 
 ## Gaps and Confidence
 
-- **Gaps:** [Any missing information or uncertainties]
-- **Confidence:** [High/Medium/Low with justification]
+- **Gaps:** Any missing information or uncertainties
+- **Confidence:** High/Medium/Low with justification
 
 Audit Trail:"""
 
@@ -3041,7 +3187,7 @@ BEGIN ANALYSIS:"""
                     narrative += f"- Fields extracted: {len([k for k in ext.keys() if not k.startswith('_')])}\n\n"
         else:
             try:
-                comparison_result = await self.llm.acomplete(comparison_prompt)
+                comparison_result = await acomplete_with_retry(self.llm, comparison_prompt)
                 narrative = comparison_result.text.strip()
             except Exception as e:
                 logger.error("llm_comparison_failed", error=str(e))
@@ -3355,7 +3501,7 @@ BEGIN ANALYSIS:"""
             narrative = "## Analysis Failed: LLM not available\n\nRaw evidence was retrieved but cannot be analyzed."
         else:
             try:
-                comparison_result = await self.llm.acomplete(comparison_prompt)
+                comparison_result = await acomplete_with_retry(self.llm, comparison_prompt)
                 narrative = comparison_result.text.strip()
             except Exception as e:
                 logger.error("llm_sentence_analysis_failed", error=str(e))
@@ -3903,5 +4049,15 @@ BEGIN ANALYSIS:"""
                     "citation_type": "chunk",
                     **citation_map[cite_key]
                 })
+        
+        # Diagnostic: log when response has [N] markers but none match
+        if not citations and (used_citations or _sent_map):
+            logger.warning(
+                "extract_citations_no_match",
+                response_markers=sorted(used_citations) if used_citations else [],
+                citation_map_keys=sorted(citation_map.keys()),
+                sent_map_keys=sorted(_sent_map.keys()) if _sent_map else [],
+                response_preview=response[:200],
+            )
         
         return citations

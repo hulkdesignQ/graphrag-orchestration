@@ -134,6 +134,24 @@ param auraDsClientSecret string = ''
 @description('Neo4j Aura DS client ID for GDS operations')
 param auraDsClientId string = ''
 
+// ── Stripe Billing ──────────────────────────────────────────────────────
+@secure()
+@description('Stripe secret key for payment processing')
+param stripeSecretKey string = ''
+
+@description('Stripe publishable key (safe to expose to frontend)')
+param stripePublishableKey string = ''
+
+@secure()
+@description('Stripe webhook signing secret')
+param stripeWebhookSecret string = ''
+
+@description('Stripe Price ID for Pro plan ($10/mo)')
+param stripePricePro string = ''
+
+@description('Stripe Price ID for Pro+ plan ($39/mo)')
+param stripePriceProPlus string = ''
+
 // ── Parameterized resource names (previously hardcoded) ─────────────────
 
 @description('Name of the existing resource group')
@@ -155,7 +173,7 @@ param azureOpenAiResourceName string = 'graphrag-openai-8476'
 param documentIntelligenceName string = 'doc-intel-graphrag'
 
 @description('Neo4j connection URI')
-param neo4jUri string = 'neo4j+s://a86dcf63.databases.neo4j.io'
+param neo4jUri string = 'neo4j+s://501bc8d1.databases.neo4j.io'
 
 @description('Neo4j username')
 param neo4jUsername string = 'neo4j'
@@ -166,8 +184,14 @@ param neo4jDatabase string = 'neo4j'
 @description('Group ID override for shared demo tenant (empty = per-user isolation)')
 param groupIdOverride string = ''
 
+@description('Group ID for demo/sample documents shown with the Demo dropdown option')
+param demoGroupId string = ''
+
 @description('Deployment timestamp for cache busting — auto-generated on each deploy')
 param deployTimestamp string = utcNow()
+
+@description('Name of the existing Log Analytics workspace for container app logs')
+param logAnalyticsWorkspaceName string = 'workspace-rggraphragfeatureeZiR'
 
 // Tags for all resources
 var tags = {
@@ -188,6 +212,7 @@ module containerAppsEnvironment './core/host/container-apps-environment.bicep' =
     name: containerAppsEnvironmentName
     location: location
     tags: tags
+    logAnalyticsWorkspaceName: logAnalyticsWorkspaceName
   }
 }
 
@@ -443,11 +468,22 @@ var conditionalSecretEnvVars = concat(
   !empty(auraDsClientSecret) ? [
       { name: 'AURA_DS_CLIENT_ID', value: auraDsClientId }
       { name: 'AURA_DS_CLIENT_SECRET', secretRef: 'aura-ds-client-secret' }
+    ] : [],
+  !empty(stripeSecretKey) ? [
+      { name: 'STRIPE_SECRET_KEY', secretRef: 'stripe-secret-key' }
+      { name: 'STRIPE_PUBLISHABLE_KEY', value: stripePublishableKey }
+      { name: 'STRIPE_WEBHOOK_SECRET', secretRef: 'stripe-webhook-secret' }
+      { name: 'STRIPE_PRICE_PRO', value: stripePricePro }
+      { name: 'STRIPE_PRICE_PRO_PLUS', value: stripePriceProPlus }
     ] : []
 )
 
 // Shared environment variables for both API and Worker
 var sharedEnvVars = concat([
+  {
+    name: 'DEMO_GROUP_ID'
+    value: demoGroupId
+  }
   {
     name: 'RUNNING_IN_PRODUCTION'
     value: 'true'
@@ -577,6 +613,63 @@ var sharedEnvVars = concat([
     name: 'VOYAGE_EMBEDDING_DIM'
     value: '2048'
   }
+  // ── Route 7 (HippoRAG 2) tuning — mirrors local .env overrides ──
+  {
+    name: 'ROUTE7_RERANK'
+    value: '1'
+  }
+  {
+    name: 'ROUTE7_PPR_PASSAGE_TOP_K'
+    value: '50'
+  }
+  {
+    name: 'ROUTE7_SYNONYM_THRESHOLD'
+    value: '0.70'
+  }
+  {
+    name: 'ROUTE7_DPR_TOP_K'
+    value: '50'
+  }
+  {
+    name: 'ROUTE7_TRIPLE_CANDIDATES_K'
+    value: '500'
+  }
+  {
+    name: 'ROUTE7_TRIPLE_RERANK'
+    value: '1'
+  }
+  {
+    name: 'ROUTE7_SEMANTIC_PASSAGE_SEEDS'
+    value: '1'
+  }
+  {
+    name: 'ROUTE7_SEMANTIC_SEED_TOP_K'
+    value: '20'
+  }
+  {
+    name: 'ROUTE7_SEMANTIC_SEED_WEIGHT'
+    value: '0.05'
+  }
+  {
+    name: 'ROUTE7_TRIPLE_TOP_K'
+    value: '15'
+  }
+  {
+    name: 'ROUTE7_RERANK_ALL'
+    value: '0'
+  }
+  {
+    name: 'ROUTE7_ENTITY_SEED_TOP_K'
+    value: '15'
+  }
+  {
+    name: 'ROUTE7_SENTENCE_WINDOW'
+    value: '1'
+  }
+  {
+    name: 'ROUTE7_MAX_MERGE_RUN'
+    value: '1'
+  }
 ], useUserUpload ? userUploadEnvVars : [])
 
 // Shared secrets — Key Vault references + runtime-generated values
@@ -617,6 +710,17 @@ var sharedSecrets = concat([
   {
     name: 'aura-ds-client-secret'
     keyVaultUrl: '${keyVault.outputs.vaultUri}secrets/aura-ds-client-secret'
+    identity: managedIdentity.outputs.id
+  }
+] : [], !empty(stripeSecretKey) ? [
+  {
+    name: 'stripe-secret-key'
+    keyVaultUrl: '${keyVault.outputs.vaultUri}secrets/stripe-secret-key'
+    identity: managedIdentity.outputs.id
+  }
+  {
+    name: 'stripe-webhook-secret'
+    keyVaultUrl: '${keyVault.outputs.vaultUri}secrets/stripe-webhook-secret'
     identity: managedIdentity.outputs.id
   }
 ] : [])

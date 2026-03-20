@@ -1,0 +1,85 @@
+.overlay {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 10000;
+    display: flex;
+    justify-content: center;
+    padding: 16px;
+    pointer-events: none;
+}
+
+.banner {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    max-width: 860px;
+    width: 100%;
+    padding: 16px 24px;
+    background: var(--colorNeutralBackground1);
+    border: 1px solid var(--colorNeutralStroke1);
+    border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+    pointer-events: auto;
+    animation: slideUp 0.3s ease-out;
+}
+
+@keyframes slideUp {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.icon {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+}
+
+.content {
+    flex: 1;
+    min-width: 0;
+}
+
+.title {
+    margin: 0 0 4px 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--colorNeutralForeground1);
+}
+
+.description {
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.4;
+    color: var(--colorNeutralForeground2);
+}
+
+.actions {
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+/* Stack vertically on small screens */
+@media (max-width: 640px) {
+    .banner {
+        flex-direction: column;
+        align-items: stretch;
+        text-align: center;
+    }
+
+    .icon {
+        justify-content: center;
+    }
+
+    .actions {
+        justify-content: center;
+    }
+}

@@ -15,9 +15,16 @@ from typing import Dict, List, Any, Optional, Tuple
 from pathlib import Path
 import json
 import asyncio
+import threading
 import structlog
 
 logger = structlog.get_logger(__name__)
+
+# Per-group lock to serialize incremental_update() read-modify-write cycles.
+# Without this, concurrent indexing jobs for the same group_id can lose data
+# when both read the same baseline, merge independently, and overwrite.
+_incremental_update_locks: Dict[str, threading.Lock] = {}
+_incremental_update_locks_guard = threading.Lock()
 
 
 class DualIndexService:
@@ -326,13 +333,33 @@ class DualIndexService:
         """
         Incrementally update indexes with new data.
         
-        Used when new documents are indexed - avoids full re-sync.
+        Uses a per-group lock to prevent concurrent read-modify-write
+        races when multiple documents in the same group are indexed
+        simultaneously.
         """
         logger.info("incremental_update_start",
                    new_entities=len(new_entities),
                    new_triples=len(new_triples),
                    new_text_units=len(new_text_units))
         
+        # Acquire per-group lock (prevents concurrent R-M-W on same files)
+        with _incremental_update_locks_guard:
+            if self.group_id not in _incremental_update_locks:
+                _incremental_update_locks[self.group_id] = threading.Lock()
+            lock = _incremental_update_locks[self.group_id]
+
+        with lock:
+            return await self._incremental_update_locked(
+                new_entities, new_triples, new_text_units,
+            )
+
+    async def _incremental_update_locked(
+        self,
+        new_entities: List[Dict[str, Any]],
+        new_triples: List[Dict[str, Any]],
+        new_text_units: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """Inner implementation of incremental_update (caller holds lock)."""
         group_dir = self.hipporag_dir / self.group_id
         
         # Load existing data

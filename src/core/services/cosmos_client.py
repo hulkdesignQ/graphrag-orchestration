@@ -11,6 +11,7 @@ from azure.identity.aio import DefaultAzureCredential
 
 from src.core.models.usage import UsageRecord
 from src.core.models.chat import ChatSession
+from src.core.models.subscription import SubscriptionRecord
 
 logger = structlog.get_logger(__name__)
 
@@ -24,12 +25,14 @@ class CosmosDBClient:
         self.database_name = os.getenv("COSMOS_DB_DATABASE_NAME", "graphrag")
         self.chat_container_name = os.getenv("COSMOS_DB_CHAT_HISTORY_CONTAINER", "chat_history")
         self.usage_container_name = os.getenv("COSMOS_DB_USAGE_CONTAINER", "usage")
+        self.subscriptions_container_name = os.getenv("COSMOS_DB_SUBSCRIPTIONS_CONTAINER", "subscriptions")
         
         self._client: Optional[CosmosClient] = None
         self._credential: Optional[DefaultAzureCredential] = None
         self._database = None
         self._chat_container = None
         self._usage_container = None
+        self._subscriptions_container = None
         
         if not self.endpoint:
             logger.warning("cosmos_db_not_configured", reason="COSMOS_DB_ENDPOINT not set")
@@ -50,6 +53,7 @@ class CosmosDBClient:
                 self._database = self._client.get_database_client(self.database_name)
                 self._chat_container = self._database.get_container_client(self.chat_container_name)
                 self._usage_container = self._database.get_container_client(self.usage_container_name)
+                self._subscriptions_container = self._database.get_container_client(self.subscriptions_container_name)
             
             logger.info("cosmos_db_initialized",
                        endpoint=self.endpoint,
@@ -192,6 +196,75 @@ class CosmosDBClient:
         except Exception as e:
             logger.error("usage_cross_query_failed", error=str(e))
             return []
+
+    # ========================================================================
+    # Subscription Methods (Stripe billing)
+    # ========================================================================
+
+    async def get_subscription(self, user_id: str) -> Optional[SubscriptionRecord]:
+        """Get subscription record by user_id."""
+        if not self._subscriptions_container:
+            await self.ensure_initialized()
+        if not self._subscriptions_container:
+            return None
+
+        try:
+            query = "SELECT * FROM c WHERE c.user_id = @user_id"
+            parameters = [{"name": "@user_id", "value": user_id}]
+            items = []
+            async for item in self._subscriptions_container.query_items(
+                query=query,
+                parameters=parameters,
+                partition_key=user_id,
+            ):
+                items.append(item)
+            if items:
+                return SubscriptionRecord(**items[0])
+            return None
+        except Exception as e:
+            logger.warning("subscription_read_failed", error=str(e), user_id=user_id)
+            return None
+
+    async def get_subscription_by_stripe_customer(self, stripe_customer_id: str) -> Optional[SubscriptionRecord]:
+        """Get subscription by Stripe customer ID (cross-partition query)."""
+        if not self._subscriptions_container:
+            await self.ensure_initialized()
+        if not self._subscriptions_container:
+            return None
+
+        try:
+            query = "SELECT * FROM c WHERE c.stripe_customer_id = @cid"
+            parameters = [{"name": "@cid", "value": stripe_customer_id}]
+            async for item in self._subscriptions_container.query_items(
+                query=query,
+                parameters=parameters,
+                enable_cross_partition_query=True,
+                max_item_count=1,
+            ):
+                return SubscriptionRecord(**item)
+            return None
+        except Exception as e:
+            logger.warning("subscription_by_customer_failed", error=str(e), customer_id=stripe_customer_id)
+            return None
+
+    async def upsert_subscription(self, record: SubscriptionRecord) -> None:
+        """Create or update a subscription record."""
+        if not self._subscriptions_container:
+            await self.ensure_initialized()
+        if not self._subscriptions_container:
+            logger.warning("subscription_upsert_skipped", reason="Cosmos not initialized")
+            return
+
+        try:
+            from datetime import datetime
+            record.updated_at = datetime.utcnow()
+            doc = record.model_dump(mode="json")
+            doc["partition_id"] = record.partition_id
+            await self._subscriptions_container.upsert_item(doc)
+            logger.info("subscription_upserted", user_id=record.user_id, plan=record.plan_tier)
+        except Exception as e:
+            logger.error("subscription_upsert_failed", error=str(e), user_id=record.user_id)
+
 
     # ========================================================================
     # Chat History Methods

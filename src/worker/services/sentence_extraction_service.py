@@ -274,6 +274,53 @@ def _call_llm_json(prompt: str) -> Optional[Any]:
         return None
 
 
+def _call_llm_text(prompt: str) -> Optional[str]:
+    """Synchronous LLM call that returns plain text or None."""
+    try:
+        from llama_index.llms.azure_openai import AzureOpenAI
+    except ImportError:
+        return None
+
+    from src.core.config import settings
+
+    model = os.getenv("SENTENCE_REVIEW_MODEL", "gpt-4.1")
+    deployment = os.getenv("SENTENCE_REVIEW_DEPLOYMENT", model)
+    api_version = settings.AZURE_OPENAI_API_VERSION or "2025-03-01-preview"
+
+    llm_kwargs: dict = {
+        "engine": deployment,
+        "azure_endpoint": settings.AZURE_OPENAI_ENDPOINT,
+        "api_version": api_version,
+        "temperature": 0.0,
+    }
+    if settings.AZURE_OPENAI_API_KEY:
+        llm_kwargs["api_key"] = settings.AZURE_OPENAI_API_KEY
+    else:
+        env_token = os.getenv("AZURE_OPENAI_BEARER_TOKEN")
+        if env_token:
+            llm_kwargs["use_azure_ad"] = True
+            llm_kwargs["azure_ad_token_provider"] = lambda: env_token
+        else:
+            try:
+                from azure.identity import DefaultAzureCredential, get_bearer_token_provider
+                credential = DefaultAzureCredential()
+                token_provider = get_bearer_token_provider(
+                    credential, "https://cognitiveservices.azure.com/.default"
+                )
+                llm_kwargs["use_azure_ad"] = True
+                llm_kwargs["azure_ad_token_provider"] = token_provider
+            except Exception:
+                return None
+
+    try:
+        llm = AzureOpenAI(**llm_kwargs)
+        response = llm.complete(prompt)
+        return (response.text or "").strip()
+    except Exception as exc:
+        logger.debug("llm_connect_fragments_failed", error=str(exc))
+        return None
+
+
 def _call_llm_for_review(prompt: str) -> Optional[List[str]]:
     """LLM call expecting a JSON array of strings. Returns list or None."""
     parsed = _call_llm_json(prompt)
@@ -351,6 +398,213 @@ _LIST_JOIN_GROUP_MAX_TOKENS = 120
 
 # Preamble merge: colon-terminated stubs and very short fragments
 _PREAMBLE_RE = re.compile(r"[:\.][\s.]*$")  # ends with : or :. (possibly trailing spaces/dots)
+
+# Section header detection for oversized section splitting.
+_SECTION_SPLIT_THRESHOLD = int(os.getenv("SECTION_SPLIT_THRESHOLD", "20"))
+
+
+def _llm_detect_section_headers(
+    sentences: List[Dict[str, Any]],
+    section_path: str,
+) -> List[int]:
+    """Use LLM to detect inline section headers within an oversized section.
+
+    Sends numbered sentence texts to gpt-4.1 and asks it to identify which
+    are section/subsection headers vs body content. Returns indices of
+    detected headers.
+
+    Cost: ~3K tokens per oversized section (negligible at indexing time).
+    """
+    numbered = "\n".join(
+        f"[{i}] {s.get('text', '').strip()}" for i, s in enumerate(sentences)
+    )
+
+    endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+    if not endpoint:
+        try:
+            from src.core.config import settings as _cfg
+            endpoint = _cfg.AZURE_OPENAI_ENDPOINT
+        except Exception:
+            pass
+    deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4.1")
+    api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-12-01-preview")
+    if not endpoint:
+        logger.debug("section_split_llm_no_endpoint")
+        return []
+
+    try:
+        from openai import AzureOpenAI as OpenAIClient
+
+        client_kwargs: Dict[str, Any] = {
+            "azure_endpoint": endpoint,
+            "api_version": api_version,
+        }
+
+        api_key = os.getenv("AZURE_OPENAI_API_KEY")
+        if api_key:
+            client_kwargs["api_key"] = api_key
+        else:
+            env_token = os.getenv("AZURE_OPENAI_AD_TOKEN")
+            if env_token:
+                client_kwargs["azure_ad_token"] = env_token
+            else:
+                from azure.identity import DefaultAzureCredential
+                credential = DefaultAzureCredential()
+                token = credential.get_token("https://cognitiveservices.azure.com/.default")
+                client_kwargs["azure_ad_token"] = token.token
+
+        client = OpenAIClient(timeout=60, **client_kwargs)
+
+        last_exc: Optional[Exception] = None
+        for attempt in range(3):
+            try:
+                response = client.chat.completions.create(
+                    model=deployment,
+                    temperature=0,
+                    messages=[
+                        {"role": "system", "content": (
+                            "You are a document structure analyst. Given numbered sentences "
+                            "from a document section, identify which are section/subsection "
+                            "headers (not body content). Return ONLY a JSON array: "
+                            '[{"index": N, "title": "header text"}]. '
+                            "If none, return []."
+                        )},
+                        {"role": "user", "content": f"Identify section headers:\n\n{numbered}"},
+                    ],
+                )
+                text = (response.choices[0].message.content or "").strip()
+
+                # Strip markdown fences
+                if text.startswith("```"):
+                    text = text.split("\n", 1)[1] if "\n" in text else text[3:]
+                if text.endswith("```"):
+                    text = text[:-3].rstrip()
+                if text.startswith("json"):
+                    text = text[4:].lstrip()
+
+                headers = json_mod.loads(text)
+                indices = [h["index"] for h in headers if isinstance(h.get("index"), int)]
+                logger.info(
+                    "section_split_llm_detected",
+                    section=section_path,
+                    headers_found=len(indices),
+                    headers=[h.get("title", "") for h in headers],
+                )
+                return indices
+            except Exception as exc:
+                last_exc = exc
+                if attempt < 2:
+                    import time as _time
+                    wait = 2 ** attempt  # 1s, 2s
+                    logger.warning("section_split_llm_retry", attempt=attempt + 1, error=str(exc), wait=wait)
+                    _time.sleep(wait)
+
+        logger.warning("section_split_llm_failed", error=str(last_exc), attempts=3)
+        return []
+
+    except Exception as exc:
+        logger.warning("section_split_llm_setup_failed", error=str(exc))
+        return []
+
+
+def _split_oversized_sections(sentences: List[Dict]) -> List[Dict]:
+    """Split oversized sections by detecting inline subsection headers via LLM.
+
+    When Azure DI assigns many sentences to one section (e.g., 76 sentences
+    under "2. Term."), this function uses an LLM to identify which sentences
+    are section headers and creates new subsection paths accordingly.
+
+    Only processes sections exceeding SECTION_SPLIT_THRESHOLD (default 20).
+    Falls back to no-op if LLM is unavailable.
+    """
+    if _SECTION_SPLIT_THRESHOLD <= 0:
+        return sentences
+
+    # Group by section_path
+    from collections import defaultdict, OrderedDict
+    section_groups: Dict[str, List[int]] = OrderedDict()
+    for i, sent in enumerate(sentences):
+        sp = sent.get("section_path") or ""
+        section_groups.setdefault(sp, []).append(i)
+
+    # Only process oversized sections
+    oversized = {sp: idxs for sp, idxs in section_groups.items()
+                 if len(idxs) > _SECTION_SPLIT_THRESHOLD and sp}
+    if not oversized:
+        return sentences
+
+    # Detect headers for all oversized sections in parallel
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    detect_tasks = {
+        sp: [sentences[i] for i in idxs]
+        for sp, idxs in oversized.items()
+    }
+    header_results: Dict[str, List[int]] = {}
+    with ThreadPoolExecutor(max_workers=min(len(detect_tasks), 4)) as pool:
+        futures = {
+            pool.submit(_llm_detect_section_headers, sents, sp): sp
+            for sp, sents in detect_tasks.items()
+        }
+        for fut in as_completed(futures):
+            sp = futures[fut]
+            try:
+                header_results[sp] = fut.result()
+            except Exception as exc:
+                logger.warning("section_split_parallel_failed", section=sp, error=str(exc))
+                header_results[sp] = []
+
+    for section_path, indices in oversized.items():
+        header_set = set(header_results.get(section_path, []))
+
+        if not header_set:
+            continue
+
+        current_subsection: Optional[str] = None
+        sub_idx = 0
+        for pos, sent_idx in enumerate(indices):
+            sent = sentences[sent_idx]
+
+            if pos in header_set:
+                title = sent.get("text", "").strip().rstrip(".").rstrip(";")
+                current_subsection = f"{section_path} > {title}"
+                sub_idx = 0
+                logger.debug(
+                    "section_split_header_applied",
+                    parent=section_path,
+                    subsection=title,
+                    position=pos,
+                )
+
+            if current_subsection:
+                sent["section_path"] = current_subsection
+                sent["index_in_section"] = sub_idx
+                sub_idx += 1
+
+    # Recount total_in_section
+    from collections import defaultdict
+    section_counts: Dict[str, int] = defaultdict(int)
+    for sent in sentences:
+        sp = sent.get("section_path") or "[Document Root]"
+        section_counts[sp] += 1
+    for sent in sentences:
+        sp = sent.get("section_path") or "[Document Root]"
+        sent["total_in_section"] = section_counts[sp]
+
+    # Log splits
+    for section_path in oversized:
+        new_sections = {
+            sent.get("section_path") for i in oversized[section_path]
+            if (sent := sentences[i]).get("section_path") != section_path
+        }
+        if new_sections:
+            logger.info(
+                "section_split_applied",
+                parent=section_path,
+                original_count=len(oversized[section_path]),
+                new_subsections=len(new_sections),
+            )
+
+    return sentences
 
 
 def _join_preamble_sentences(sentences: List[Dict]) -> List[Dict]:
@@ -500,23 +754,17 @@ def _detect_letterhead_indices(di_units: List[Any]) -> List[int]:
 
 
 def _synthesize_signature_sentences(sig_block: dict) -> List[str]:
-    """Return a single joined sentence from a structured signature block.
+    """Connect signature block fragments into one meaningful sentence via LLM.
 
-    Instead of constructing a template sentence from parsed party/role data
-    (which is brittle and depends on regex extraction), we join the **raw
-    paragraph lines** into one sentence — filtering only underscore filler
-    and bare field labels.
+    The raw lines from a signature block are distinct fragments (names, roles,
+    dates, labels) that individually lack context.  An LLM connects them into
+    a single coherent sentence without changing sequence or adding information.
 
-    Joining keeps all fragments (party names, roles, dates) in one embedding
-    vector so semantic search can match any combination (e.g. "who is the
-    authorized representative" matches the sentence containing both the name
-    and the role).  The sentence is stored with ``source="signature_party"``
-    which bypasses the noise-denoiser and gets a ``[Signature Block]``
-    embedding context prefix.
+    Falls back to comma-joined text when the LLM is unavailable.
     """
     raw_lines = sig_block.get("raw_lines") or []
 
-    parts: List[str] = []
+    filtered: List[str] = []
     for line in raw_lines:
         line = line.strip()
         if not line:
@@ -525,13 +773,25 @@ def _synthesize_signature_sentences(sig_block: dict) -> List[str]:
             continue
         if _SIG_FIELD_LABEL_RE.match(line):
             continue
-        parts.append(line)
+        filtered.append(line)
 
-    if not parts:
+    if not filtered:
         return []
-    # Strip trailing periods before joining to avoid "Ltd.." doubles
-    joined = ". ".join(p.rstrip(".") for p in parts)
-    return [joined]
+
+    prompt = (
+        "Connect the following text fragments into a single meaningful sentence.\n"
+        "Rules:\n"
+        "- Do NOT add any information not present in the fragments\n"
+        "- Just add minimal connective words to make it read as one coherent sentence\n"
+        "- Return ONLY the resulting sentence, nothing else\n\n"
+        "Fragments:\n"
+        + "\n".join(f"- {f}" for f in filtered)
+    )
+    result = _call_llm_text(prompt)
+    if result:
+        return [result]
+
+    return [", ".join(filtered)]
 
 
 def _is_noise_sentence(
@@ -1051,30 +1311,69 @@ def extract_sentences_from_di_units(
             continue
 
         # ─── Source G: Signature block (tagged by section-aware path) ──
+        # Use LLM fragment connector to produce coherent sentences from
+        # disconnected signature fragments (names, roles, dates).
         if role == "signature":
-            sig_text = unit_text.strip()
-            if sig_text:
-                text_key = sig_text.strip().lower()
-                if text_key not in seen_texts:
-                    sent_id = f"{doc_id}_sent_{global_idx}"
-                    seen_texts[text_key] = sent_id
-                    section_key = "[Signature Block]"
-                    idx_in_section = section_counters.get(section_key, 0)
-                    section_counters[section_key] = idx_in_section + 1
-                    all_sentences.append({
-                        "id": sent_id,
-                        "text": sig_text,
-                        "document_id": doc_id,
-                        "source": "signature_block",
-                        "index_in_doc": global_idx,
-                        "section_path": "[Signature Block]",
-                        "page": page,
-                        "confidence": 1.0,
-                        "tokens": len(sig_text.split()),
-                        "parent_text": "",
-                        "index_in_section": idx_in_section,
-                    })
-                    global_idx += 1
+            sig_block = meta.get("signature_block") or {}
+            raw_lines = sig_block.get("raw_lines") or []
+            if not raw_lines:
+                raw_lines = [l.strip() for l in unit_text.strip().split("\n") if l.strip()]
+            if raw_lines:
+                for sig_text in _synthesize_signature_sentences({"raw_lines": raw_lines}):
+                    text_key = sig_text.strip().lower()
+                    if text_key not in seen_texts:
+                        sent_id = f"{doc_id}_sent_{global_idx}"
+                        seen_texts[text_key] = sent_id
+                        section_key = "[Signature Block]"
+                        idx_in_section = section_counters.get(section_key, 0)
+                        section_counters[section_key] = idx_in_section + 1
+                        all_sentences.append({
+                            "id": sent_id,
+                            "text": sig_text,
+                            "document_id": doc_id,
+                            "source": "signature_block",
+                            "index_in_doc": global_idx,
+                            "section_path": "[Signature Block]",
+                            "page": page,
+                            "confidence": 1.0,
+                            "tokens": len(sig_text.split()),
+                            "parent_text": "",
+                            "index_in_section": idx_in_section,
+                        })
+                        global_idx += 1
+            continue
+
+        # ─── Source H: Contact/address block ──────────────────────
+        # Use LLM fragment connector to produce coherent sentences from
+        # concatenated address fields (name, street, city, phone).
+        if role == "contact_block":
+            cb_data = meta.get("contact_block") or {}
+            raw_lines = cb_data.get("raw_lines") or []
+            if not raw_lines:
+                raw_lines = [l.strip() for l in unit_text.strip().split("\n") if l.strip()]
+            if raw_lines:
+                for cb_text in _synthesize_signature_sentences({"raw_lines": raw_lines}):
+                    text_key = cb_text.strip().lower()
+                    if text_key not in seen_texts:
+                        sent_id = f"{doc_id}_sent_{global_idx}"
+                        seen_texts[text_key] = sent_id
+                        section_key = section_path or "[Contact Block]"
+                        idx_in_section = section_counters.get(section_key, 0)
+                        section_counters[section_key] = idx_in_section + 1
+                        all_sentences.append({
+                            "id": sent_id,
+                            "text": cb_text,
+                            "document_id": doc_id,
+                            "source": "contact_block",
+                            "index_in_doc": global_idx,
+                            "section_path": section_path or "[Contact Block]",
+                            "page": page,
+                            "confidence": 1.0,
+                            "tokens": len(cb_text.split()),
+                            "parent_text": "",
+                            "index_in_section": idx_in_section,
+                        })
+                        global_idx += 1
             continue
 
         # Skip non-content DI roles (remaining headers/footers, page numbers, etc.)
@@ -1322,6 +1621,9 @@ def extract_sentences_from_di_units(
         all_sentences = _join_preamble_sentences(all_sentences)
     # Join consecutive short spec-list sentences (Fix A7)
     all_sentences = _join_spec_list_sentences(all_sentences)
+
+    # Split oversized sections by detecting inline subsection headers
+    all_sentences = _split_oversized_sections(all_sentences)
 
     # Backfill total_in_section from section_counters
     for sent in all_sentences:

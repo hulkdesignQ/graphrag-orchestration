@@ -295,10 +295,8 @@ class HubExtractor:
         try:
             loop = asyncio.get_running_loop()
             
-            # Build folder filter if folder_id is set
+            # IN_FOLDER relationships not created during indexing; group_id provides isolation
             folder_filter = ""
-            if self.folder_id:
-                folder_filter = "AND (d)-[:IN_FOLDER]->(:Folder {id: $folder_id})"
             
             # Query Neo4j to get document source for each entity
             # Support both Entity label variants for compatibility

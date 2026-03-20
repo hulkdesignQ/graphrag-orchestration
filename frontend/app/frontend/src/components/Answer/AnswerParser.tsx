@@ -238,6 +238,17 @@ const renderCitation = (detail: CitationDetail) => {
         );
     }
 
+    if (!detail.documentUrl) {
+        // No backing file (e.g. community/graph citation) — render as non-clickable badge
+        return renderToStaticMarkup(
+            <span className="citationBadgeContainer">
+                <span className="supContainer" title={detail.reference}>
+                    {supElement}
+                </span>
+            </span>
+        );
+    }
+
     const path = getCitationFilePath(detail.reference, detail.documentUrl);
     return renderToStaticMarkup(
         <span className="citationBadgeContainer">

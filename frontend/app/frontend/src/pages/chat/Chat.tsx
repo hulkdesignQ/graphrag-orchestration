@@ -1,6 +1,6 @@
-import { useRef, useState, useEffect, useContext } from "react";
+import { useRef, useState, useEffect, useContext, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import readNDJSONStream from "ndjson-readablestream";
 
@@ -9,6 +9,7 @@ import styles from "./Chat.module.css";
 
 import { chatApi, configApi, RetrievalMode, ChatAppResponse, ChatAppResponseOrError, ChatAppRequest, ResponseMessage, SpeechConfig } from "../../api";
 import { StructuredCitation } from "../../api/models";
+import { Events } from "../../analytics";
 import { Answer, AnswerError, AnswerLoading } from "../../components/Answer";
 import { QuestionInput } from "../../components/QuestionInput";
 import { ExampleList } from "../../components/Example";
@@ -18,9 +19,11 @@ import { HistoryPanel } from "../../components/HistoryPanel";
 import { HistoryProviderOptions, useHistoryManager } from "../../components/HistoryProviders";
 import { HistoryButton } from "../../components/HistoryButton";
 import { ClearChatButton } from "../../components/ClearChatButton";
+import { FolderSelector, DEMO_VALUE } from "../../components/FolderSelector";
 import { useLogin, getToken, requireAccessControl } from "../../authConfig";
 import { useMsal } from "@azure/msal-react";
 import { LoginContext } from "../../loginContext";
+import { hasSeenOnboarding, markOnboardingSeen } from "../../utils/onboarding";
 
 /**
  * Map raw JS errors to user-friendly messages.
@@ -47,7 +50,8 @@ function getUserFriendlyError(error: unknown, t: (key: string) => string): strin
 
 const Chat = () => {
     const [searchParams] = useSearchParams();
-    const folderId = searchParams.get("folder") || undefined;
+    const folderId = searchParams.get("folder") || sessionStorage.getItem("selectedFolderId") || undefined;
+    const [selectedFolderId, setSelectedFolderId] = useState<string | undefined>(folderId);
 
     const [isHistoryPanelOpen, setIsHistoryPanelOpen] = useState(false);
     const [promptTemplate, setPromptTemplate] = useState<string>("");
@@ -279,6 +283,9 @@ const Chat = () => {
         setActiveCitation(undefined);
         setActiveAnalysisPanelTab(undefined);
 
+        const queryStartMs = performance.now();
+        Events.querySent({ language: i18n.language, folderId: selectedFolderId ?? undefined });
+
         const token = client ? await getToken(client) : undefined;
 
         try {
@@ -315,7 +322,7 @@ const Chat = () => {
                         use_sharepoint_source: sharePointSourceSupported ? sharePointSourceEnabled : false,
                         ...(seed !== null ? { seed: seed } : {}),
                         ...(speechDetectedLanguage ? { speech_detected_language: speechDetectedLanguage } : {}),
-                        ...(folderId ? { folder_id: folderId } : {})
+                        ...(selectedFolderId ? { folder_id: selectedFolderId } : {})
                     }
                 },
                 // AI Chat Protocol: Client must pass on any session state received from the server
@@ -335,6 +342,7 @@ const Chat = () => {
                 const plan = detail?.plan || "free";
                 const dailyLimit = detail?.daily_limit || "?";
                 const upgradeUrl = detail?.upgrade_url || "/dashboard#plans";
+                Events.rateLimitHit({ plan });
                 throw Error(
                     `You've reached your daily query limit (${dailyLimit} queries on the ${plan} plan). ` +
                     `Visit your [dashboard](${upgradeUrl}) to upgrade your plan.`
@@ -350,7 +358,7 @@ const Chat = () => {
                     setAnswers([...answers, [question, parsedResponse]]);
                     if (typeof parsedResponse.session_state === "string" && parsedResponse.session_state !== "") {
                         const token = client ? await getToken(client) : undefined;
-                        historyManager.addItem(parsedResponse.session_state, [...answers, [question, parsedResponse]], token);
+                        historyManager.addItem(parsedResponse.session_state, [...answers, [question, parsedResponse]], token, selectedFolderId);
                     }
                 } else {
                     // Stopped before any content arrived - restore question to input
@@ -365,10 +373,11 @@ const Chat = () => {
                 setAnswers([...answers, [question, parsedResponse as ChatAppResponse]]);
                 if (typeof parsedResponse.session_state === "string" && parsedResponse.session_state !== "") {
                     const token = client ? await getToken(client) : undefined;
-                    historyManager.addItem(parsedResponse.session_state, [...answers, [question, parsedResponse as ChatAppResponse]], token);
+                    historyManager.addItem(parsedResponse.session_state, [...answers, [question, parsedResponse as ChatAppResponse]], token, selectedFolderId);
                 }
             }
             setSpeechUrls([...speechUrls, null]);
+            Events.queryCompleted({ latencyMs: Math.round(performance.now() - queryStartMs) });
         } catch (e) {
             if (e instanceof DOMException && e.name === "AbortError") {
                 // Stopped during loading - restore question to input
@@ -376,6 +385,7 @@ const Chat = () => {
                 setRestoredQuestion(question);
             } else {
                 setError(e);
+                Events.queryError({ errorType: e instanceof Error ? e.message.slice(0, 80) : "unknown", statusCode: undefined });
             }
         } finally {
             setIsLoading(false);
@@ -395,6 +405,21 @@ const Chat = () => {
         setIsStreaming(false);
         setRestoredQuestion("");
     };
+
+    const handleFolderChange = useCallback(
+        (newFolderId: string | undefined) => {
+            if (newFolderId !== selectedFolderId) {
+                setSelectedFolderId(newFolderId);
+                if (newFolderId) {
+                    sessionStorage.setItem("selectedFolderId", newFolderId);
+                } else {
+                    sessionStorage.removeItem("selectedFolderId");
+                }
+                clearChat();
+            }
+        },
+        [selectedFolderId]
+    );
 
     useEffect(() => chatMessageStreamEnd.current?.scrollIntoView({ behavior: "smooth" }), [isLoading]);
     useEffect(() => chatMessageStreamEnd.current?.scrollIntoView({ behavior: "auto" }), [streamedAnswers]);
@@ -418,6 +443,8 @@ const Chat = () => {
         } else {
             setActiveCitation(citation);
             setActiveAnalysisPanelTab(AnalysisPanelTabs.CitationTab);
+            const docName = decodeURIComponent(citation.split("#")[0].replace(/^.*\/content\//, ""));
+            Events.citationClicked({ documentName: docName });
 
             // Look up structured citation data for highlighting
             const answer = (isStreaming ? streamedAnswers : answers)[index]?.[1];
@@ -515,6 +542,10 @@ const Chat = () => {
                         <HistoryButton className={styles.commandButton} onClick={() => setIsHistoryPanelOpen(!isHistoryPanelOpen)} />
                     )}
                 </div>
+                <FolderSelector
+                    selectedFolderId={selectedFolderId}
+                    onFolderChange={handleFolderChange}
+                />
                 <div className={styles.commandsContainer}>
                     <ClearChatButton className={styles.commandButton} onClick={clearChat} disabled={!lastQuestionRef.current || isLoading} />
                 </div>
@@ -527,7 +558,23 @@ const Chat = () => {
 
                             <h1 className={styles.chatEmptyStateTitle}>{t("chatEmptyStateTitle")}</h1>
                             <h2 className={styles.chatEmptyStateSubtitle}>{t("chatEmptyStateSubtitle")}</h2>
-                            <ExampleList onExampleClicked={onExampleClicked} useMultimodalAnswering={showMultimodalOptions} />
+                            {!hasSeenOnboarding() && (
+                                <div className={styles.welcomeBanner}>
+                                    <span>🚀</span>
+                                    <p className={styles.welcomeBannerText}>
+                                        {t("onboarding.welcomeBanner", "New to Evidoc? Check out our Getting Started guide to learn the basics.")}
+                                    </p>
+                                    <button className={styles.welcomeBannerLink} onClick={() => { markOnboardingSeen(); window.location.hash = "#/getting-started"; }}>
+                                        {t("onboarding.welcomeBannerAction", "Show me →")}
+                                    </button>
+                                    <button className={styles.welcomeBannerDismiss} onClick={(e) => { markOnboardingSeen(); (e.target as HTMLElement).closest(`.${styles.welcomeBanner}`)?.remove(); }}>
+                                        ✕
+                                    </button>
+                                </div>
+                            )}
+                            {selectedFolderId === DEMO_VALUE && (
+                                <ExampleList onExampleClicked={onExampleClicked} useMultimodalAnswering={showMultimodalOptions} />
+                            )}
                         </div>
                     ) : (
                         <div className={styles.chatMessageStream}>
@@ -544,7 +591,6 @@ const Chat = () => {
                                                 speechConfig={speechConfig}
                                                 isSelected={false}
                                                 onCitationClicked={c => onShowCitation(c, index)}
-                                                onSupportingContentClicked={() => onToggleTab(AnalysisPanelTabs.SupportingContentTab, index)}
                                                 onFollowupQuestionClicked={q => makeApiRequest(q)}
                                                 showFollowupQuestions={useSuggestFollowupQuestions && answers.length - 1 === index}
                                                 showSpeechOutputAzure={showSpeechOutputAzure}
@@ -566,7 +612,6 @@ const Chat = () => {
                                                 speechConfig={speechConfig}
                                                 isSelected={selectedAnswer === index && activeAnalysisPanelTab !== undefined}
                                                 onCitationClicked={c => onShowCitation(c, index)}
-                                                onSupportingContentClicked={() => onToggleTab(AnalysisPanelTabs.SupportingContentTab, index)}
                                                 onFollowupQuestionClicked={q => makeApiRequest(q)}
                                                 showFollowupQuestions={useSuggestFollowupQuestions && answers.length - 1 === index}
                                                 showSpeechOutputAzure={showSpeechOutputAzure}
@@ -631,10 +676,14 @@ const Chat = () => {
                         isOpen={isHistoryPanelOpen}
                         notify={!isStreaming && !isLoading}
                         onClose={() => setIsHistoryPanelOpen(false)}
-                        onChatSelected={answers => {
-                            if (answers.length === 0) return;
-                            setAnswers(answers);
-                            lastQuestionRef.current = answers[answers.length - 1][0];
+                        onChatSelected={data => {
+                            if (data.answers.length === 0) return;
+                            setAnswers(data.answers);
+                            lastQuestionRef.current = data.answers[data.answers.length - 1][0];
+                            if (data.folder_id) {
+                                setSelectedFolderId(data.folder_id);
+                                sessionStorage.setItem("selectedFolderId", data.folder_id);
+                            }
                         }}
                     />
                 )}

@@ -31,6 +31,13 @@
         "errorDeleting": "Error deleting.",
         "fileDeleted": "File deleted"
     },
+    "folderSelector": {
+        "label": "Knowledge base:",
+        "placeholder": "Select a knowledge base…",
+        "noFolders": "No analyzed folders yet",
+        "loadError": "Could not load folders",
+        "demo": "Demo"
+    },
     "developerSettings": "Developer settings",
     "chatEmptyStateTitle": "Ask your documents. Trust every answer.",
     "chatEmptyStateSubtitle": "Every answer is traced to the exact sentence — click to verify on the original PDF. Try with our sample documents or upload your own.",
@@ -55,15 +62,15 @@
         "stopStreaming": "Stop streaming",
         "askWithVoice": "Ask question with voice",
         "stopRecording": "Stop recording question",
-        "showSupportingContent": "Show supporting content",
         "speakAnswer": "Speak answer",
         "info": "Info",
         "save": "Save",
         "copy": "Copy",
-        "copied": "Copied!"
+        "copied": "Copied!",
+        "showOriginal": "Show original",
+        "showTranslated": "Show translated"
     },
     "headerTexts": {
-        "supportingContent": "Supporting Content",
         "citation": "Citation"
     },
     "labels": {
@@ -182,6 +189,8 @@
         "loadingFiles": "Loading files...",
         "noFilesYet": "No files yet",
         "uploadFilesHint": "Upload files to get started.",
+        "selectFolderFirst": "Select or create a folder first",
+        "selectFolderHint": "Files must be uploaded into a folder to be indexed and searchable.",
         "nameColumn": "Name",
         "typeColumn": "Type",
         "actionsColumn": "Actions",
@@ -232,13 +241,20 @@
         "deleteAnalysisConfirm": "This will permanently remove all analysis data (graph, entities, embeddings) for this folder. Original files will be kept. Continue?",
         "analysisDeleted": "Analysis data deleted successfully",
         "deleteAnalysisFailed": "Failed to delete analysis: {{message}}",
-        "storageReminder": "💡 Analysis data uses storage. Delete analysis when no longer needed to save costs."
+        "storageReminder": "💡 Analysis data uses storage. Delete analysis when no longer needed to save costs.",
+        "preview": "Preview",
+        "zoneAnalysisResults": "Analysis Results",
+        "zoneAnalyzed": "Analyzed",
+        "zoneFolders": "Folders",
+        "expandZone": "Expand",
+        "collapseZone": "Collapse"
     },
     "nav": {
         "chat": "Chat",
         "files": "Files",
         "dashboard": "Dashboard",
-        "toggleNavigation": "Toggle navigation"
+        "toggleNavigation": "Toggle navigation",
+        "gettingStarted": "Getting Started"
     },
     "viewer": {
         "loadingFile": "Loading file",
@@ -248,6 +264,19 @@
         "pageInfo": "Page {{current}} / {{total}}",
         "highlightCount": "{{count}} highlight(s) on this page",
         "failedLoadPdf": "Failed to load PDF document"
+    },
+    "preview": {
+        "prev": "Previous file",
+        "next": "Next file",
+        "download": "Download",
+        "close": "Close",
+        "fitWidth": "Fit",
+        "loading": "Loading preview…",
+        "rendering": "Rendering…",
+        "error": "Preview failed",
+        "noPreview": "Preview not available",
+        "noPreviewHint": "This file format cannot be previewed in the browser.",
+        "downloadFile": "Download file"
     },
     "analysis": {
         "citedSentences": "Cited Sentences",
@@ -287,35 +316,29 @@
         "documents": "Documents",
         "storageUsed": "Storage Used",
         "dataDegraded": "Some usage data may be temporarily unavailable. Stats shown may be incomplete.",
-        "dailyLimit": "of {{limit}} daily limit",
         "monthlyLimit": "of {{limit}} monthly limit",
         "monthlyCredits": "of {{limit}} monthly credits",
         "unlimitedCredits": "Unlimited credits",
         "translated": "{{count}} translated",
         "voice": "{{count}} voice",
         "personalShared": "({{personal}} personal + {{shared}} shared) of {{limit}} limit",
-        "ofLimit": "of {{limit}} limit",
         "gbLimit": "of {{limit}} GB limit",
         "recentActivity": "Recent Activity",
         "time": "Time",
         "tokens": "Tokens",
         "credits": "Credits",
         "language": "Language",
-        "yourFeatures": "Your Features",
         "plans": "Plans",
         "currentPlan": "Current Plan",
         "contactSales": "Contact Sales",
-        "queriesPerDay": "{{count}} queries/day",
-        "maxDocuments": "{{count}} documents",
+        "upgrade": "Upgrade",
+        "manageBilling": "Manage Billing",
         "maxStorage": "{{count}} GB storage",
         "creditsPerMonth": "{{count}} credits/mo",
-        "featureGraphrag": "GraphRAG Multi-Route",
         "featureAdvancedAnalytics": "Advanced Analytics",
-        "featureCustomModels": "Custom Models",
         "featureApiAccess": "API Access",
-        "featurePrioritySupport": "Priority Support",
-        "featureSso": "SSO",
-        "featureCustomBranding": "Custom Branding"
+        "featureCentralizedBilling": "Centralized Billing",
+        "featureAuditLogs": "Audit Logs"
     },
     "admin": {
         "signInRequired": "Sign in Required",
@@ -343,5 +366,26 @@
         "plan": "Plan",
         "lastActive": "Last Active",
         "noUserActivity": "No user activity data yet. Data will appear once analytics are connected."
+    },
+    "onboarding": {
+        "pageTitle": "Getting Started",
+        "heroTitle": "Welcome to Evidoc",
+        "heroSubtitle": "Ask your documents anything. Trust every answer with sentence-level, click-to-verify citations.",
+        "howItWorks": "How it works",
+        "step1Title": "Upload your documents",
+        "step1Description": "Go to Files and upload your PDFs, Word documents, spreadsheets, or images. Evidoc supports 15+ formats. Organize them in folders to query related documents together.",
+        "step2Title": "Ask a question",
+        "step2Description": "Go to Chat, select a folder, and type your question in natural language. Evidoc searches across all documents in the folder using a Knowledge Graph — not just keywords.",
+        "step3Title": "Click to verify",
+        "step3Description": "Every answer includes numbered citations. Click any citation to see the exact sentence highlighted on the original PDF. Verify in seconds — no more manual cross-referencing.",
+        "tipsTitle": "Tips for best results",
+        "tip1": "Group related documents (contract + invoices) in the same folder for cross-document Q&A",
+        "tip2": "Be specific: \"What is the penalty for late delivery under section 5?\" works better than \"Tell me about penalties\"",
+        "tip3": "Try comparison questions: \"Do the invoice amounts match the agreed contract rates?\"",
+        "tip4": "Ask in any of 13 languages — Evidoc auto-detects and responds in your language",
+        "uploadFirst": "Upload your first document",
+        "skipToChat": "Go to Chat",
+        "welcomeBanner": "New to Evidoc? Check out our Getting Started guide to learn the basics.",
+        "welcomeBannerAction": "Show me →"
     }
 }

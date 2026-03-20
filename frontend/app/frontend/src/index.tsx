@@ -7,6 +7,14 @@ import { MsalProvider } from "@azure/msal-react";
 import { AuthenticationResult, EventType, PublicClientApplication } from "@azure/msal-browser";
 
 import "./index.css";
+import { initAnalytics, analytics } from "./analytics";
+import { getStoredConsent } from "./components/CookieConsentBanner";
+
+// Initialize analytics only if the user has previously accepted all cookies.
+// First-time visitors see the consent banner before any analytics are loaded.
+if (getStoredConsent() === "all") {
+    initAnalytics();
+}
 
 import Chat from "./pages/chat/Chat";
 import Dashboard from "./pages/dashboard/Dashboard";
@@ -18,6 +26,7 @@ const router = createHashRouter([
     {
         path: "/",
         element: <LayoutWrapper />,
+        hydrateFallbackElement: <></>,
         children: [
             {
                 index: true,
@@ -33,6 +42,13 @@ const router = createHashRouter([
             {
                 path: "dashboard",
                 element: <Dashboard />
+            },
+            {
+                path: "getting-started",
+                lazy: async () => {
+                    const { default: Component } = await import("./pages/getting-started/GettingStarted");
+                    return { Component };
+                }
             },
             {
                 path: "admin",
@@ -74,6 +90,10 @@ const root = ReactDOM.createRoot(document.getElementById("root") as HTMLElement)
                     const result = event.payload as AuthenticationResult;
                     if (result.account) {
                         msalInstance!.setActiveAccount(result.account);
+                        analytics.identify(result.account.localAccountId, {
+                            name: result.account.name,
+                            tenantId: result.account.tenantId,
+                        });
                     }
                 }
             });

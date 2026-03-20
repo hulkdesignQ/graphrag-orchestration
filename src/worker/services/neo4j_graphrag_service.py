@@ -752,9 +752,8 @@ Output ONLY the JSON object, no explanations or markdown:"""
             entities = entity_types or ["Person", "Organization", "Document", "Concept"]
             relations = relation_types or ["MENTIONS", "WORKS_FOR", "RELATED_TO"]
             
-            # Get node count before indexing to identify new nodes
-            with self.driver.session() as session:
-                before_count = session.run("MATCH (n) RETURN max(id(n)) as max_id").single()["max_id"] or 0
+            # Track new nodes via group_id IS NULL filter (Cypher 25 compatible)
+            before_count = 0  # Kept for parameter compat; filtering uses group_id IS NULL
             
             # Create SimpleKGPipeline
             kg_builder = SimpleKGPipeline(
@@ -780,29 +779,29 @@ Output ONLY the JSON object, no explanations or markdown:"""
             
             # Post-process: Add group_id to all newly created nodes and ensure vector index compatibility
             with self.driver.session() as session:
-                # Update nodes created after our start point
+                # Update nodes created by this pipeline run (identified by missing group_id)
                 node_result = session.run("""
                     MATCH (n)
-                    WHERE id(n) > $before_id AND n.group_id IS NULL
+                    WHERE n.group_id IS NULL
                     SET n.group_id = $group_id
                     RETURN count(n) as updated_nodes
-                """, before_id=before_count, group_id=group_id).single()
+                """, group_id=group_id).single()
                 
                 # CRITICAL: Add __Node__ label to Chunk nodes for vector index compatibility
                 label_result = session.run("""
                     MATCH (n:Chunk)
-                    WHERE id(n) > $before_id AND NOT n:__Node__
+                    WHERE NOT n:__Node__
                     SET n:__Node__
                     RETURN count(n) as updated_chunks
-                """, before_id=before_count).single()
+                """).single()
                 
                 # Update relationships too
                 rel_result = session.run("""
                     MATCH ()-[r]->()
-                    WHERE id(r) > $before_id AND r.group_id IS NULL
+                    WHERE r.group_id IS NULL
                     SET r.group_id = $group_id
                     RETURN count(r) as updated_rels
-                """, before_id=before_count, group_id=group_id).single()
+                """, group_id=group_id).single()
                 
                 logger.info(f"Post-processed: {node_result['updated_nodes']} nodes, {rel_result['updated_rels']} rels, {label_result['updated_chunks']} chunks with __Node__ label for group_id={group_id}")
             
@@ -854,15 +853,12 @@ Output ONLY the JSON object, no explanations or markdown:"""
         before_rel_id = 0
         
         try:
-            # Capture max internal IDs before indexing so post-processing only
-            # affects entities/relationships created in this run.
-            # This is critical for strict multi-tenant isolation.
+            # Capture state before indexing for post-processing.
+            # Cypher 25 removed id() — use group_id IS NULL filter instead.
             try:
-                with self.driver.session() as session:
-                    before_node_id = session.run("MATCH (n) RETURN max(id(n)) as max_id").single()["max_id"] or 0
-                    before_rel_id = session.run("MATCH ()-[r]->() RETURN max(id(r)) as max_id").single()["max_id"] or 0
+                pass  # No pre-capture needed; post-processing filters on group_id IS NULL
             except Exception as id_error:
-                logger.warning(f"Failed to capture pre-index max IDs; post-processing may be less precise: {id_error}")
+                logger.warning(f"Pre-index setup note: {id_error}")
 
             # SimpleKGPipeline → Neo4j (for entity/relationship graph)
             # Use entities/relations parameters for neo4j-graphrag 1.7.0
@@ -886,39 +882,39 @@ Output ONLY the JSON object, no explanations or markdown:"""
             logger.info(f"SimpleKGPipeline completed for group {group_id}")
             
             # Post-process: Add group_id to all nodes/relationships with NULL group_id
-            # This is more robust than ID-based tracking since Neo4j IDs can be reused
-            # Also ensures any orphaned nodes get properly tagged
+            # Cypher 25 removed id() — filter on group_id IS NULL which is more robust
+            # than ID-based tracking since Neo4j IDs can be reused
             updated_nodes = 0
             updated_rels = 0
             chunk_labels_added = 0
             try:
                 with self.driver.session() as session:
-                    # Update ONLY nodes created after this indexing started.
+                    # Update ONLY nodes without group_id (newly created by pipeline).
                     node_result = session.run("""
                         MATCH (n)
-                        WHERE id(n) > $before_id AND n.group_id IS NULL
+                        WHERE n.group_id IS NULL
                         SET n.group_id = $group_id
                         RETURN count(n) as updated_nodes
-                    """, before_id=before_node_id, group_id=group_id).single()
+                    """, group_id=group_id).single()
                     updated_nodes = node_result['updated_nodes'] if node_result else 0
                     
                     # CRITICAL: Add __Node__ label to ALL Chunk nodes without it for vector index compatibility
                     # The vector index is on __Node__ label, but SimpleKGPipeline creates Chunk nodes
                     label_result = session.run("""
                         MATCH (n:Chunk)
-                        WHERE id(n) > $before_id AND NOT n:__Node__
+                        WHERE NOT n:__Node__
                         SET n:__Node__
                         RETURN count(n) as updated_chunks
-                    """, before_id=before_node_id).single()
+                    """).single()
                     chunk_labels_added = label_result['updated_chunks'] if label_result else 0
                     
-                    # Update ONLY relationships created after this indexing started.
+                    # Update ONLY relationships without group_id (newly created by pipeline).
                     rel_result = session.run("""
                         MATCH ()-[r]->()
-                        WHERE id(r) > $before_id AND r.group_id IS NULL
+                        WHERE r.group_id IS NULL
                         SET r.group_id = $group_id
                         RETURN count(r) as updated_rels
-                    """, before_id=before_rel_id, group_id=group_id).single()
+                    """, group_id=group_id).single()
                     updated_rels = rel_result['updated_rels'] if rel_result else 0
                     
                 logger.info(f"Post-processed: {updated_nodes} nodes, {updated_rels} rels, {chunk_labels_added} chunks with __Node__ label for group_id={group_id}")

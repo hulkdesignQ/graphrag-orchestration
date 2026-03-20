@@ -8,7 +8,6 @@ import { StructuredCitation } from "../../api/models";
 import { getToken, useLogin } from "../../authConfig";
 import { PdfHighlightViewer, ImageHighlightViewer, SentenceHighlight } from "../DocumentViewer";
 import { MarkdownViewer } from "../MarkdownViewer";
-import { SupportingContent } from "../SupportingContent";
 import styles from "./AnalysisPanel.module.css";
 import { AnalysisPanelTabs } from "./AnalysisPanelTabs";
 
@@ -115,14 +114,6 @@ export const AnalysisPanel = ({
     onActiveTabChanged,
     onCitationClicked,
 }: Props) => {
-    const dataPoints = answer.context.data_points;
-    const hasSupportingContent = Boolean(
-        dataPoints &&
-            ((dataPoints.text && dataPoints.text.length > 0) ||
-                (dataPoints.images && dataPoints.images.length > 0) ||
-                (dataPoints.external_results_metadata && dataPoints.external_results_metadata.length > 0))
-    );
-    const isDisabledSupportingContentTab: boolean = !hasSupportingContent;
     const isDisabledCitationTab: boolean = !activeCitation;
     const [citation, setCitation] = useState("");
     const [citationBlob, setCitationBlob] = useState<string>(""); // raw blob URL (no hash)
@@ -154,24 +145,26 @@ export const AnalysisPanel = ({
     const fetchCitation = async () => {
         const token = client ? await getToken(client) : undefined;
         if (activeCitation) {
-            // Strip hash from URL for fetching
             const urlNoHash = activeCitation.split("#")[0];
             const originalHash = activeCitation.includes("#") ? activeCitation.split("#")[1] : "";
-            const response = await fetchWithAuthRetry(urlNoHash, {
-                method: "GET",
-                headers: await getHeaders(token),
-            });
-            if (!response.ok) {
-                console.error(`Citation fetch failed: ${response.status} ${response.statusText}`);
+            try {
+                const response = await fetchWithAuthRetry(urlNoHash, {
+                    method: "GET",
+                    headers: await getHeaders(token),
+                });
+                if (!response.ok) {
+                    setCitationBlob("");
+                    setCitation("");
+                    return;
+                }
+                const citationContent = await response.blob();
+                const blobUrl = URL.createObjectURL(citationContent);
+                setCitationBlob(blobUrl);
+                setCitation(originalHash ? blobUrl + "#" + originalHash : blobUrl);
+            } catch {
                 setCitationBlob("");
                 setCitation("");
-                return;
             }
-            const citationContent = await response.blob();
-            const blobUrl = URL.createObjectURL(citationContent);
-            setCitationBlob(blobUrl);
-            // For iframe/legacy viewers, add hash back
-            setCitation(originalHash ? blobUrl + "#" + originalHash : blobUrl);
         }
     };
     useEffect(() => {
@@ -190,6 +183,14 @@ export const AnalysisPanel = ({
 
     const renderFileViewer = () => {
         if (!activeCitation) return null;
+
+        // No blob loaded (404 or community citation) — show text-only fallback
+        if (!citationBlob && !citation) {
+            if (activeCitationObj && activeCitationObj.length > 0) {
+                return null; // renderSentenceTextPanel handles this
+            }
+            return <div style={{ padding: "16px", color: "#666" }}>{t("analysis.noPdfAvailable", "Source document not available for this citation.")}</div>;
+        }
 
         // PDF with polygon highlights → use pdf.js viewer
         if ((fileExtension === "pdf" || !fileExtension) && hasPolygonHighlights && citationBlob) {
@@ -231,8 +232,8 @@ export const AnalysisPanel = ({
     // Sentence text panel for non-PDF/non-image formats (show cited text alongside iframe)
     const renderSentenceTextPanel = () => {
         if (!activeCitationObj || activeCitationObj.length === 0) return null;
-        // Only show for formats without polygon overlays
-        if (hasPolygonHighlights && (fileExtension === "pdf" || ["png", "jpg", "jpeg", "tiff", "tif", "bmp"].includes(fileExtension))) return null;
+        // Only hide for formats WITH polygon overlays when the blob loaded successfully
+        if (citationBlob && hasPolygonHighlights && (fileExtension === "pdf" || ["png", "jpg", "jpeg", "tiff", "tif", "bmp"].includes(fileExtension))) return null;
 
         return (
             <div className={styles.sentencePanel}>
@@ -254,15 +255,11 @@ export const AnalysisPanel = ({
     return (
         <div className={className}>
             <TabList selectedValue={activeTab} onTabSelect={(_ev: SelectTabEvent, data: SelectTabData) => onActiveTabChanged(data.value as AnalysisPanelTabs)}>
-                <Tab value={AnalysisPanelTabs.SupportingContentTab} disabled={isDisabledSupportingContentTab}>
-                    {t("headerTexts.supportingContent")}
-                </Tab>
                 <Tab value={AnalysisPanelTabs.CitationTab} disabled={isDisabledCitationTab}>
                     {t("headerTexts.citation")}
                 </Tab>
             </TabList>
             <div>
-                {activeTab === AnalysisPanelTabs.SupportingContentTab && <SupportingContent supportingContent={answer.context.data_points} />}
                 {activeTab === AnalysisPanelTabs.CitationTab && (
                     <>
                         {renderSentenceTextPanel()}

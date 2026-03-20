@@ -24,6 +24,9 @@ from src.core.roles import (
     PlanTier,
     PlanLimits,
     PLAN_DEFINITIONS,
+    LEGACY_TIER_MAP,
+    B2C_TIERS,
+    B2B_TIERS,
     UserProfile,
     resolve_user_profile,
 )
@@ -87,15 +90,12 @@ class UsageStatsResponse(BaseModel):
     """Personal usage statistics."""
     queries_today: int = 0
     queries_this_month: int = 0
-    queries_limit_day: int = 0
     queries_limit_month: int = 0
     documents_count: int = 0
-    documents_limit: int = 0
+    documents_limit: int = Field(default=0, description="Deprecated — storage cap is the effective limit")
     storage_used_gb: float = 0.0
     storage_limit_gb: float = 0.0
-    # Two-tier document breakdown
     personal_documents_count: int = 0
-    global_documents_count: int = 0
     # Credit system
     credits_used_month: int = 0
     credits_limit_month: Optional[int] = None
@@ -204,16 +204,6 @@ async def _fetch_profile(
 
     limits = profile.plan_limits or PLAN_DEFINITIONS[PlanTier.FREE]
 
-    features = {
-        "graphrag": limits.graphrag_enabled,
-        "advanced_analytics": limits.advanced_analytics,
-        "custom_models": limits.custom_models,
-        "api_access": limits.api_access,
-        "priority_support": limits.priority_support,
-        "sso": limits.sso_enabled,
-        "custom_branding": limits.custom_branding,
-    }
-
     return UserProfileResponse(
         user_id=profile.user_id,
         display_name=profile.display_name,
@@ -228,7 +218,6 @@ async def _fetch_profile(
         queries_this_month=usage["queries_this_month"],
         documents_count=0,
         storage_used_gb=0.0,
-        features=features,
     )
 
 
@@ -281,8 +270,8 @@ async def _fetch_user_usage(
     blob_degraded = False
     cosmos_degraded = False
 
-    async def _blob_stats() -> tuple[int, float, int]:
-        """Returns (personal_count, storage_gb, global_count)."""
+    async def _blob_stats() -> tuple[int, float]:
+        """Returns (personal_count, storage_gb)."""
         nonlocal blob_degraded
         blob_mgr = getattr(request.app.state, "user_blob_manager", None)
         personal_count, storage_gb = 0, 0.0
@@ -298,21 +287,7 @@ async def _fetch_user_usage(
         else:
             logger.debug("usage_blob_manager_not_initialized", group_id=group_id)
 
-        global_count = 0
-        global_mgr = getattr(request.app.state, "global_blob_manager", None)
-        if global_mgr:
-            try:
-                async with asyncio.timeout(5):
-                    container_client = global_mgr.blob_service_client.get_container_client(
-                        global_mgr.container
-                    )
-                    async for blob in container_client.list_blobs():
-                        if "/" not in blob.name:
-                            global_count += 1
-            except (TimeoutError, Exception) as e:
-                logger.warning("usage_global_blob_count_failed", error=str(e))
-
-        return personal_count, storage_gb, global_count
+        return personal_count, storage_gb
 
     async def _recent_queries() -> tuple[list, int, float]:
         """Fetch recent queries and (fallback) doc count from Cosmos."""
@@ -367,7 +342,7 @@ async def _fetch_user_usage(
             logger.warning("dashboard_credit_fetch_failed", user_id=user_id)
             return {}
 
-    (documents_count, storage_used_gb, global_documents_count), \
+    (documents_count, storage_used_gb), \
         (recent_queries, cosmos_doc_count, cosmos_doc_storage), \
         credit_info = await asyncio.gather(
             _blob_stats(), _recent_queries(), _credits()
@@ -388,14 +363,12 @@ async def _fetch_user_usage(
     return UsageStatsResponse(
         queries_today=usage["queries_today"],
         queries_this_month=usage["queries_this_month"],
-        queries_limit_day=limits.queries_per_day,
         queries_limit_month=limits.queries_per_month,
         documents_count=total_documents,
-        documents_limit=limits.max_documents,
+        documents_limit=0,  # deprecated — storage cap is the effective limit
         storage_used_gb=storage_used_gb,
         storage_limit_gb=limits.max_storage_gb,
         personal_documents_count=personal_documents_count,
-        global_documents_count=global_documents_count,
         credits_used_month=credit_info.get("credits_used", 0),
         credits_limit_month=credit_info.get("credits_limit"),
         credits_remaining=credit_info.get("credits_remaining"),
@@ -409,13 +382,17 @@ async def _fetch_user_usage(
 
 @router.get("/plans", response_model=PlanInfoResponse)
 async def get_available_plans(
+    request: Request,
     user: Dict[str, Any] = Depends(get_current_user),
 ):
     """
     Get available payment plans and the user's current plan.
-    Used for the plan upgrade/comparison UI.
+    B2C users see Free/Pro/Pro+. B2B users see Business/Enterprise.
     """
     user_id = user.get("oid", "")
+    auth_type = getattr(request.state, "auth_type", "B2C")
+    billing_type = "b2b" if auth_type == "B2B" else "b2c"
+    visible_tiers = B2B_TIERS if billing_type == "b2b" else B2C_TIERS
 
     try:
         enforcer = await asyncio.wait_for(get_quota_enforcer(), timeout=5)
@@ -429,23 +406,21 @@ async def get_available_plans(
 
     plans = {}
     for tier, limits in PLAN_DEFINITIONS.items():
+        if tier in LEGACY_TIER_MAP or tier not in visible_tiers:
+            continue
         plans[tier.value] = {
-            "name": tier.value.title(),
-            "queries_per_day": limits.queries_per_day,
-            "queries_per_month": limits.queries_per_month,
-            "max_documents": limits.max_documents,
-            "max_storage_gb": limits.max_storage_gb,
+            "name": tier.value.replace("_", " ").title(),
             "monthly_credits": limits.monthly_credits,
-            "graphrag_enabled": limits.graphrag_enabled,
+            "max_storage_gb": limits.max_storage_gb,
             "advanced_analytics": limits.advanced_analytics,
-            "custom_models": limits.custom_models,
             "api_access": limits.api_access,
-            "sso_enabled": limits.sso_enabled,
+            "centralized_billing": limits.centralized_billing,
+            "audit_logs": limits.audit_logs,
         }
 
     return PlanInfoResponse(
         current_plan=current_plan.value,
-        billing_type="b2c",
+        billing_type=billing_type,
         plans=plans,
     )
 
@@ -518,16 +493,6 @@ async def _fetch_dashboard_all(
     profile_obj = resolve_user_profile(user, plan_tier=plan_tier, billing_type=billing_type)
     profile_limits = profile_obj.plan_limits or limits
 
-    features = {
-        "graphrag": profile_limits.graphrag_enabled,
-        "advanced_analytics": profile_limits.advanced_analytics,
-        "custom_models": profile_limits.custom_models,
-        "api_access": profile_limits.api_access,
-        "priority_support": profile_limits.priority_support,
-        "sso": profile_limits.sso_enabled,
-        "custom_branding": profile_limits.custom_branding,
-    }
-
     profile_resp = UserProfileResponse(
         user_id=profile_obj.user_id,
         display_name=profile_obj.display_name,
@@ -542,53 +507,26 @@ async def _fetch_dashboard_all(
         queries_this_month=redis_usage["queries_this_month"],
         documents_count=0,
         storage_used_gb=0.0,
-        features=features,
     )
 
     # ── Phase 3: Blob + Cosmos + credits in parallel ─────────────────────
     blob_degraded = False
     cosmos_degraded = False
 
-    async def _blob_stats() -> tuple[int, float, int]:
+    async def _blob_stats() -> tuple[int, float]:
         nonlocal blob_degraded
-
-        async def _personal() -> tuple[int, float]:
-            nonlocal blob_degraded
-            blob_mgr = getattr(request.app.state, "user_blob_manager", None)
-            if not blob_mgr:
-                logger.debug("usage_blob_manager_not_initialized", group_id=group_id)
-                return 0, 0.0
-            try:
-                async with asyncio.timeout(5):
-                    count, size_bytes = await blob_mgr.get_blob_stats(group_id)
-                    return count, round(size_bytes / (1024 ** 3), 4)
-            except (TimeoutError, Exception) as e:
-                logger.warning("usage_blob_count_failed", group_id=group_id, error=str(e))
-                blob_degraded = True
-                return 0, 0.0
-
-        async def _global() -> int:
-            global_mgr = getattr(request.app.state, "global_blob_manager", None)
-            if not global_mgr:
-                return 0
-            try:
-                async with asyncio.timeout(5):
-                    container_client = global_mgr.blob_service_client.get_container_client(
-                        global_mgr.container
-                    )
-                    count = 0
-                    async for blob in container_client.list_blobs():
-                        if "/" not in blob.name:
-                            count += 1
-                    return count
-            except (TimeoutError, Exception) as e:
-                logger.warning("usage_global_blob_count_failed", error=str(e))
-                return 0
-
-        (personal_count, storage_gb), global_count = await asyncio.gather(
-            _personal(), _global()
-        )
-        return personal_count, storage_gb, global_count
+        blob_mgr = getattr(request.app.state, "user_blob_manager", None)
+        if not blob_mgr:
+            logger.debug("usage_blob_manager_not_initialized", group_id=group_id)
+            return 0, 0.0
+        try:
+            async with asyncio.timeout(5):
+                count, size_bytes = await blob_mgr.get_blob_stats(group_id)
+                return count, round(size_bytes / (1024 ** 3), 4)
+        except (TimeoutError, Exception) as e:
+            logger.warning("usage_blob_count_failed", group_id=group_id, error=str(e))
+            blob_degraded = True
+            return 0, 0.0
 
     async def _recent_queries() -> tuple[list, int, float]:
         nonlocal cosmos_degraded
@@ -637,7 +575,7 @@ async def _fetch_dashboard_all(
             logger.warning("dashboard_credit_fetch_failed", user_id=user_id)
             return {}
 
-    (documents_count, storage_used_gb, global_documents_count), \
+    (documents_count, storage_used_gb), \
         (recent_queries, cosmos_doc_count, cosmos_doc_storage), \
         credit_info = await asyncio.gather(
             _blob_stats(), _recent_queries(), _credits()
@@ -656,14 +594,12 @@ async def _fetch_dashboard_all(
     usage_resp = UsageStatsResponse(
         queries_today=redis_usage["queries_today"],
         queries_this_month=redis_usage["queries_this_month"],
-        queries_limit_day=limits.queries_per_day,
         queries_limit_month=limits.queries_per_month,
         documents_count=total_documents,
-        documents_limit=limits.max_documents,
+        documents_limit=0,  # deprecated — storage cap is the effective limit
         storage_used_gb=storage_used_gb,
         storage_limit_gb=limits.max_storage_gb,
         personal_documents_count=personal_documents_count,
-        global_documents_count=global_documents_count,
         credits_used_month=credit_info.get("credits_used", 0),
         credits_limit_month=credit_info.get("credits_limit"),
         credits_remaining=credit_info.get("credits_remaining"),
@@ -675,20 +611,19 @@ async def _fetch_dashboard_all(
     )
 
     # ── Phase 4: Plans (pure computation, no I/O — reuses plan_tier) ─────
+    visible_tiers = B2B_TIERS if billing_type == "b2b" else B2C_TIERS
     plans_dict = {}
     for tier, tier_limits in PLAN_DEFINITIONS.items():
+        if tier in LEGACY_TIER_MAP or tier not in visible_tiers:
+            continue
         plans_dict[tier.value] = {
-            "name": tier.value.title(),
-            "queries_per_day": tier_limits.queries_per_day,
-            "queries_per_month": tier_limits.queries_per_month,
-            "max_documents": tier_limits.max_documents,
-            "max_storage_gb": tier_limits.max_storage_gb,
+            "name": tier.value.replace("_", " ").title(),
             "monthly_credits": tier_limits.monthly_credits,
-            "graphrag_enabled": tier_limits.graphrag_enabled,
+            "max_storage_gb": tier_limits.max_storage_gb,
             "advanced_analytics": tier_limits.advanced_analytics,
-            "custom_models": tier_limits.custom_models,
             "api_access": tier_limits.api_access,
-            "sso_enabled": tier_limits.sso_enabled,
+            "centralized_billing": tier_limits.centralized_billing,
+            "audit_logs": tier_limits.audit_logs,
         }
 
     plans_resp = PlanInfoResponse(
@@ -735,7 +670,7 @@ async def get_system_metrics(
     queries_month = 0
     total_documents = 0
     total_storage_gb = 0.0
-    plan_dist: Dict[str, int] = {"free": 0, "starter": 0, "professional": 0, "enterprise": 0}
+    plan_dist: Dict[str, int] = {t.value: 0 for t in PlanTier}
     queries_per_hour: List[Dict[str, Any]] = []
     top_users_list: List[Dict[str, Any]] = []
     error_rate = 0.0
@@ -775,7 +710,7 @@ async def get_system_metrics(
                 "user_id": uid,
                 "name": uid[:20],
                 "queries": count,
-                "plan": "enterprise",
+                "plan": "unknown",
                 "last_active": "",
             })
 
@@ -790,7 +725,7 @@ async def get_system_metrics(
                 plan = await enforcer.get_plan(uid)
                 plan_dist[plan.value] = plan_dist.get(plan.value, 0) + 1
         except Exception:
-            plan_dist["enterprise"] = total_users
+            plan_dist["free"] = total_users
 
         # Document count from doc_intel records
         try:

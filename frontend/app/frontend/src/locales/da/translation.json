@@ -55,15 +55,15 @@
         "stopStreaming": "Stop streaming",
         "askWithVoice": "Indtal spørgsmål",
         "stopRecording": "Stop optagelse af spørgsmål",
-        "showSupportingContent": "Vis understøttende indhold",
         "speakAnswer": "Afspil svar",
         "info": "Info",
         "save": "Gem",
         "copy": "Kopier",
-        "copied": "Kopieret!"
+        "copied": "Kopieret!",
+        "showOriginal": "Vis originalt svar",
+        "showTranslated": "Vis oversat svar"
     },
     "headerTexts": {
-        "supportingContent": "Understøttende indhold",
         "citation": "Kilde"
     },
     "labels": {
@@ -231,7 +231,12 @@
         "deleteAnalysisConfirm": "Dette vil permanent fjerne alle analysedata (graf, entiteter, embeddings) for denne mappe. Originale filer beholdes. Fortsæt?",
         "analysisDeleted": "Analysedata slettet",
         "deleteAnalysisFailed": "Sletning af analyse mislykkedes: {{message}}",
-        "storageReminder": "💡 Analysedata bruger lagerplads. Slet analysen når den ikke længere er nødvendig for at spare omkostninger."
+        "storageReminder": "💡 Analysedata bruger lagerplads. Slet analysen når den ikke længere er nødvendig for at spare omkostninger.",
+        "zoneAnalysisResults": "Analyseresultater",
+        "zoneAnalyzed": "Analyseret",
+        "zoneFolders": "Mapper",
+        "expandZone": "Udvid",
+        "collapseZone": "Fold sammen"
     },
     "viewer": {
         "loadingFile": "Indlæser fil",
@@ -279,35 +284,27 @@
         "creditsUsed": "Brugte kreditter",
         "documents": "Dokumenter",
         "storageUsed": "Brugt lagerplads",
-        "dailyLimit": "af {{limit}} daglig grænse",
         "monthlyLimit": "af {{limit}} månedlig grænse",
         "monthlyCredits": "af {{limit}} månedlige kreditter",
         "unlimitedCredits": "Ubegrænsede kreditter",
         "translated": "{{count}} oversat",
         "voice": "{{count}} stemme",
         "personalShared": "({{personal}} personlige + {{shared}} delte) af {{limit}} grænse",
-        "ofLimit": "af {{limit}} grænse",
         "gbLimit": "af {{limit}} GB grænse",
         "recentActivity": "Seneste aktivitet",
         "time": "Tid",
         "tokens": "Tokens",
         "credits": "Kreditter",
         "language": "Sprog",
-        "yourFeatures": "Dine funktioner",
         "plans": "Planer",
         "currentPlan": "Nuværende plan",
         "contactSales": "Kontakt salg",
-        "queriesPerDay": "{{count}} forespørgsler/dag",
-        "maxDocuments": "{{count}} dokumenter",
         "maxStorage": "{{count}} GB lagerplads",
         "creditsPerMonth": "{{count}} kreditter/md.",
-        "featureGraphrag": "Evidoc Search",
         "featureAdvancedAnalytics": "Avanceret analyse",
-        "featureCustomModels": "Brugerdefinerede modeller",
         "featureApiAccess": "API-adgang",
-        "featurePrioritySupport": "Prioriteret support",
-        "featureSso": "SSO-integration",
-        "featureCustomBranding": "Brugerdefineret branding"
+        "featureCentralizedBilling": "Centraliseret fakturering",
+        "featureAuditLogs": "Revisionslogfiler"
     },
     "admin": {
         "signInRequired": "Log ind påkrævet",
@@ -335,5 +332,12 @@
         "plan": "Plan",
         "lastActive": "Sidst aktiv",
         "noUserActivity": "Ingen brugeraktivitetsdata endnu. Data vises, når analyser er tilsluttet."
+    },
+    "folderSelector": {
+        "label": "Vidensbase:",
+        "placeholder": "Vælg en vidensbase…",
+        "noFolders": "Ingen analyserede mapper endnu",
+        "loadError": "Could not load folders",
+        "demo": "Demo"
     }
 }
