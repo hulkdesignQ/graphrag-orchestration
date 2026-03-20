@@ -4,6 +4,8 @@ Billing API Router — Stripe Checkout, Billing Portal, and Webhooks.
 Endpoints:
   POST /billing/create-checkout-session  — start a Stripe Checkout for plan upgrade
   POST /billing/create-portal-session    — open Stripe Billing Portal (manage sub)
+  POST /billing/change-plan              — upgrade or downgrade an existing subscription
+  POST /billing/cancel                   — cancel subscription at period end
   POST /billing/webhook                  — receive Stripe webhook events (no auth)
   GET  /billing/subscription             — current subscription status
   GET  /billing/config                   — publishable key for frontend
@@ -92,6 +94,23 @@ class SubscriptionResponse(BaseModel):
 class BillingConfigResponse(BaseModel):
     stripe_enabled: bool
     publishable_key: Optional[str] = None
+
+
+class ChangePlanRequest(BaseModel):
+    plan: str  # Target PlanTier value, e.g. "pro" or "pro_plus"
+
+
+class ChangePlanResponse(BaseModel):
+    previous_plan: str
+    new_plan: str
+    status: str
+    proration_amount: Optional[int] = None  # cents
+
+
+class CancelResponse(BaseModel):
+    plan: str
+    cancel_at_period_end: bool
+    current_period_end: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -206,6 +225,176 @@ async def create_portal_session(
     )
 
     return PortalResponse(portal_url=session.url)
+
+
+# ---------------------------------------------------------------------------
+# POST /billing/change-plan — upgrade or downgrade existing subscription
+# ---------------------------------------------------------------------------
+
+@router.post("/change-plan", response_model=ChangePlanResponse)
+async def change_plan(
+    body: ChangePlanRequest,
+    user_id: str = Depends(get_user_id),
+):
+    """Upgrade or downgrade an existing Stripe subscription in-place.
+
+    Prorations are applied automatically — the customer is charged or credited
+    proportionally for the remaining billing period.
+
+    - Upgrades: prorated charge is created immediately.
+    - Downgrades: prorated credit is applied to the next invoice.
+    - Free → paid: rejected (use /create-checkout-session instead).
+    - Paid → free: rejected (use /cancel instead).
+    """
+    stripe = _require_stripe()
+
+    # Validate target plan
+    try:
+        target_tier = PlanTier(body.plan)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid plan: {body.plan}")
+
+    if target_tier in B2B_TIERS:
+        raise HTTPException(status_code=400, detail="B2B plans require sales contact")
+
+    if target_tier == PlanTier.FREE:
+        raise HTTPException(
+            status_code=400,
+            detail="To downgrade to Free, use /billing/cancel instead",
+        )
+
+    new_price_id = TIER_TO_STRIPE_PRICE.get(target_tier)
+    if not new_price_id:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No Stripe price configured for {target_tier.value}",
+        )
+
+    # Fetch existing subscription
+    cosmos = get_cosmos_client()
+    sub_record = await cosmos.get_subscription(user_id)
+
+    if not sub_record or not sub_record.stripe_subscription_id:
+        raise HTTPException(
+            status_code=400,
+            detail="No active subscription. Use /billing/create-checkout-session for new subscriptions",
+        )
+
+    if sub_record.status not in ("active", "trialing"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot change plan while subscription is {sub_record.status}",
+        )
+
+    previous_plan = sub_record.plan_tier
+
+    if previous_plan == target_tier.value:
+        raise HTTPException(status_code=400, detail="Already on this plan")
+
+    # Retrieve current subscription from Stripe to get the item ID
+    stripe_sub = stripe.Subscription.retrieve(sub_record.stripe_subscription_id)
+    if not stripe_sub["items"]["data"]:
+        raise HTTPException(status_code=500, detail="Subscription has no items")
+
+    item_id = stripe_sub["items"]["data"][0]["id"]
+
+    # Preview proration cost
+    proration_amount = None
+    try:
+        preview = stripe.Invoice.upcoming(
+            customer=sub_record.stripe_customer_id,
+            subscription=sub_record.stripe_subscription_id,
+            subscription_items=[{"id": item_id, "price": new_price_id}],
+            subscription_proration_behavior="create_prorations",
+        )
+        proration_amount = preview.get("amount_due")
+    except Exception as e:
+        logger.warning("proration_preview_failed", error=str(e))
+
+    # Modify the subscription — Stripe handles proration
+    updated_sub = stripe.Subscription.modify(
+        sub_record.stripe_subscription_id,
+        items=[{"id": item_id, "price": new_price_id}],
+        proration_behavior="create_prorations",
+        metadata={"user_id": user_id},
+    )
+
+    # Update local records immediately (webhook will also fire, but this is faster)
+    sub_record.plan_tier = target_tier.value
+    sub_record.status = updated_sub.get("status", "active")
+    sub_record.cancel_at_period_end = updated_sub.get("cancel_at_period_end", False)
+    sub_record.current_period_start = datetime.fromtimestamp(
+        updated_sub["current_period_start"], tz=timezone.utc
+    )
+    sub_record.current_period_end = datetime.fromtimestamp(
+        updated_sub["current_period_end"], tz=timezone.utc
+    )
+    sub_record.updated_at = datetime.now(tz=timezone.utc)
+
+    await cosmos.upsert_subscription(sub_record)
+    await _update_plan_cache(user_id, target_tier.value)
+
+    logger.info(
+        "plan_changed",
+        user_id=user_id,
+        previous_plan=previous_plan,
+        new_plan=target_tier.value,
+        proration_amount=proration_amount,
+    )
+
+    return ChangePlanResponse(
+        previous_plan=previous_plan,
+        new_plan=target_tier.value,
+        status=updated_sub.get("status", "active"),
+        proration_amount=proration_amount,
+    )
+
+
+# ---------------------------------------------------------------------------
+# POST /billing/cancel — cancel subscription at end of billing period
+# ---------------------------------------------------------------------------
+
+@router.post("/cancel", response_model=CancelResponse)
+async def cancel_subscription(
+    user_id: str = Depends(get_user_id),
+):
+    """Cancel the current subscription at the end of the billing period.
+
+    The user retains access to their paid plan until the period ends,
+    then reverts to Free automatically (handled by the subscription.deleted webhook).
+    """
+    stripe = _require_stripe()
+
+    cosmos = get_cosmos_client()
+    sub_record = await cosmos.get_subscription(user_id)
+
+    if not sub_record or not sub_record.stripe_subscription_id:
+        raise HTTPException(status_code=404, detail="No active subscription to cancel")
+
+    if sub_record.status == "canceled":
+        raise HTTPException(status_code=400, detail="Subscription is already canceled")
+
+    # Cancel at period end (not immediately)
+    updated_sub = stripe.Subscription.modify(
+        sub_record.stripe_subscription_id,
+        cancel_at_period_end=True,
+    )
+
+    sub_record.cancel_at_period_end = True
+    sub_record.updated_at = datetime.now(tz=timezone.utc)
+    await cosmos.upsert_subscription(sub_record)
+
+    period_end = None
+    if sub_record.current_period_end:
+        period_end = sub_record.current_period_end.isoformat()
+
+    logger.info("subscription_cancel_scheduled", user_id=user_id, period_end=period_end)
+
+    return CancelResponse(
+        plan=sub_record.plan_tier,
+        cancel_at_period_end=True,
+        current_period_end=period_end,
+    )
 
 
 # ---------------------------------------------------------------------------
