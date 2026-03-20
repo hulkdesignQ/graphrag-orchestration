@@ -44,7 +44,7 @@ GROUND_TRUTH: Dict[str, Dict[str, Any]] = {
             ("3 business days", "purchase_contract"),
             ("deposit is forfeited", "purchase_contract"),
             ("terminat", "HOLDING TANK"),  # "terminates" or "terminate"
-            ("not transferable", "WARRANTY"),
+            ("automatically terminates", "WARRANTY"),
         ],
     },
     "Q-G2": {
