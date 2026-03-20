@@ -5,6 +5,7 @@ import { InteractionStatus } from "@azure/msal-browser";
 import { useLogin, checkLoggedIn, loginRequest, getRedirectUri } from "./authConfig";
 import { LoginContext } from "./loginContext";
 import Layout from "./pages/layout/Layout";
+import { CookieConsentBanner } from "./components/CookieConsentBanner";
 
 const LayoutWrapper = () => {
     const [loggedIn, setLoggedIn] = useState(false);
@@ -39,6 +40,7 @@ const LayoutWrapper = () => {
             <LoginContext.Provider value={{ loggedIn, setLoggedIn }}>
                 <FluentProvider theme={webLightTheme} style={{ height: "100%", backgroundColor: "transparent" }}>
                     <Layout />
+                    <CookieConsentBanner />
                 </FluentProvider>
             </LoginContext.Provider>
         );
@@ -52,6 +54,7 @@ const LayoutWrapper = () => {
             >
                 <FluentProvider theme={webLightTheme} style={{ height: "100%", backgroundColor: "transparent" }}>
                     <Layout />
+                    <CookieConsentBanner />
                 </FluentProvider>
             </LoginContext.Provider>
         );

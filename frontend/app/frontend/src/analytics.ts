@@ -1,7 +1,8 @@
 /**
  * Analytics service — PostHog product analytics + Sentry error tracking.
  *
- * Opt-in: Only activates when the corresponding env var is set.
+ * Consent-gated: Analytics only initializes when the user has accepted
+ * analytics cookies via the CookieConsentBanner. Env vars must also be set.
  *   - VITE_POSTHOG_KEY: PostHog project API key
  *   - VITE_POSTHOG_HOST: PostHog instance URL (default: https://us.i.posthog.com)
  *   - VITE_SENTRY_DSN: Sentry DSN for error tracking
@@ -20,8 +21,12 @@ const POSTHOG_KEY = import.meta.env.VITE_POSTHOG_KEY as string | undefined;
 const POSTHOG_HOST = (import.meta.env.VITE_POSTHOG_HOST as string) || "https://us.i.posthog.com";
 
 let posthogReady = false;
+let analyticsInitialized = false;
 
 export function initAnalytics(): void {
+    if (analyticsInitialized) return;
+    analyticsInitialized = true;
+
     // PostHog
     if (POSTHOG_KEY) {
         posthog.init(POSTHOG_KEY, {
@@ -54,6 +59,14 @@ export function initAnalytics(): void {
                 return event;
             },
         });
+    }
+}
+
+/** Disable PostHog tracking (called when user chooses "necessary only"). */
+export function shutdownAnalytics(): void {
+    if (posthogReady) {
+        posthog.opt_out_capturing();
+        posthogReady = false;
     }
 }
 

@@ -8,9 +8,13 @@ import { AuthenticationResult, EventType, PublicClientApplication } from "@azure
 
 import "./index.css";
 import { initAnalytics, analytics } from "./analytics";
+import { getStoredConsent } from "./components/CookieConsentBanner";
 
-// Initialize analytics (PostHog + Sentry) — no-ops if env vars are not set
-initAnalytics();
+// Initialize analytics only if the user has previously accepted all cookies.
+// First-time visitors see the consent banner before any analytics are loaded.
+if (getStoredConsent() === "all") {
+    initAnalytics();
+}
 
 import Chat from "./pages/chat/Chat";
 import Dashboard from "./pages/dashboard/Dashboard";
@@ -38,6 +42,13 @@ const router = createHashRouter([
             {
                 path: "dashboard",
                 element: <Dashboard />
+            },
+            {
+                path: "getting-started",
+                lazy: async () => {
+                    const { default: Component } = await import("./pages/getting-started/GettingStarted");
+                    return { Component };
+                }
             },
             {
                 path: "admin",
