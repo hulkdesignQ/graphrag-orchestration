@@ -1,6 +1,6 @@
 import { useRef, useState, useEffect, useContext, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import readNDJSONStream from "ndjson-readablestream";
 
@@ -23,6 +23,7 @@ import { FolderSelector, DEMO_VALUE } from "../../components/FolderSelector";
 import { useLogin, getToken, requireAccessControl } from "../../authConfig";
 import { useMsal } from "@azure/msal-react";
 import { LoginContext } from "../../loginContext";
+import { hasSeenOnboarding, markOnboardingSeen } from "../../utils/onboarding";
 
 /**
  * Map raw JS errors to user-friendly messages.
@@ -557,6 +558,20 @@ const Chat = () => {
 
                             <h1 className={styles.chatEmptyStateTitle}>{t("chatEmptyStateTitle")}</h1>
                             <h2 className={styles.chatEmptyStateSubtitle}>{t("chatEmptyStateSubtitle")}</h2>
+                            {!hasSeenOnboarding() && (
+                                <div className={styles.welcomeBanner}>
+                                    <span>🚀</span>
+                                    <p className={styles.welcomeBannerText}>
+                                        {t("onboarding.welcomeBanner", "New to Evidoc? Check out our Getting Started guide to learn the basics.")}
+                                    </p>
+                                    <button className={styles.welcomeBannerLink} onClick={() => { markOnboardingSeen(); window.location.hash = "#/getting-started"; }}>
+                                        {t("onboarding.welcomeBannerAction", "Show me →")}
+                                    </button>
+                                    <button className={styles.welcomeBannerDismiss} onClick={(e) => { markOnboardingSeen(); (e.target as HTMLElement).closest(`.${styles.welcomeBanner}`)?.remove(); }}>
+                                        ✕
+                                    </button>
+                                </div>
+                            )}
                             {selectedFolderId === DEMO_VALUE && (
                                 <ExampleList onExampleClicked={onExampleClicked} useMultimodalAnswering={showMultimodalOptions} />
                             )}

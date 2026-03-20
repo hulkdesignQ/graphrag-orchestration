@@ -253,7 +253,8 @@
         "chat": "Chat",
         "files": "Files",
         "dashboard": "Dashboard",
-        "toggleNavigation": "Toggle navigation"
+        "toggleNavigation": "Toggle navigation",
+        "gettingStarted": "Getting Started"
     },
     "viewer": {
         "loadingFile": "Loading file",
@@ -365,5 +366,26 @@
         "plan": "Plan",
         "lastActive": "Last Active",
         "noUserActivity": "No user activity data yet. Data will appear once analytics are connected."
+    },
+    "onboarding": {
+        "pageTitle": "Getting Started",
+        "heroTitle": "Welcome to Evidoc",
+        "heroSubtitle": "Ask your documents anything. Trust every answer with sentence-level, click-to-verify citations.",
+        "howItWorks": "How it works",
+        "step1Title": "Upload your documents",
+        "step1Description": "Go to Files and upload your PDFs, Word documents, spreadsheets, or images. Evidoc supports 15+ formats. Organize them in folders to query related documents together.",
+        "step2Title": "Ask a question",
+        "step2Description": "Go to Chat, select a folder, and type your question in natural language. Evidoc searches across all documents in the folder using a Knowledge Graph — not just keywords.",
+        "step3Title": "Click to verify",
+        "step3Description": "Every answer includes numbered citations. Click any citation to see the exact sentence highlighted on the original PDF. Verify in seconds — no more manual cross-referencing.",
+        "tipsTitle": "Tips for best results",
+        "tip1": "Group related documents (contract + invoices) in the same folder for cross-document Q&A",
+        "tip2": "Be specific: \"What is the penalty for late delivery under section 5?\" works better than \"Tell me about penalties\"",
+        "tip3": "Try comparison questions: \"Do the invoice amounts match the agreed contract rates?\"",
+        "tip4": "Ask in any of 13 languages — Evidoc auto-detects and responds in your language",
+        "uploadFirst": "Upload your first document",
+        "skipToChat": "Go to Chat",
+        "welcomeBanner": "New to Evidoc? Check out our Getting Started guide to learn the basics.",
+        "welcomeBannerAction": "Show me →"
     }
 }
