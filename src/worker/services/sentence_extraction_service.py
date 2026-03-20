@@ -419,17 +419,6 @@ def _llm_detect_section_headers(
         f"[{i}] {s.get('text', '').strip()}" for i, s in enumerate(sentences)
     )
 
-    prompt = (
-        "You are a document structure analyst. Given numbered sentences from a "
-        "legal document section, identify which sentences are section or subsection "
-        "headers (not body content). Headers are typically short titles like "
-        "'Exclusions from Coverage.' or 'A. Binding Arbitration.'\n\n"
-        "Return ONLY a JSON array of objects: "
-        '[{"index": N, "title": "header text"}]\n'
-        "If there are no headers, return [].\n\n"
-        f"Sentences:\n{numbered}"
-    )
-
     endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
     deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4.1")
     api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-12-01-preview")
@@ -438,36 +427,42 @@ def _llm_detect_section_headers(
         return []
 
     try:
-        from llama_index.llms.azure_openai import AzureOpenAI as LlamaAzureOpenAI
+        from openai import AzureOpenAI as OpenAIClient
 
-        llm_kwargs: Dict[str, Any] = {
-            "model": deployment,
-            "engine": deployment,
+        client_kwargs: Dict[str, Any] = {
             "azure_endpoint": endpoint,
             "api_version": api_version,
-            "temperature": 0.0,
         }
 
         api_key = os.getenv("AZURE_OPENAI_API_KEY")
         if api_key:
-            llm_kwargs["api_key"] = api_key
+            client_kwargs["api_key"] = api_key
         else:
             env_token = os.getenv("AZURE_OPENAI_AD_TOKEN")
             if env_token:
-                llm_kwargs["use_azure_ad"] = True
-                llm_kwargs["azure_ad_token_provider"] = lambda: env_token
+                client_kwargs["azure_ad_token"] = env_token
             else:
-                from azure.identity import DefaultAzureCredential, get_bearer_token_provider
+                from azure.identity import DefaultAzureCredential
                 credential = DefaultAzureCredential()
-                token_provider = get_bearer_token_provider(
-                    credential, "https://cognitiveservices.azure.com/.default"
-                )
-                llm_kwargs["use_azure_ad"] = True
-                llm_kwargs["azure_ad_token_provider"] = token_provider
+                token = credential.get_token("https://cognitiveservices.azure.com/.default")
+                client_kwargs["azure_ad_token"] = token.token
 
-        llm = LlamaAzureOpenAI(**llm_kwargs)
-        response = llm.complete(prompt)
-        text = (response.text or "").strip()
+        client = OpenAIClient(**client_kwargs)
+        response = client.chat.completions.create(
+            model=deployment,
+            temperature=0,
+            messages=[
+                {"role": "system", "content": (
+                    "You are a document structure analyst. Given numbered sentences "
+                    "from a document section, identify which are section/subsection "
+                    "headers (not body content). Return ONLY a JSON array: "
+                    '[{"index": N, "title": "header text"}]. '
+                    "If none, return []."
+                )},
+                {"role": "user", "content": f"Identify section headers:\n\n{numbered}"},
+            ],
+        )
+        text = (response.choices[0].message.content or "").strip()
 
         # Strip markdown fences
         if text.startswith("```"):
