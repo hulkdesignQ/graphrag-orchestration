@@ -190,6 +190,10 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
             "max_chunks_per_doc": 5,  # cap per doc to balance coverage across documents
             "map_reduce_synthesis": True,  # per-document MAP extraction → cross-doc REDUCE merge
             "section_graph": True,  # load Section nodes + SHARES_ENTITY edges in PPR
+            # Unified PPR modifiers — available via config_overrides for A/B testing:
+            #   hub_penalty_mode: "log"  (1/log(2+degree) hub tax)
+            #   symmetric_norm: "1"      (D^(-½)·A·D^(-½))
+            #   community_balanced_seeds: "1" (seed / log(2+community_size))
         },
     }
 
@@ -400,6 +404,20 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
         ppr_self_loops = float(_ov("ppr_self_loops", "ROUTE7_PPR_SELF_LOOPS", "0.0"))
         ppr_hub_deval = _ov(
             "ppr_hub_deval", "ROUTE7_PPR_HUB_DEVAL", "0"
+        ).strip().lower() in {"1", "true", "yes"}
+
+        # Unified PPR: hub penalty, symmetric norm, community-balanced seeds
+        ppr_hub_penalty_mode = _ov(
+            "hub_penalty_mode", "ROUTE8_HUB_PENALTY_MODE",
+            preset.get("hub_penalty_mode", "none")
+        ).strip().lower()
+        ppr_symmetric_norm = _ov(
+            "symmetric_norm", "ROUTE8_SYMMETRIC_NORM",
+            "1" if preset.get("symmetric_norm", False) else "0"
+        ).strip().lower() in {"1", "true", "yes"}
+        ppr_community_balance = _ov(
+            "community_balanced_seeds", "ROUTE8_COMMUNITY_BALANCED_SEEDS",
+            "1" if preset.get("community_balanced_seeds", False) else "0"
         ).strip().lower() in {"1", "true", "yes"}
 
         # Sentence window: preset provides the default; config_overrides / env
@@ -957,6 +975,9 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
             dangling_redistribution=ppr_dangling,
             passage_self_loops=ppr_self_loops,
             hub_devaluation=ppr_hub_deval,
+            hub_penalty_mode=ppr_hub_penalty_mode,
+            symmetric_norm=ppr_symmetric_norm,
+            community_balance=ppr_community_balance,
         )
 
         # Bug 3 fix: if PPR produced no passage scores, fall back to raw DPR order

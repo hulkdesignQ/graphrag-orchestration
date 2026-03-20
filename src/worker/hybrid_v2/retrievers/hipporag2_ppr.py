@@ -28,6 +28,7 @@ Reference: HippoRAG 2 (ICML '25) — https://arxiv.org/abs/2502.14802
 from __future__ import annotations
 
 import asyncio
+import math
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -64,6 +65,9 @@ class HippoRAG2PPR:
         self._node_names: Dict[int, str] = {}  # index -> display name
         self._passage_full_texts: Dict[str, str] = {}  # node_id -> full text (for reranker)
         self._entity_mention_counts: Dict[str, int] = {}  # entity_id -> # passages mentioning it
+        # Community metadata for community-balanced personalization
+        self._community_id: Dict[int, int] = {}  # node_idx -> community_id
+        self._community_sizes: Dict[int, int] = {}  # community_id -> member_count
         # Weighted adjacency: source_idx -> [(target_idx, weight)]
         self._adj: Dict[int, List[Tuple[int, float]]] = {}
         # Precomputed sum of outgoing weights per node (for rank distribution)
@@ -110,10 +114,15 @@ class HippoRAG2PPR:
         self._adj[tgt_idx].append((src_idx, weight))
 
     def _finalize_graph(self) -> None:
-        """Precompute outgoing weight sums for efficient PPR iteration."""
+        """Precompute outgoing weight sums and community sizes."""
         for idx in range(self._node_count):
             edges = self._adj.get(idx, [])
             self._out_weight_sum[idx] = sum(w for _, w in edges) if edges else 0.0
+
+        # Compute community sizes from loaded community_id metadata
+        self._community_sizes.clear()
+        for idx, cid in self._community_id.items():
+            self._community_sizes[cid] = self._community_sizes.get(cid, 0) + 1
 
     async def load_graph(
         self,
@@ -201,16 +210,20 @@ class HippoRAG2PPR:
 
         with retry_session(neo4j_driver) as session:
             # ----------------------------------------------------------
-            # 1. Load Entity nodes
+            # 1. Load Entity nodes (with community_id for balanced seeds)
             # ----------------------------------------------------------
             result = session.run(
                 "MATCH (e:Entity) "
                 "WHERE e.group_id IN $group_ids "
-                "RETURN e.id AS id, e.name AS name",
+                "RETURN e.id AS id, e.name AS name, "
+                "e.community_id AS community_id",
                 group_ids=group_ids,
             )
             for record in result:
-                self._add_node(record["id"], "entity", record["name"] or "")
+                idx = self._add_node(record["id"], "entity", record["name"] or "")
+                cid = record["community_id"]
+                if cid is not None:
+                    self._community_id[idx] = int(cid)
 
             # ----------------------------------------------------------
             # 2. Load Sentence (passage) nodes
@@ -438,6 +451,9 @@ class HippoRAG2PPR:
         dangling_redistribution: bool = False,
         passage_self_loops: float = 0.0,
         hub_devaluation: bool = False,
+        hub_penalty_mode: str = "none",
+        symmetric_norm: bool = False,
+        community_balance: bool = False,
     ) -> Tuple[List[Tuple[str, float]], List[Tuple[str, float]]]:
         """Run Personalized PageRank with weighted seeds.
 
@@ -456,11 +472,18 @@ class HippoRAG2PPR:
                 (zero out-degree) teleports back to the personalization
                 vector instead of being lost.
             passage_self_loops: If > 0, add virtual self-loops of this
-                weight to passage nodes during the walk. Prevents passage
-                mass from draining entirely to entities.
-            hub_devaluation: If True, normalize entity→passage walk
-                contributions by entity degree (IDF-style), preventing
-                high-degree hubs from diluting mass.
+                weight to passage nodes during the walk.
+            hub_devaluation: Legacy flag — if True, uses raw-degree IDF.
+                Prefer hub_penalty_mode="log" instead.
+            hub_penalty_mode: Hub penalty strategy for entity nodes.
+                "none" = no penalty (default, backward compat).
+                "log"  = 1/log(2+degree) — industry-standard hub tax.
+            symmetric_norm: If True, use symmetric normalization
+                D^(-½)·A·D^(-½) instead of row normalization D⁻¹·A.
+                Prevents high-degree nodes from acting as mass sinks.
+            community_balance: If True, weight entity seeds inversely
+                by community density: seed *= 1/log(2+community_size).
+                Boosts seeds from sparse communities.
 
         Returns:
             Tuple of:
@@ -483,6 +506,14 @@ class HippoRAG2PPR:
             if idx is not None:
                 personalization[idx] += weight
 
+        # Community-balanced personalization: boost sparse communities
+        if community_balance and self._community_sizes:
+            for idx in range(self._node_count):
+                if personalization[idx] > 0 and idx in self._community_id:
+                    cid = self._community_id[idx]
+                    c_size = self._community_sizes.get(cid, 1)
+                    personalization[idx] /= math.log(2 + c_size)
+
         # Normalize personalization to sum to 1
         total_p = sum(personalization)
         if total_p <= 0:
@@ -497,12 +528,26 @@ class HippoRAG2PPR:
                 if self._node_types.get(idx) == "passage":
                     effective_out_sum[idx] = effective_out_sum.get(idx, 0.0) + passage_self_loops
 
-        # Precompute hub-devaluation divisors (entity degree for IDF-style)
-        hub_divisor: Dict[int, float] = {}
-        if hub_devaluation:
+        # Precompute hub penalty factors (entity nodes only)
+        hub_factor: Dict[int, float] = {}
+        effective_hub_mode = hub_penalty_mode
+        if hub_devaluation and hub_penalty_mode == "none":
+            effective_hub_mode = "raw"  # legacy backward compat
+        if effective_hub_mode != "none":
             for idx in range(self._node_count):
                 if self._node_types.get(idx) == "entity":
-                    hub_divisor[idx] = max(len(self._adj.get(idx, [])), 1.0)
+                    degree = max(len(self._adj.get(idx, [])), 1)
+                    if effective_hub_mode == "log":
+                        hub_factor[idx] = 1.0 / math.log(2 + degree)
+                    elif effective_hub_mode == "raw":
+                        hub_factor[idx] = 1.0 / degree
+
+        # Precompute sqrt of out-weight sums for symmetric normalization
+        sqrt_out: Dict[int, float] = {}
+        if symmetric_norm:
+            for idx in range(self._node_count):
+                s = effective_out_sum.get(idx, 0.0)
+                sqrt_out[idx] = math.sqrt(s) if s > 0 else 0.0
 
         # Initialize rank to personalization vector
         rank = list(personalization)
@@ -531,10 +576,22 @@ class HippoRAG2PPR:
                     new_rank[src] += self_share
 
                 for tgt, edge_weight in self._adj[src]:
-                    share = damping * rank[src] * edge_weight / out_sum
-                    # Hub devaluation: reduce share from high-degree entities
-                    if hub_devaluation and src in hub_divisor:
-                        share /= hub_divisor[src]
+                    if symmetric_norm:
+                        # D^(-½)·A·D^(-½): divide by sqrt(deg_src * deg_tgt)
+                        sqrt_src = sqrt_out.get(src, 0.0)
+                        sqrt_tgt = sqrt_out.get(tgt, 0.0)
+                        if sqrt_src > 0 and sqrt_tgt > 0:
+                            share = damping * rank[src] * edge_weight / (sqrt_src * sqrt_tgt)
+                        else:
+                            continue
+                    else:
+                        # Standard row normalization: D⁻¹·A
+                        share = damping * rank[src] * edge_weight / out_sum
+
+                    # Hub penalty: reduce share from high-degree entity nodes
+                    if src in hub_factor:
+                        share *= hub_factor[src]
+
                     new_rank[tgt] += share
 
             # Redistribute dangling mass to personalization vector
@@ -578,6 +635,10 @@ class HippoRAG2PPR:
             iterations=min(iteration + 1, max_iterations) if self._node_count > 0 else 0,
             entity_seeds=len(entity_seeds),
             passage_seeds=len(passage_seeds),
+            hub_penalty=effective_hub_mode,
+            symmetric_norm=symmetric_norm,
+            community_balance=community_balance,
+            community_count=len(self._community_sizes),
             top_passage_score=passage_scores[0][1] if passage_scores else 0.0,
             top_entity_score=entity_scores[0][1] if entity_scores else 0.0,
         )
