@@ -304,7 +304,9 @@
         "featureAdvancedAnalytics": "Avanceret analyse",
         "featureApiAccess": "API-adgang",
         "featureCentralizedBilling": "Centraliseret fakturering",
-        "featureAuditLogs": "Revisionslogfiler"
+        "featureAuditLogs": "Revisionslogfiler",
+        "cancelAtPeriodEnd": "Dit abonnement opsiges den {{date}}. Du kan genabonnere når som helst.",
+        "nextRenewal": "Næste fornyelse: {{date}}"
     },
     "admin": {
         "signInRequired": "Log ind påkrævet",

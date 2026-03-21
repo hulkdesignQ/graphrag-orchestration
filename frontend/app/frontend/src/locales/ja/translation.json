@@ -304,7 +304,9 @@
         "featureAdvancedAnalytics": "高度な分析",
         "featureApiAccess": "APIアクセス",
         "featureCentralizedBilling": "一括請求",
-        "featureAuditLogs": "監査ログ"
+        "featureAuditLogs": "監査ログ",
+        "cancelAtPeriodEnd": "サブスクリプションは{{date}}に解約されます。いつでも再登録できます。",
+        "nextRenewal": "次回更新日: {{date}}"
     },
     "admin": {
         "signInRequired": "サインインが必要です",

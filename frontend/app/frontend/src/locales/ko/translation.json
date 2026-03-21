@@ -296,7 +296,9 @@
         "featureAdvancedAnalytics": "고급 분석",
         "featureApiAccess": "API 접근",
         "featureCentralizedBilling": "중앙 결제",
-        "featureAuditLogs": "감사 로그"
+        "featureAuditLogs": "감사 로그",
+        "cancelAtPeriodEnd": "구독이 {{date}}에 취소됩니다. 언제든지 다시 구독할 수 있습니다.",
+        "nextRenewal": "다음 갱신일: {{date}}"
     },
     "admin": {
         "signInRequired": "로그인 필요",

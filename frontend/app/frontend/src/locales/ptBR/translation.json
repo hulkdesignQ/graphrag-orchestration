@@ -304,7 +304,9 @@
         "featureAdvancedAnalytics": "Análises avançadas",
         "featureApiAccess": "Acesso à API",
         "featureCentralizedBilling": "Faturamento centralizado",
-        "featureAuditLogs": "Logs de auditoria"
+        "featureAuditLogs": "Logs de auditoria",
+        "cancelAtPeriodEnd": "Sua assinatura será cancelada em {{date}}. Você pode assinar novamente a qualquer momento.",
+        "nextRenewal": "Próxima renovação: {{date}}"
     },
     "admin": {
         "signInRequired": "Login necessário",

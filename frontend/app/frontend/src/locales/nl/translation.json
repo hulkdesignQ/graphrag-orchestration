@@ -304,7 +304,9 @@
         "featureAdvancedAnalytics": "Geavanceerde analyses",
         "featureApiAccess": "API-toegang",
         "featureCentralizedBilling": "Gecentraliseerde facturering",
-        "featureAuditLogs": "Auditlogboeken"
+        "featureAuditLogs": "Auditlogboeken",
+        "cancelAtPeriodEnd": "Je abonnement wordt opgezegd op {{date}}. Je kunt je op elk moment opnieuw abonneren.",
+        "nextRenewal": "Volgende verlenging: {{date}}"
     },
     "admin": {
         "signInRequired": "Inloggen vereist",

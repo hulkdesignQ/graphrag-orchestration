@@ -304,7 +304,9 @@
         "featureAdvancedAnalytics": "Gelişmiş Analitik",
         "featureApiAccess": "API Erişimi",
         "featureCentralizedBilling": "Merkezi faturalandırma",
-        "featureAuditLogs": "Denetim günlükleri"
+        "featureAuditLogs": "Denetim günlükleri",
+        "cancelAtPeriodEnd": "Aboneliğiniz {{date}} tarihinde iptal edilecektir. İstediğiniz zaman yeniden abone olabilirsiniz.",
+        "nextRenewal": "Sonraki yenileme: {{date}}"
     },
     "admin": {
         "signInRequired": "Giriş gerekli",

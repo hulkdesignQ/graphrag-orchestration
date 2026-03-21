@@ -296,7 +296,9 @@
         "featureAdvancedAnalytics": "高级分析",
         "featureApiAccess": "API 访问",
         "featureCentralizedBilling": "集中计费",
-        "featureAuditLogs": "审计日志"
+        "featureAuditLogs": "审计日志",
+        "cancelAtPeriodEnd": "您的订阅将于{{date}}取消。您可以随时重新订阅。",
+        "nextRenewal": "下次续费：{{date}}"
     },
     "admin": {
         "signInRequired": "需要登录",

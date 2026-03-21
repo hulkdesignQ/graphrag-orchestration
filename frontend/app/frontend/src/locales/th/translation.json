@@ -333,7 +333,9 @@
         "featureAdvancedAnalytics": "การวิเคราะห์ขั้นสูง",
         "featureApiAccess": "การเข้าถึง API",
         "featureCentralizedBilling": "การเรียกเก็บเงินแบบรวมศูนย์",
-        "featureAuditLogs": "บันทึกการตรวจสอบ"
+        "featureAuditLogs": "บันทึกการตรวจสอบ",
+        "cancelAtPeriodEnd": "การสมัครสมาชิกของคุณจะถูกยกเลิกในวันที่ {{date}} คุณสามารถสมัครใหม่ได้ทุกเมื่อ",
+        "nextRenewal": "ต่ออายุครั้งถัดไป: {{date}}"
     },
     "admin": {
         "signInRequired": "ต้องเข้าสู่ระบบ",

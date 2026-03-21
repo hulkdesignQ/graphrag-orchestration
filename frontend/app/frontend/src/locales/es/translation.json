@@ -304,7 +304,9 @@
         "featureAdvancedAnalytics": "Analítica avanzada",
         "featureApiAccess": "Acceso API",
         "featureCentralizedBilling": "Facturación centralizada",
-        "featureAuditLogs": "Registros de auditoría"
+        "featureAuditLogs": "Registros de auditoría",
+        "cancelAtPeriodEnd": "Tu suscripción se cancelará el {{date}}. Puedes volver a suscribirte en cualquier momento.",
+        "nextRenewal": "Próxima renovación: {{date}}"
     },
     "admin": {
         "signInRequired": "Inicio de sesión requerido",

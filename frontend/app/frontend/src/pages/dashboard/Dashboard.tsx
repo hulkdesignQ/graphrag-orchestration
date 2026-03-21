@@ -6,7 +6,7 @@ import styles from "./Dashboard.module.css";
 import { useLogin, getToken, isUsingAppServicesLogin } from "../../authConfig";
 import { LoginContext } from "../../loginContext";
 import { fetchDashboardAll, UserProfileResponse, UsageStats, PlanInfo } from "../../api/dashboard";
-import { fetchBillingConfig, createCheckoutSession, createPortalSession, BillingConfig } from "../../api/billing";
+import { fetchBillingConfig, fetchSubscription, createCheckoutSession, createPortalSession, BillingConfig, SubscriptionStatus } from "../../api/billing";
 import { Events } from "../../analytics";
 
 const PLAN_BADGE_CLASS: Record<string, string> = {
@@ -41,10 +41,10 @@ const Dashboard = () => {
     const [error, setError] = useState<string | null>(null);
     const [sessionExpired, setSessionExpired] = useState(false);
     const [billingConfig, setBillingConfig] = useState<BillingConfig | null>(null);
+    const [subscription, setSubscription] = useState<SubscriptionStatus | null>(null);
     const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null);
 
-    // B2B tiers require sales contact — never show Stripe checkout
-    const B2B_TIERS = new Set(["business", "enterprise"]);
+    // All tiers support self-service Stripe checkout
 
     const handleReLogin = () => {
         if (isUsingAppServicesLogin) {
@@ -66,6 +66,12 @@ const Dashboard = () => {
             setUsage(data.usage);
             setPlans(data.plans);
             setBillingConfig(billing);
+
+            // Fetch subscription details if Stripe is enabled
+            if (billing.stripe_enabled) {
+                const sub = await fetchSubscription(token);
+                setSubscription(sub);
+            }
         } catch (e: any) {
             const msg = e.message || "Failed to load dashboard";
             if (msg.includes("401") || msg.toLowerCase().includes("expired") || msg.toLowerCase().includes("unauthorized")) {
@@ -253,8 +259,7 @@ const Dashboard = () => {
                     <div className={styles.planGrid}>
                         {Object.entries(plans.plans).map(([tier, info]) => {
                             const isCurrent = tier === plans.current_plan;
-                            const isB2B = B2B_TIERS.has(tier);
-                            const canCheckout = billingConfig?.stripe_enabled && !isB2B && tier !== "free";
+                            const canCheckout = billingConfig?.stripe_enabled && tier !== "free";
                             const isUpgrade = !isCurrent && canCheckout;
                             return (
                                 <div
@@ -297,31 +302,51 @@ const Dashboard = () => {
                                             ? t("dashboard.currentPlan")
                                             : checkoutLoading === tier
                                                 ? "..."
-                                                : isUpgrade
-                                                    ? t("dashboard.upgrade")
-                                                    : t("dashboard.contactSales")}
+                                                : t("dashboard.upgrade")}
                                     </button>
                                 </div>
                             );
                         })}
                     </div>
-                    {/* Manage Billing — shown only for paid subscribers */}
+                    {/* Subscription status & Manage Billing */}
                     {billingConfig?.stripe_enabled && profile.plan !== "free" && (
-                        <button
-                            className={styles.upgradeButton}
-                            style={{ marginTop: "1rem" }}
-                            onClick={async () => {
-                                try {
-                                    const token = client ? await getToken(client) : undefined;
-                                    const { portal_url } = await createPortalSession(token);
-                                    window.location.href = portal_url;
-                                } catch (err: any) {
-                                    setError(err.message || "Failed to open billing portal");
-                                }
-                            }}
-                        >
-                            💳 {t("dashboard.manageBilling")}
-                        </button>
+                        <div className={styles.subscriptionStatus}>
+                            {subscription?.has_subscription && (
+                                <>
+                                    {subscription.cancel_at_period_end && (
+                                        <p className={styles.cancelNotice}>
+                                            ⚠️ {t("dashboard.cancelAtPeriodEnd", {
+                                                date: subscription.current_period_end
+                                                    ? new Date(subscription.current_period_end).toLocaleDateString()
+                                                    : "—"
+                                            })}
+                                        </p>
+                                    )}
+                                    {subscription.current_period_end && !subscription.cancel_at_period_end && (
+                                        <p className={styles.renewalInfo}>
+                                            {t("dashboard.nextRenewal", {
+                                                date: new Date(subscription.current_period_end).toLocaleDateString()
+                                            })}
+                                        </p>
+                                    )}
+                                </>
+                            )}
+                            <button
+                                className={styles.upgradeButton}
+                                style={{ marginTop: "0.5rem" }}
+                                onClick={async () => {
+                                    try {
+                                        const token = client ? await getToken(client) : undefined;
+                                        const { portal_url } = await createPortalSession(token);
+                                        window.location.href = portal_url;
+                                    } catch (err: any) {
+                                        setError(err.message || "Failed to open billing portal");
+                                    }
+                                }}
+                            >
+                                💳 {t("dashboard.manageBilling")}
+                            </button>
+                        </div>
                     )}
                 </div>
             )}

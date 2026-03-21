@@ -307,7 +307,9 @@
         "featureAdvancedAnalytics": "Zaawansowana analityka",
         "featureApiAccess": "Dostęp do API",
         "featureCentralizedBilling": "Scentralizowane rozliczenia",
-        "featureAuditLogs": "Dzienniki audytu"
+        "featureAuditLogs": "Dzienniki audytu",
+        "cancelAtPeriodEnd": "Twoja subskrypcja zostanie anulowana {{date}}. Możesz ponownie subskrybować w dowolnym momencie.",
+        "nextRenewal": "Następne odnowienie: {{date}}"
     },
     "admin": {
         "signInRequired": "Wymagane logowanie",

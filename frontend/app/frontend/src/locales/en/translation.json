@@ -338,7 +338,9 @@
         "featureAdvancedAnalytics": "Advanced Analytics",
         "featureApiAccess": "API Access",
         "featureCentralizedBilling": "Centralized Billing",
-        "featureAuditLogs": "Audit Logs"
+        "featureAuditLogs": "Audit Logs",
+        "cancelAtPeriodEnd": "Your subscription will be cancelled on {{date}}. You can resubscribe anytime.",
+        "nextRenewal": "Next renewal: {{date}}"
     },
     "admin": {
         "signInRequired": "Sign in Required",

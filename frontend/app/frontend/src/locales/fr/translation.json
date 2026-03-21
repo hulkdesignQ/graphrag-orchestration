@@ -304,7 +304,9 @@
         "featureAdvancedAnalytics": "Analytique avancée",
         "featureApiAccess": "Accès API",
         "featureCentralizedBilling": "Facturation centralisée",
-        "featureAuditLogs": "Journaux d'audit"
+        "featureAuditLogs": "Journaux d'audit",
+        "cancelAtPeriodEnd": "Votre abonnement sera annulé le {{date}}. Vous pouvez vous réabonner à tout moment.",
+        "nextRenewal": "Prochain renouvellement : {{date}}"
     },
     "admin": {
         "signInRequired": "Connexion requise",

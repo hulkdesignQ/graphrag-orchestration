@@ -333,7 +333,9 @@
         "featureAdvancedAnalytics": "Erweiterte Analytik",
         "featureApiAccess": "API-Zugang",
         "featureCentralizedBilling": "Zentrale Abrechnung",
-        "featureAuditLogs": "Audit-Protokolle"
+        "featureAuditLogs": "Audit-Protokolle",
+        "cancelAtPeriodEnd": "Ihr Abonnement wird am {{date}} gekündigt. Sie können jederzeit erneut abonnieren.",
+        "nextRenewal": "Nächste Verlängerung: {{date}}"
     },
     "admin": {
         "signInRequired": "Anmeldung erforderlich",
