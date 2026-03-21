@@ -40,11 +40,13 @@ GROUND_TRUTH: Dict[str, Dict[str, Any]] = {
     "Q-G1": {
         "query": "Across the agreements, list the termination/cancellation rules you can find.",
         "required": [
-            ("sixty (60) day", "PROPERTY MANAGEMENT"),
-            ("3 business days", "purchase_contract"),
-            ("deposit is forfeited", "purchase_contract"),
-            ("terminat", "HOLDING TANK"),  # "terminates" or "terminate"
-            ("automatically terminates", "WARRANTY"),
+            ("sixty (60) day", "PROPERTY MANAGEMENT"),       # PMA termination notice
+            ("written notice", "PROPERTY MANAGEMENT"),       # PMA: written notice to terminate
+            ("3 business days", "purchase_contract"),        # purchase: cancellation window
+            ("deposit is forfeited", "purchase_contract"),   # purchase: forfeiture after window
+            ("terminat", "HOLDING TANK"),                    # holding tank: remains until terminated
+            ("not transferable", "WARRANTY"),                # warranty: not transferable
+            ("sells", "WARRANTY"),                           # warranty: terminates if purchaser sells/moves
         ],
     },
     "Q-G2": {
@@ -59,72 +61,79 @@ GROUND_TRUTH: Dict[str, Dict[str, Any]] = {
     "Q-G3": {
         "query": "Summarize who pays what across the set (fees/charges/taxes).",
         "required": [
-            ("29,900", "purchase_contract"),
-            ("25%", "PROPERTY MANAGEMENT"),
-            ("10%", "PROPERTY MANAGEMENT"),
-            ("$75", "PROPERTY MANAGEMENT"),
-            ("excise tax", "PROPERTY MANAGEMENT"),
-            ("pumper", "HOLDING TANK"),
+            ("29,900", "purchase_contract"),                 # purchase price
+            ("25%", "PROPERTY MANAGEMENT"),                  # leasing commission
+            ("10%", "PROPERTY MANAGEMENT"),                  # management commission or repair fee
+            ("$75", "PROPERTY MANAGEMENT"),                  # advertising fee
+            ("$50", "PROPERTY MANAGEMENT"),                  # admin fee
+            ("$35", "PROPERTY MANAGEMENT"),                  # scheduling fee
+            ("excise tax", "PROPERTY MANAGEMENT"),           # Hawaii excise tax
+            ("pumper", "HOLDING TANK"),                      # owner pays pumper
         ],
     },
     "Q-G4": {
         "query": "What obligations are explicitly described as reporting / record-keeping?",
         "required": [
-            ("report", "HOLDING TANK"),  # pumper submits reports
-            ("volumes in gallons", "HOLDING TANK"),
-            ("monthly statement", "PROPERTY MANAGEMENT"),
+            ("report", "HOLDING TANK"),                      # pumper submits reports
+            ("volumes", "HOLDING TANK"),                     # volumes pumped
+            ("monthly statement", "PROPERTY MANAGEMENT"),    # agent monthly statement
         ],
     },
     "Q-G5": {
         "query": "What remedies / dispute-resolution mechanisms are described?",
         "required": [
-            ("arbitration", "WARRANTY"),
-            ("small claims", "WARRANTY"),
-            ("confidential", "WARRANTY"),
-            ("legal fees", "purchase_contract"),
+            ("arbitration", "WARRANTY"),                     # binding arbitration
+            ("small claims", "WARRANTY"),                    # small claims carveout
+            ("confidential", "WARRANTY"),                    # confidentiality language
+            ("legal fees", "purchase_contract"),             # legal fees recoverable
         ],
     },
     "Q-G6": {
         "query": "List all named parties/organizations across the documents and which document(s) they appear in.",
         "required": [
-            ("Fabrikam", "WARRANTY"),
-            ("Contoso", "PROPERTY MANAGEMENT"),
-            ("Contoso Lifts", "purchase_contract"),
-            ("Walt Flood", "PROPERTY MANAGEMENT"),
+            ("Fabrikam", "WARRANTY"),                        # builder in warranty
+            ("Fabrikam", "HOLDING TANK"),                    # pumper in holding tank
+            ("Contoso", "PROPERTY MANAGEMENT"),              # owner in PMA
+            ("Contoso Lifts", "purchase_contract"),          # contractor in purchase
+            ("Walt Flood", "PROPERTY MANAGEMENT"),           # agent in PMA
         ],
     },
     "Q-G7": {
         "query": "Summarize all explicit notice / delivery mechanisms mentioned.",
         "required": [
-            ("written noti", "PROPERTY MANAGEMENT"),
-            ("certified mail", "WARRANTY"),
-            ("business days", "HOLDING TANK"),
+            ("sixty (60) day", "PROPERTY MANAGEMENT"),       # PMA: 60 days written notice to terminate
+            ("written notice", "PROPERTY MANAGEMENT"),       # PMA: written notice requirement
+            ("certified mail", "WARRANTY"),                  # warranty: certified mail return receipt
+            ("phone", "WARRANTY"),                           # warranty: emergency by phone
+            ("in writing", "WARRANTY"),                      # warranty: defect notice in writing
+            ("business days", "HOLDING TANK"),               # holding tank: 10 business days filing
         ],
     },
     "Q-G8": {
         "query": "Summarize all explicit insurance / indemnity / hold harmless clauses.",
         "required": [
-            ("300,000", "PROPERTY MANAGEMENT"),
-            ("25,000", "PROPERTY MANAGEMENT"),
-            ("indemnify", "PROPERTY MANAGEMENT"),
-            ("negligence", "PROPERTY MANAGEMENT"),
+            ("300,000", "PROPERTY MANAGEMENT"),              # BI limit
+            ("25,000", "PROPERTY MANAGEMENT"),               # PD limit
+            ("indemnify", "PROPERTY MANAGEMENT"),            # hold harmless/indemnify
+            ("negligence", "PROPERTY MANAGEMENT"),           # except gross negligence
         ],
     },
     "Q-G9": {
         "query": "Identify all explicit non-refundable / forfeiture terms across the documents.",
         "required": [
-            ("non-refundable", "PROPERTY MANAGEMENT"),
-            ("$250", "PROPERTY MANAGEMENT"),
-            ("deposit is forfeited", "purchase_contract"),
+            ("non-refundable", "PROPERTY MANAGEMENT"),       # PMA start-up fee
+            ("$250", "PROPERTY MANAGEMENT"),                 # $250 amount
+            ("deposit is forfeited", "purchase_contract"),   # purchase: deposit forfeiture
+            ("3 business days", "purchase_contract"),        # after 3 business days
         ],
     },
     "Q-G10": {
         "query": "Summarize each document's main purpose in one sentence.",
         "required": [
-            ("warranty", "WARRANTY"),
-            ("servic", "HOLDING TANK"),
-            ("manag", "PROPERTY MANAGEMENT"),
-            ("purchase", "purchase_contract"),
+            ("warranty", "WARRANTY"),                        # warranty doc
+            ("servic", "HOLDING TANK"),                      # holding tank servicing
+            ("manag", "PROPERTY MANAGEMENT"),                # property management
+            ("purchase", "purchase_contract"),               # purchase contract
         ],
     },
 }
@@ -209,6 +218,7 @@ def run_evaluation(
     """Run retrieval evaluation for all Q-G questions."""
     results = {}
     total_found = 0
+    total_final_found = 0
     total_required = 0
 
     qids = questions or sorted(GROUND_TRUTH.keys())
@@ -243,12 +253,20 @@ def run_evaluation(
             checks = check_retrieval(ppr_passages, required)
             found = sum(1 for c in checks if c["found"])
 
+            # Also check post-reranking passages (final_passages)
+            final_passages = metadata.get("final_passages", [])
+            final_checks = check_retrieval(final_passages, required) if final_passages else []
+            final_found = sum(1 for c in final_checks if c["found"])
+
             repeat_results.append({
                 "found": found,
                 "total": len(required),
                 "elapsed": elapsed,
                 "checks": checks,
                 "num_ppr_passages": len(ppr_passages),
+                "final_found": final_found,
+                "num_final_passages": len(final_passages),
+                "final_checks": final_checks,
             })
 
         # Aggregate repeats
@@ -260,6 +278,11 @@ def run_evaluation(
         total_found += best["found"]
         total_required += len(required)
 
+        # Post-reranking recall
+        best_final = max(repeat_results, key=lambda x: x.get("final_found", 0))
+        worst_final = min(repeat_results, key=lambda x: x.get("final_found", 0))
+        total_final_found += best_final.get("final_found", 0)
+
         # Status icon
         if best["found"] == len(required):
             icon = "✅"
@@ -268,10 +291,23 @@ def run_evaluation(
         else:
             icon = "❌"
 
+        # Post-reranking icon
+        ff = best_final.get("final_found", 0)
+        if ff == len(required):
+            final_icon = "✅"
+        elif ff >= len(required) * 0.7:
+            final_icon = "🟡"
+        else:
+            final_icon = "❌"
+
         # Show missing phrases from worst run
         missing = []
         if "checks" in worst:
             missing = [c["phrase"] for c in worst["checks"] if not c["found"]]
+
+        final_missing = []
+        if "final_checks" in worst_final and worst_final["final_checks"]:
+            final_missing = [c["phrase"] for c in worst_final["final_checks"] if not c["found"]]
 
         results[qid] = {
             "best": best["found"],
@@ -280,18 +316,28 @@ def run_evaluation(
             "total": len(required),
             "avg_elapsed_s": avg_elapsed,
             "missing": missing,
+            "final_best": best_final.get("final_found", 0),
+            "final_worst": worst_final.get("final_found", 0),
+            "final_missing": final_missing,
         }
 
         miss_str = f" missing=[{', '.join(missing)}]" if missing else ""
+        ppr_p = best.get("num_ppr_passages", "?")
+        final_p = best_final.get("num_final_passages", "?")
         consistency = f"{worst['found']}-{best['found']}" if worst["found"] != best["found"] else str(best["found"])
-        print(f"  {icon} [{qid}] {consistency}/{len(required)}{miss_str}  ({avg_elapsed:.1f}s)")
+        final_str = f"{best_final.get('final_found', 0)}/{len(required)}"
+        final_miss_str = f" dropped=[{', '.join(final_missing)}]" if final_missing else ""
+        print(f"  {icon} [{qid}] PPR={consistency}/{len(required)} ({ppr_p}p) | {final_icon} Reranked={final_str} ({final_p}p){final_miss_str}{miss_str}  ({avg_elapsed:.1f}s)")
 
     overall_pct = (total_found / total_required * 100) if total_required > 0 else 0
+    final_pct = (total_final_found / total_required * 100) if total_required > 0 else 0
     return {
         "per_question": results,
         "total_found": total_found,
+        "total_final_found": total_final_found,
         "total_required": total_required,
         "overall_pct": overall_pct,
+        "final_pct": final_pct,
         "config_overrides": config_overrides,
     }
 
@@ -380,8 +426,10 @@ def main():
             args.url, args.group_id, args.force_route, args.query_mode,
             config_overrides, args.questions, args.repeats,
         )
-        print(f"\n  Overall: {result['total_found']}/{result['total_required']} "
+        print(f"\n  PPR recall:      {result['total_found']}/{result['total_required']} "
               f"({result['overall_pct']:.1f}%)")
+        print(f"  Reranked recall: {result['total_final_found']}/{result['total_required']} "
+              f"({result['final_pct']:.1f}%)")
 
         if args.json:
             with open(args.json, "w") as f:

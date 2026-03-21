@@ -183,13 +183,13 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
             "max_tokens": None,
         },
         "community_search": {          # Community-dominant (abstract themes, exhaustive)
-            "ppr_passage_top_k": 100,  # wider net — dynamic reranker handles filtering
+            "ppr_passage_top_k": 150,  # wider net for cross-topic retrieval; reranker handles filtering
             "prompt_variant": None,
             "max_tokens": None,
             "community_passage_seeds": False,  # Neural PPR achieves 100% recall — injection redundant
             "community_guided_instruction": False,  # dynamic cutoff handles filtering; guided narrows too aggressively (-24% facts)
             "rerank_dynamic_cutoff": True,   # let reranker score decide which passages survive
-            "rerank_relevance_threshold": 0.25,  # natural breakpoint — keeps ~25-40 passages per query
+            "rerank_relevance_threshold": 0.22,  # 0.22 keeps all ground truth; 0.25 drops borderline cross-topic passages
             "rerank_top_k": 260,  # wide net — Voyage scores all, threshold filters
             "rerank_prefilter_k": 120,  # cosine pre-filter before cross-encoder reranking
             "min_chunks_per_doc": 0,  # disabled — dynamic cutoff handles passage selection
@@ -411,6 +411,10 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
         )
         rerank_dynamic_max = int(
             _ov("rerank_dynamic_max", "ROUTE7_RERANK_DYNAMIC_MAX", "80")
+        )
+        rerank_dynamic_min = int(
+            _ov("rerank_dynamic_min", "ROUTE7_RERANK_DYNAMIC_MIN",
+                str(preset.get("rerank_dynamic_min", 0)))
         )
 
         # Semantic pre-filter: use embedding cosine similarity to densify
@@ -1142,6 +1146,7 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
                         community_guided_query, candidate_ids, top_k=rerank_top_k,
                         relevance_threshold=rerank_relevance_threshold if rerank_dynamic_cutoff else 0.0,
                         dynamic_max=rerank_dynamic_max if rerank_dynamic_cutoff else 0,
+                        dynamic_min=rerank_dynamic_min if rerank_dynamic_cutoff else 0,
                         user_id=user_id,
                     )
                     if reranked_scored:
@@ -3096,6 +3101,7 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
         top_k: int = 20,
         relevance_threshold: float = 0.0,
         dynamic_max: int = 0,
+        dynamic_min: int = 0,
         user_id: Optional[str] = None,
     ) -> List[Tuple[str, float]]:
         """Rerank candidate sentence IDs using voyage-rerank-2.5.
@@ -3105,7 +3111,9 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
 
         When relevance_threshold > 0, uses dynamic cutoff: keeps all passages
         above the threshold instead of a fixed top-K.  dynamic_max caps
-        the total to avoid context overflow.
+        the total to avoid context overflow.  dynamic_min ensures at least
+        N passages survive even if they fall below threshold — prevents
+        narrow queries from being starved.
 
         Args:
             query: The user query.
@@ -3113,6 +3121,7 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
             top_k: Max passages to return (used when threshold is 0).
             relevance_threshold: Min relevance_score to keep (0 = disabled).
             dynamic_max: Hard cap when using dynamic cutoff (0 = top_k).
+            dynamic_min: Floor — always keep at least N passages (0 = disabled).
 
         Returns:
             Reranked list of (sentence_id, relevance_score) tuples.
@@ -3175,6 +3184,12 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
                 for rr in rr_result.results
                 if rr.relevance_score >= relevance_threshold
             ]
+            # Floor: if threshold is too aggressive, keep at least dynamic_min
+            if dynamic_min > 0 and len(scored) < dynamic_min:
+                scored = [
+                    (valid_ids[rr.index], rr.relevance_score)
+                    for rr in rr_result.results[:dynamic_min]
+                ]
             if dynamic_max > 0:
                 scored = scored[:dynamic_max]
         else:
