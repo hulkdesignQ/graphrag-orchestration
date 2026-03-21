@@ -1,14 +1,18 @@
 """Route 8: HippoRAG 2 + Community-Seeded PPR (experimental).
 
-Fork of Route 7 with community passage seeding and community-guided
-instruction ALWAYS ON by default.  This lets PPR reach entity clusters
-that the query's narrow entity seeds would never visit — solving the
-"retrieval breadth" gap seen on cross-document comparison questions
-like Q-D3 ("Compare time windows across the set").
+Fork of Route 7 with Neural PPR + dynamic reranker cutoff.  Neural PPR
+(cosine teleportation) gives every passage query-relevance mass, achieving
+100% retrieval recall without community passage seeds or entity injection.
+The Voyage reranker's relevance_score drives a dynamic cutoff (threshold
+0.25) that replaces fixed top-K and doc interleaving.
 
-The only differences from Route 7:
-  - community_passage_seeds default: ON  (Route 7: OFF unless preset)
-  - community_guided_instruction default: ON  (Route 7: OFF unless preset)
+Key differences from Route 7 default preset:
+  - neural_weight: 0.5          (query-conditioned PPR teleportation)
+  - rerank_dynamic_cutoff: True  (score-based passage filtering)
+  - community_passage_seeds: OFF (Neural PPR supersedes injection)
+  - entity_context_inject: OFF   (PPR already retrieves entity passages)
+  - semantic_passage_seeds: OFF  (Neural PPR supersedes cross-encoder seeds)
+  - community_guided_instruction: OFF (dynamic cutoff handles filtering)
   - ROUTE_NAME = "route_8_hipporag2_community"
   - Env-var prefix: ROUTE8_* (falls back to ROUTE7_* then defaults)
 
@@ -183,12 +187,16 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
             "prompt_variant": None,
             "max_tokens": None,
             "community_passage_seeds": False,  # Neural PPR achieves 100% recall — injection redundant
-            "community_guided_instruction": True,  # guide embed + reranker with community summaries
+            "community_guided_instruction": False,  # dynamic cutoff handles filtering; guided narrows too aggressively (-24% facts)
             "rerank_dynamic_cutoff": True,   # let reranker score decide which passages survive
             "rerank_relevance_threshold": 0.25,  # natural breakpoint — keeps ~25-40 passages per query
             "rerank_top_k": 260,  # wide net — Voyage scores all, threshold filters
+            "rerank_prefilter_k": 120,  # cosine pre-filter before cross-encoder reranking
             "min_chunks_per_doc": 0,  # disabled — dynamic cutoff handles passage selection
             "max_chunks_per_doc": 0,  # disabled — dynamic cutoff handles passage selection
+            "entity_context_inject": False,  # disabled — PPR already retrieves entity-linked passages
+            "semantic_passage_seeds": False,  # disabled — Neural PPR (cosine teleportation) supersedes
+            "neural_weight": 0.5,  # query-conditioned teleportation — 100% recall without injection
             "map_reduce_synthesis": True,  # per-document MAP extraction → cross-doc REDUCE merge
             "section_graph": True,  # load Section nodes + SHARES_ENTITY edges in PPR
             # Unified PPR modifiers — available via config_overrides for A/B testing:
@@ -307,10 +315,22 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
         preset = self.QUERY_MODE_PRESETS.get(query_mode or "", {})
         _co = config_overrides or {}
 
-        # Config from env, with per-request overrides taking precedence
+        # Config from env, with per-request overrides taking precedence.
+        # Priority: config_overrides → ROUTE8_env → preset value → ROUTE7_env → default.
+        # When the preset explicitly defines a key, ROUTE7_ env vars from .env
+        # do NOT override it (prevents route-7 defaults from clobbering the
+        # community_search preset).  Use ROUTE8_ env vars to override preset.
         def _ov(key: str, env_var: str, default: str) -> str:
-            """Return config_overrides[key] → env_var → default."""
-            return _co.get(key) or os.getenv(env_var, default)
+            val = _co.get(key)
+            if val:
+                return val
+            if env_var.startswith("ROUTE7_"):
+                r8_val = os.getenv("ROUTE8_" + env_var[7:])
+                if r8_val is not None:
+                    return r8_val
+            if key in preset:
+                return default
+            return os.getenv(env_var, default)
 
         triple_top_k = int(_ov("triple_top_k", "ROUTE7_TRIPLE_TOP_K", "15"))
         dpr_top_k = int(_ov("dpr_top_k", "ROUTE7_DPR_TOP_K", "50"))  # upstream default; set -1 to disable
@@ -376,7 +396,7 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
         # embedding and reranker queries for thematic precision.
         community_guided_enabled = _ov(
             "community_guided_instruction", "ROUTE8_COMMUNITY_GUIDED_INSTRUCTION",
-            "1"
+            "1" if preset.get("community_guided_instruction", True) else "0"
         ).strip().lower() in {"1", "true", "yes"}
 
         # Dynamic relevance cutoff: use reranker relevance_score instead
@@ -407,20 +427,23 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
         # into passage_seeds BEFORE PPR, so the graph walk starts from semantically
         # relevant passages (catches graph-isolated sentences that DPR misses).
         semantic_passage_seeds_enabled = _ov(
-            "semantic_passage_seeds", "ROUTE7_SEMANTIC_PASSAGE_SEEDS", "1"
+            "semantic_passage_seeds", "ROUTE7_SEMANTIC_PASSAGE_SEEDS",
+            "1" if preset.get("semantic_passage_seeds", True) else "0"
         ).strip().lower() in {"1", "true", "yes"}
         semantic_seed_top_k = int(_ov("semantic_seed_top_k", "ROUTE7_SEMANTIC_SEED_TOP_K", "20"))
         semantic_seed_weight = float(_ov("semantic_seed_weight", "ROUTE7_SEMANTIC_SEED_WEIGHT", "0.05"))
 
         # Embedding pre-filter: narrow candidates before cross-encoder reranking.
         # 0 = disabled (rerank all passages). >0 = cosine pre-filter to this many.
-        rerank_prefilter_k = int(_ov("rerank_prefilter_k", "ROUTE7_RERANK_PREFILTER_K", "0"))
+        rerank_prefilter_k = int(_ov("rerank_prefilter_k", "ROUTE7_RERANK_PREFILTER_K",
+                                     str(preset.get("rerank_prefilter_k", 0))))
 
         # Neural PPR: query-conditioned teleportation.
         # Blends cosine(query, passage_emb) into PPR personalization vector
         # so every passage gets teleportation mass proportional to query relevance.
         # 0.0 = disabled (structural seeds only). >0 = blend ratio.
-        neural_weight = float(_ov("neural_weight", "ROUTE7_NEURAL_WEIGHT", "0.0"))
+        neural_weight = float(_ov("neural_weight", "ROUTE7_NEURAL_WEIGHT",
+                                    str(preset.get("neural_weight", 0.0))))
 
         # Triple reranking config (read early for logging)
         triple_rerank_enabled = _ov(
@@ -1489,7 +1512,8 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
         # than community injection (27 vs 82 chunks) and bypasses PPR
         # dilution which drowns minority-cluster entities.
         entity_inject_enabled = _ov(
-            "entity_context_inject", "ROUTE8_ENTITY_CONTEXT_INJECT", "1"
+            "entity_context_inject", "ROUTE8_ENTITY_CONTEXT_INJECT",
+            "1" if preset.get("entity_context_inject", True) else "0"
         ).strip().lower() in {"1", "true", "yes"}
         if entity_inject_enabled and emb_entity_ids and pre_fetched_chunks is not None and self._async_neo4j:
             try:
