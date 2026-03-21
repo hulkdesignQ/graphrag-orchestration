@@ -238,8 +238,11 @@ class Settings(BaseSettings):
     STRIPE_SECRET_KEY: Optional[str] = None
     STRIPE_PUBLISHABLE_KEY: Optional[str] = None
     STRIPE_WEBHOOK_SECRET: Optional[str] = None
+    STRIPE_WEBHOOK_SECRET_B2C: Optional[str] = None
     STRIPE_PRICE_PRO: Optional[str] = None          # price_xxx from Stripe Dashboard
     STRIPE_PRICE_PRO_PLUS: Optional[str] = None      # price_xxx from Stripe Dashboard
+    STRIPE_PRICE_BUSINESS: Optional[str] = None      # price_xxx from Stripe Dashboard
+    STRIPE_PRICE_ENTERPRISE: Optional[str] = None    # price_xxx from Stripe Dashboard
 
     # Authentication & Security
     AUTH_TYPE: str = "B2B"  # B2B (Azure AD with groups) or B2C (Azure AD B2C with oid)

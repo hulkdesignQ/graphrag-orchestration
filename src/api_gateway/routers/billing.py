@@ -147,9 +147,6 @@ async def create_checkout_session(
     except ValueError:
         raise HTTPException(status_code=400, detail=f"Invalid plan: {body.plan}")
 
-    if target_tier in B2B_TIERS:
-        raise HTTPException(status_code=400, detail="B2B plans require sales contact")
-
     if target_tier == PlanTier.FREE:
         raise HTTPException(status_code=400, detail="Cannot checkout for Free plan")
 
@@ -253,9 +250,6 @@ async def change_plan(
         target_tier = PlanTier(body.plan)
     except ValueError:
         raise HTTPException(status_code=400, detail=f"Invalid plan: {body.plan}")
-
-    if target_tier in B2B_TIERS:
-        raise HTTPException(status_code=400, detail="B2B plans require sales contact")
 
     if target_tier == PlanTier.FREE:
         raise HTTPException(
@@ -436,6 +430,9 @@ async def stripe_webhook(request: Request):
 
     This endpoint is called directly by Stripe — it MUST NOT require JWT auth.
     Verification is done via the webhook signature header.
+
+    We always fetch the full resource from the Stripe API rather than relying
+    on the event snapshot, ensuring we process the latest data.
     """
     stripe = _require_stripe()
     payload = await request.body()
@@ -444,34 +441,51 @@ async def stripe_webhook(request: Request):
     if not sig_header:
         raise HTTPException(status_code=400, detail="Missing stripe-signature header")
 
-    if not settings.STRIPE_WEBHOOK_SECRET:
+    # Try both B2B and B2C webhook secrets — each Stripe endpoint has its own
+    # signing secret, but both apps share this handler.
+    webhook_secrets = [
+        s for s in (settings.STRIPE_WEBHOOK_SECRET, settings.STRIPE_WEBHOOK_SECRET_B2C) if s
+    ]
+    if not webhook_secrets:
         raise HTTPException(status_code=503, detail="Webhook secret not configured")
 
-    try:
-        event = stripe.Webhook.construct_event(
-            payload, sig_header, settings.STRIPE_WEBHOOK_SECRET
-        )
-    except stripe.error.SignatureVerificationError:
+    event = None
+    for secret in webhook_secrets:
+        try:
+            event = stripe.Webhook.construct_event(payload, sig_header, secret)
+            break
+        except stripe.error.SignatureVerificationError:
+            continue
+        except Exception as e:
+            logger.error("stripe_webhook_parse_failed", error=str(e))
+            raise HTTPException(status_code=400, detail="Invalid payload")
+
+    if event is None:
         logger.warning("stripe_webhook_invalid_signature")
         raise HTTPException(status_code=400, detail="Invalid signature")
-    except Exception as e:
-        logger.error("stripe_webhook_parse_failed", error=str(e))
-        raise HTTPException(status_code=400, detail="Invalid payload")
 
     event_type = event["type"]
-    data = event["data"]["object"]
 
-    logger.info("stripe_webhook_received", event_type=event_type, event_id=event["id"])
+    # Extract the resource ID from the event snapshot so we can fetch the
+    # latest version of the object from the Stripe API.
+    resource_id = event["data"]["object"]["id"]
+
+    logger.info("stripe_webhook_received", event_type=event_type, event_id=event["id"],
+                resource_id=resource_id)
 
     try:
         if event_type == "checkout.session.completed":
-            await _handle_checkout_completed(stripe, data)
+            session = stripe.checkout.Session.retrieve(resource_id)
+            await _handle_checkout_completed(stripe, dict(session))
         elif event_type == "customer.subscription.updated":
-            await _handle_subscription_updated(data)
+            sub = stripe.Subscription.retrieve(resource_id)
+            await _handle_subscription_updated(dict(sub))
         elif event_type == "customer.subscription.deleted":
-            await _handle_subscription_deleted(data)
+            sub = stripe.Subscription.retrieve(resource_id)
+            await _handle_subscription_deleted(dict(sub))
         elif event_type == "invoice.payment_failed":
-            await _handle_payment_failed(data)
+            invoice = stripe.Invoice.retrieve(resource_id)
+            await _handle_payment_failed(dict(invoice))
         else:
             logger.debug("stripe_webhook_unhandled", event_type=event_type)
     except Exception as e:

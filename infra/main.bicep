@@ -143,14 +143,24 @@ param stripeSecretKey string = ''
 param stripePublishableKey string = ''
 
 @secure()
-@description('Stripe webhook signing secret')
-param stripeWebhookSecret string = ''
+@description('Stripe webhook signing secret (B2B endpoint)')
+param stripeWebhookSecretB2b string = ''
+
+@secure()
+@description('Stripe webhook signing secret (B2C endpoint)')
+param stripeWebhookSecretB2c string = ''
 
 @description('Stripe Price ID for Pro plan ($10/mo)')
 param stripePricePro string = ''
 
 @description('Stripe Price ID for Pro+ plan ($39/mo)')
 param stripePriceProPlus string = ''
+
+@description('Stripe Price ID for Business plan ($19/user/mo)')
+param stripePriceBusiness string = ''
+
+@description('Stripe Price ID for Enterprise plan ($39/user/mo)')
+param stripePriceEnterprise string = ''
 
 // ── Parameterized resource names (previously hardcoded) ─────────────────
 
@@ -472,9 +482,12 @@ var conditionalSecretEnvVars = concat(
   !empty(stripeSecretKey) ? [
       { name: 'STRIPE_SECRET_KEY', secretRef: 'stripe-secret-key' }
       { name: 'STRIPE_PUBLISHABLE_KEY', value: stripePublishableKey }
-      { name: 'STRIPE_WEBHOOK_SECRET', secretRef: 'stripe-webhook-secret' }
+      { name: 'STRIPE_WEBHOOK_SECRET', secretRef: 'stripe-webhook-secret-b2b' }
+      { name: 'STRIPE_WEBHOOK_SECRET_B2C', secretRef: 'stripe-webhook-secret-b2c' }
       { name: 'STRIPE_PRICE_PRO', value: stripePricePro }
       { name: 'STRIPE_PRICE_PRO_PLUS', value: stripePriceProPlus }
+      { name: 'STRIPE_PRICE_BUSINESS', value: stripePriceBusiness }
+      { name: 'STRIPE_PRICE_ENTERPRISE', value: stripePriceEnterprise }
     ] : []
 )
 
@@ -719,8 +732,13 @@ var sharedSecrets = concat([
     identity: managedIdentity.outputs.id
   }
   {
-    name: 'stripe-webhook-secret'
-    keyVaultUrl: '${keyVault.outputs.vaultUri}secrets/stripe-webhook-secret'
+    name: 'stripe-webhook-secret-b2b'
+    keyVaultUrl: '${keyVault.outputs.vaultUri}secrets/stripe-webhook-secret-b2b'
+    identity: managedIdentity.outputs.id
+  }
+  {
+    name: 'stripe-webhook-secret-b2c'
+    keyVaultUrl: '${keyVault.outputs.vaultUri}secrets/stripe-webhook-secret-b2c'
     identity: managedIdentity.outputs.id
   }
 ] : [])
