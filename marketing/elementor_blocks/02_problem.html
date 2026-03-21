@@ -1,0 +1,116 @@
+<!-- ELEMENTOR BLOCK 2: THE PROBLEM (Side-by-side comparison) -->
+<style>
+.evi-problem {
+  padding: 80px 24px;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: #ffffff;
+}
+.evi-problem .evi-section-header {
+  text-align: center;
+  max-width: 700px;
+  margin: 0 auto 48px;
+}
+.evi-problem .evi-section-header h2 {
+  font-size: clamp(1.6rem, 4vw, 2.2rem);
+  font-weight: 700;
+  color: #111827;
+  margin: 0;
+}
+.evi-problem .evi-section-header p {
+  font-size: 1.1rem;
+  color: #4b5563;
+  margin-top: 12px;
+  line-height: 1.6;
+}
+.evi-compare-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  max-width: 960px;
+  margin: 0 auto;
+}
+@media (max-width: 768px) {
+  .evi-compare-grid { grid-template-columns: 1fr; }
+}
+.evi-compare-card {
+  padding: 32px;
+  border-radius: 16px;
+}
+.evi-compare-card.evi-old {
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+}
+.evi-compare-card.evi-new {
+  background: #ffffff;
+  border: 2px solid #2563eb;
+  box-shadow: 0 8px 32px rgba(37, 99, 235, 0.1);
+}
+.evi-compare-card h3 {
+  font-size: 1.2rem;
+  font-weight: 600;
+  margin: 0;
+}
+.evi-compare-card.evi-old h3 { color: #374151; }
+.evi-compare-card.evi-new h3 { color: #2563eb; }
+.evi-compare-card > p {
+  color: #6b7280;
+  font-size: 0.95rem;
+  margin-top: 8px;
+  line-height: 1.5;
+}
+.evi-compare-list {
+  list-style: none;
+  padding: 0;
+  margin: 20px 0 0;
+}
+.evi-compare-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 14px;
+  font-size: 0.95rem;
+  color: #374151;
+  line-height: 1.5;
+}
+.evi-compare-list .evi-icon-x {
+  color: #ef4444;
+  font-weight: 700;
+  flex-shrink: 0;
+  font-size: 1.1rem;
+}
+.evi-compare-list .evi-icon-check {
+  color: #22c55e;
+  font-weight: 700;
+  flex-shrink: 0;
+  font-size: 1.1rem;
+}
+</style>
+
+<div class="evi-problem">
+  <div class="evi-section-header">
+    <h2>Why Today's Document AI Falls Short</h2>
+    <p>Your team spends days cross-referencing documents. The mistakes they catch are luck. The ones they miss are liability.</p>
+  </div>
+
+  <div class="evi-compare-grid">
+    <div class="evi-compare-card evi-old">
+      <h3>Standard AI Chat + PDF</h3>
+      <p>Summarizes single files but can't truly understand or cross-reference your documents.</p>
+      <ul class="evi-compare-list">
+        <li><span class="evi-icon-x">✕</span><span><strong>Single file only:</strong> Can't answer questions across multiple documents.</span></li>
+        <li><span class="evi-icon-x">✕</span><span><strong>Generates answers:</strong> Text is fabricated, not retrieved. Hallucinations are undetectable.</span></li>
+        <li><span class="evi-icon-x">✕</span><span><strong>No real citations:</strong> "Page 12" at best — no way to click and verify.</span></li>
+      </ul>
+    </div>
+
+    <div class="evi-compare-card evi-new">
+      <h3>Evidoc</h3>
+      <p>Reads across all your documents, connects the dots, and shows its work — every answer traceable to the source.</p>
+      <ul class="evi-compare-list">
+        <li><span class="evi-icon-check">✓</span><span><strong>Cross-document Q&A:</strong> Ask one question across all your files. Get one verified answer.</span></li>
+        <li><span class="evi-icon-check">✓</span><span><strong>Retrieves, never fabricates:</strong> Answers extracted from your documents, not generated.</span></li>
+        <li><span class="evi-icon-check">✓</span><span><strong>Click-to-verify:</strong> Every citation links to the exact sentence, highlighted on the original page.</span></li>
+      </ul>
+    </div>
+  </div>
+</div>
