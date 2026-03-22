@@ -5,6 +5,7 @@ export const zhCn: Record<string, string> = {
   "nav.features": "功能特点",
   "nav.useCases": "应用场景",
   "nav.pricing": "价格",
+  "nav.login": "登录",
   "nav.cta": "免费试用",
 
   // Hero

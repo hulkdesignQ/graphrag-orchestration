@@ -5,6 +5,7 @@ export const ja: Record<string, string> = {
   "nav.features": "機能",
   "nav.useCases": "活用事例",
   "nav.pricing": "料金",
+  "nav.login": "ログイン",
   "nav.cta": "無料で試す",
 
   // Hero

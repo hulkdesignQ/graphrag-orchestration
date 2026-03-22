@@ -5,6 +5,7 @@ export const da: Record<string, string> = {
   "nav.features": "Funktioner",
   "nav.useCases": "Anvendelser",
   "nav.pricing": "Priser",
+  "nav.login": "Log ind",
   "nav.cta": "Prøv gratis",
 
   // Hero

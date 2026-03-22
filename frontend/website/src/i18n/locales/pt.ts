@@ -5,6 +5,7 @@ export const pt: Record<string, string> = {
   "nav.features": "Funcionalidades",
   "nav.useCases": "Casos de uso",
   "nav.pricing": "Preços",
+  "nav.login": "Entrar",
   "nav.cta": "Experimente grátis",
 
   // Hero

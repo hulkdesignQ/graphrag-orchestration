@@ -19,6 +19,7 @@ export const ui = {
     "nav.features": "Features",
     "nav.useCases": "Use Cases",
     "nav.pricing": "Pricing",
+    "nav.login": "Log In",
     "nav.cta": "Try Free",
 
     // Hero

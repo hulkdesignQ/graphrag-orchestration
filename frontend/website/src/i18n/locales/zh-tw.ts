@@ -5,6 +5,7 @@ export const zhTw: Record<string, string> = {
   "nav.features": "功能特色",
   "nav.useCases": "應用場景",
   "nav.pricing": "方案價格",
+  "nav.login": "登入",
   "nav.cta": "免費試用",
 
   // Hero

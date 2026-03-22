@@ -5,6 +5,7 @@ export const ko: Record<string, string> = {
   "nav.features": "기능",
   "nav.useCases": "활용 사례",
   "nav.pricing": "요금제",
+  "nav.login": "로그인",
   "nav.cta": "무료 체험",
 
   // Hero
