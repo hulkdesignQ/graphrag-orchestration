@@ -94,9 +94,9 @@
 
 | # | Item | Status | Notes |
 |---|---|---|---|
-| 52 | Terms of Service | 🟡 Draft | `docs/legal/TERMS_OF_SERVICE.md` — needs legal review |
-| 53 | Privacy Policy | 🟡 Draft | `docs/legal/PRIVACY_POLICY.md` — needs legal review |
-| 54 | Cookie consent banner | 🟡 Draft | `docs/legal/COOKIE_POLICY.md` — needs legal review + frontend implementation |
+| 52 | Terms of Service | ✅ Done | `docs/legal/TERMS_OF_SERVICE.md` — pending legal review |
+| 53 | Privacy Policy | ✅ Done | `docs/legal/PRIVACY_POLICY.md` — pending legal review |
+| 54 | Cookie consent banner | ✅ Done | `docs/legal/COOKIE_POLICY.md` + frontend CookieConsentBanner component |
 | 55 | Data Processing Agreement (B2B) | 🟡 Later | Phase 2 |
 | 56 | GDPR data deletion flow | 🟡 Later | Phase 2 |
 
@@ -121,9 +121,9 @@
 | Public Website | 4 | 1 | 2 |
 | User Experience | 5 | 0 | 0 |
 | Analytics & Monitoring | 4 | 0 | 0 |
-| Legal & Compliance | 0 | 3 | 2 |
+| Legal & Compliance | 3 | 0 | 2 |
 | Technical Debt | 1 | 2 | 0 |
-| **Total** | **48** | **6** | **4** |
+| **Total** | **51** | **3** | **4** |
 
 ---
 
