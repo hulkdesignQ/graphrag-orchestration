@@ -5,6 +5,7 @@ export const ja: Record<string, string> = {
   "nav.features": "機能",
   "nav.useCases": "活用事例",
   "nav.pricing": "料金",
+  "nav.contact": "お問い合わせ",
   "nav.login": "ログイン",
   "nav.cta": "無料で試す",
 
@@ -180,5 +181,17 @@ export const ja: Record<string, string> = {
   "footer.copyright": "© 2026 Hulkdesign AI. All rights reserved.",
 
   // Language switcher
+  "contact.headline": "お問い合わせ",
+  "contact.subheadline": "ご質問、フィードバック、提携のお問い合わせなど、お気軽にご連絡ください。",
+  "contact.nameLabel": "お名前",
+  "contact.namePlaceholder": "お名前を入力",
+  "contact.emailLabel": "メールアドレス",
+  "contact.emailPlaceholder": "you@example.com",
+  "contact.subjectLabel": "件名",
+  "contact.subjectPlaceholder": "お問い合わせ内容",
+  "contact.messageLabel": "メッセージ",
+  "contact.messagePlaceholder": "詳しくお聞かせください...",
+  "contact.submitBtn": "メッセージを送信",
+  "contact.privacyNote": "2営業日以内にご返信いたします。お客様の情報は共有されません。",
   "lang.switchLabel": "言語",
 };

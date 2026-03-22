@@ -5,6 +5,7 @@ export const ko: Record<string, string> = {
   "nav.features": "기능",
   "nav.useCases": "활용 사례",
   "nav.pricing": "요금제",
+  "nav.contact": "문의하기",
   "nav.login": "로그인",
   "nav.cta": "무료 체험",
 
@@ -179,5 +180,17 @@ export const ko: Record<string, string> = {
   "footer.copyright": "© 2026 Hulkdesign AI. All rights reserved.",
 
   // Language switcher
+  "contact.headline": "문의하기",
+  "contact.subheadline": "질문, 피드백 또는 파트너십 문의가 있으신가요? 연락을 기다리겠습니다.",
+  "contact.nameLabel": "이름",
+  "contact.namePlaceholder": "이름을 입력하세요",
+  "contact.emailLabel": "이메일",
+  "contact.emailPlaceholder": "you@example.com",
+  "contact.subjectLabel": "제목",
+  "contact.subjectPlaceholder": "어떤 내용인가요?",
+  "contact.messageLabel": "메시지",
+  "contact.messagePlaceholder": "자세히 알려주세요...",
+  "contact.submitBtn": "메시지 보내기",
+  "contact.privacyNote": "영업일 기준 2일 이내에 답변드리겠습니다. 귀하의 정보는 절대 공유되지 않습니다.",
   "lang.switchLabel": "언어",
 };

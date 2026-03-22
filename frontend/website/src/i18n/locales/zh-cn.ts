@@ -5,6 +5,7 @@ export const zhCn: Record<string, string> = {
   "nav.features": "功能特点",
   "nav.useCases": "应用场景",
   "nav.pricing": "价格",
+  "nav.contact": "联系我们",
   "nav.login": "登录",
   "nav.cta": "免费试用",
 
@@ -180,5 +181,17 @@ export const zhCn: Record<string, string> = {
   "footer.copyright": "© 2026 Hulkdesign AI. All rights reserved.",
 
   // Language switcher
+  "contact.headline": "联系我们",
+  "contact.subheadline": "有问题、反馈或合作咨询？我们期待您的来信。",
+  "contact.nameLabel": "姓名",
+  "contact.namePlaceholder": "您的姓名",
+  "contact.emailLabel": "电子邮件",
+  "contact.emailPlaceholder": "you@example.com",
+  "contact.subjectLabel": "主题",
+  "contact.subjectPlaceholder": "关于什么？",
+  "contact.messageLabel": "留言",
+  "contact.messagePlaceholder": "请告诉我们更多...",
+  "contact.submitBtn": "发送消息",
+  "contact.privacyNote": "我们将在2个工作日内回复。您的信息绝不会被共享。",
   "lang.switchLabel": "语言",
 };

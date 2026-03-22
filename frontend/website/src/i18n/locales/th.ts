@@ -5,6 +5,7 @@ export const th: Record<string, string> = {
   "nav.features": "คุณสมบัติ",
   "nav.useCases": "กรณีการใช้งาน",
   "nav.pricing": "ราคา",
+  "nav.contact": "ติดต่อเรา",
   "nav.login": "เข้าสู่ระบบ",
   "nav.cta": "ทดลองฟรี",
 
@@ -180,5 +181,17 @@ export const th: Record<string, string> = {
   "footer.copyright": "© 2026 Hulkdesign AI. All rights reserved.",
 
   // Language switcher
+  "contact.headline": "ติดต่อเรา",
+  "contact.subheadline": "มีคำถาม ข้อเสนอแนะ หรือสอบถามเรื่องความร่วมมือ? เรายินดีรับฟัง",
+  "contact.nameLabel": "ชื่อ",
+  "contact.namePlaceholder": "ชื่อของคุณ",
+  "contact.emailLabel": "อีเมล",
+  "contact.emailPlaceholder": "you@example.com",
+  "contact.subjectLabel": "หัวข้อ",
+  "contact.subjectPlaceholder": "เรื่องเกี่ยวกับอะไร?",
+  "contact.messageLabel": "ข้อความ",
+  "contact.messagePlaceholder": "บอกเราเพิ่มเติม...",
+  "contact.submitBtn": "ส่งข้อความ",
+  "contact.privacyNote": "เราจะตอบกลับภายใน 2 วันทำการ ข้อมูลของคุณจะไม่ถูกเปิดเผย",
   "lang.switchLabel": "ภาษา",
 };

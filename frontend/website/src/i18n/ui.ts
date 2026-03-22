@@ -19,6 +19,7 @@ export const ui = {
     "nav.features": "Features",
     "nav.useCases": "Use Cases",
     "nav.pricing": "Pricing",
+    "nav.contact": "Contact",
     "nav.login": "Log In",
     "nav.cta": "Try Free",
 
@@ -192,6 +193,20 @@ export const ui = {
 
     // Footer
     "footer.copyright": "© 2026 Hulkdesign AI. All rights reserved.",
+
+    // Contact
+    "contact.headline": "Get in Touch",
+    "contact.subheadline": "Have a question, feedback, or partnership inquiry? We'd love to hear from you.",
+    "contact.nameLabel": "Name",
+    "contact.namePlaceholder": "Your name",
+    "contact.emailLabel": "Email",
+    "contact.emailPlaceholder": "you@example.com",
+    "contact.subjectLabel": "Subject",
+    "contact.subjectPlaceholder": "What is this about?",
+    "contact.messageLabel": "Message",
+    "contact.messagePlaceholder": "Tell us more...",
+    "contact.submitBtn": "Send Message",
+    "contact.privacyNote": "We'll respond within 2 business days. Your information is never shared.",
 
     // Language switcher
     "lang.switchLabel": "Language",

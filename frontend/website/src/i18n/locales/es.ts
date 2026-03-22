@@ -5,6 +5,7 @@ export const es: Record<string, string> = {
   "nav.features": "Características",
   "nav.useCases": "Casos de uso",
   "nav.pricing": "Precios",
+  "nav.contact": "Contacto",
   "nav.login": "Iniciar sesión",
   "nav.cta": "Prueba gratis",
 
@@ -179,5 +180,17 @@ export const es: Record<string, string> = {
   "footer.copyright": "© 2026 Hulkdesign AI. Todos los derechos reservados.",
 
   // Language switcher
+  "contact.headline": "Contáctenos",
+  "contact.subheadline": "¿Tiene alguna pregunta, comentario o consulta de colaboración? Nos encantaría saber de usted.",
+  "contact.nameLabel": "Nombre",
+  "contact.namePlaceholder": "Su nombre",
+  "contact.emailLabel": "Correo electrónico",
+  "contact.emailPlaceholder": "tu@ejemplo.com",
+  "contact.subjectLabel": "Asunto",
+  "contact.subjectPlaceholder": "¿De qué se trata?",
+  "contact.messageLabel": "Mensaje",
+  "contact.messagePlaceholder": "Cuéntenos más...",
+  "contact.submitBtn": "Enviar mensaje",
+  "contact.privacyNote": "Responderemos en un plazo de 2 días hábiles. Su información nunca se comparte.",
   "lang.switchLabel": "Idioma",
 };

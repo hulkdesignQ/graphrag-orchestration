@@ -1,7 +1,7 @@
 ---
 import LanguageSwitcher from "./LanguageSwitcher.astro";
 import type { Lang } from "@/i18n/languages";
-import { useTranslations } from "@/i18n/utils";
+import { useTranslations, getLocalePath } from "@/i18n/utils";
 
 interface Props { lang: Lang }
 const { lang } = Astro.props;
@@ -19,6 +19,7 @@ const t = useTranslations(lang);
       <a href="#features" class="hover:text-white transition-colors duration-300">{t("nav.features")}</a>
       <a href="#use-cases" class="hover:text-white transition-colors duration-300">{t("nav.useCases")}</a>
       <a href="#pricing" class="hover:text-white transition-colors duration-300">{t("nav.pricing")}</a>
+      <a href={getLocalePath(lang, "/contact")} class="hover:text-white transition-colors duration-300">{t("nav.contact")}</a>
     </div>
 
     <!-- Right actions -->

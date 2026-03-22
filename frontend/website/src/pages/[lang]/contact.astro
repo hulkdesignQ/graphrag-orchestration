@@ -1,0 +1,97 @@
+---
+import Layout from "@/layouts/Layout.astro";
+import Nav from "@/components/Nav.astro";
+import Footer from "@/components/Footer.astro";
+import { languages, type Lang } from "@/i18n/languages";
+import { useTranslations } from "@/i18n/utils";
+
+export function getStaticPaths() {
+  return Object.keys(languages)
+    .filter((l) => l !== "en")
+    .map((lang) => ({ params: { lang }, props: { lang } }));
+}
+
+const { lang } = Astro.props;
+const t = useTranslations(lang as Lang);
+---
+
+<Layout title={`${t("contact.headline")} — Evidoc`} lang={lang as string}>
+  <Nav lang={lang as Lang} />
+
+  <section class="pt-28 pb-20 md:pt-40 md:pb-28 bg-white">
+    <div class="mx-auto max-w-xl px-6 text-center">
+      <h1 class="text-4xl md:text-5xl font-bold text-apple-text tracking-tight leading-[1.08]">
+        {t("contact.headline")}
+      </h1>
+      <p class="mt-4 text-lg text-apple-secondary leading-relaxed">
+        {t("contact.subheadline")}
+      </p>
+    </div>
+
+    <form
+      action="https://formspree.io/f/YOUR_FORM_ID"
+      method="POST"
+      class="mx-auto mt-12 max-w-lg px-6 space-y-5"
+    >
+      <div>
+        <label for="name" class="block text-sm font-medium text-apple-text mb-1.5">{t("contact.nameLabel")}</label>
+        <input
+          type="text"
+          id="name"
+          name="name"
+          required
+          class="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm text-apple-text placeholder:text-apple-secondary/50 focus:border-apple-blue focus:ring-1 focus:ring-apple-blue outline-none transition-colors"
+          placeholder={t("contact.namePlaceholder")}
+        />
+      </div>
+
+      <div>
+        <label for="email" class="block text-sm font-medium text-apple-text mb-1.5">{t("contact.emailLabel")}</label>
+        <input
+          type="email"
+          id="email"
+          name="email"
+          required
+          class="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm text-apple-text placeholder:text-apple-secondary/50 focus:border-apple-blue focus:ring-1 focus:ring-apple-blue outline-none transition-colors"
+          placeholder={t("contact.emailPlaceholder")}
+        />
+      </div>
+
+      <div>
+        <label for="subject" class="block text-sm font-medium text-apple-text mb-1.5">{t("contact.subjectLabel")}</label>
+        <input
+          type="text"
+          id="subject"
+          name="subject"
+          class="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm text-apple-text placeholder:text-apple-secondary/50 focus:border-apple-blue focus:ring-1 focus:ring-apple-blue outline-none transition-colors"
+          placeholder={t("contact.subjectPlaceholder")}
+        />
+      </div>
+
+      <div>
+        <label for="message" class="block text-sm font-medium text-apple-text mb-1.5">{t("contact.messageLabel")}</label>
+        <textarea
+          id="message"
+          name="message"
+          rows="5"
+          required
+          class="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm text-apple-text placeholder:text-apple-secondary/50 focus:border-apple-blue focus:ring-1 focus:ring-apple-blue outline-none transition-colors resize-none"
+          placeholder={t("contact.messagePlaceholder")}
+        ></textarea>
+      </div>
+
+      <button
+        type="submit"
+        class="w-full bg-apple-blue hover:bg-apple-bluehover text-white font-medium py-3 rounded-full transition-colors duration-300 text-sm"
+      >
+        {t("contact.submitBtn")}
+      </button>
+
+      <p class="text-xs text-apple-secondary text-center">
+        {t("contact.privacyNote")}
+      </p>
+    </form>
+  </section>
+
+  <Footer lang={lang as Lang} />
+</Layout>
