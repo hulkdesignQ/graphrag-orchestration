@@ -1,3 +1,16 @@
+import { es } from "./locales/es";
+import { fr } from "./locales/fr";
+import { de } from "./locales/de";
+import { ja } from "./locales/ja";
+import { ko } from "./locales/ko";
+import { zhCn } from "./locales/zh-cn";
+import { zhTw } from "./locales/zh-tw";
+import { nl } from "./locales/nl";
+import { da } from "./locales/da";
+import { pl } from "./locales/pl";
+import { pt } from "./locales/pt";
+import { th } from "./locales/th";
+
 export const ui = {
   en: {
     // Nav
@@ -182,4 +195,16 @@ export const ui = {
     // Language switcher
     "lang.switchLabel": "Language",
   },
+  es,
+  fr,
+  de,
+  ja,
+  ko,
+  "zh-cn": zhCn,
+  "zh-tw": zhTw,
+  nl,
+  da,
+  pl,
+  pt,
+  th,
 } as Record<string, Record<string, string>>;
