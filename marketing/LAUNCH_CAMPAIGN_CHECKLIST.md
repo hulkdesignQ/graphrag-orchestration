@@ -97,7 +97,7 @@
 | 52 | Terms of Service | ✅ Done | `docs/legal/TERMS_OF_SERVICE.md` — pending legal review |
 | 53 | Privacy Policy | ✅ Done | `docs/legal/PRIVACY_POLICY.md` — pending legal review |
 | 54 | Cookie consent banner | ✅ Done | `docs/legal/COOKIE_POLICY.md` + frontend CookieConsentBanner component |
-| 55 | Data Processing Agreement (B2B) | 🟡 Later | Phase 2 |
+| 55 | Data Processing Agreement (B2B) | ✅ Done | `docs/legal/DATA_PROCESSING_AGREEMENT.md` — pending legal review |
 | 56 | GDPR data deletion flow | 🟡 Later | Phase 2 |
 
 ## Technical Debt
