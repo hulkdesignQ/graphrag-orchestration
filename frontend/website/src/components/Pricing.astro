@@ -29,14 +29,17 @@ const t = useTranslations(lang);
         <h3 class="text-xl font-semibold text-apple-text">{t("pricing.free.name")}</h3>
         <div class="mt-4 text-5xl font-bold text-apple-text">{t("pricing.free.price")}</div>
         <p class="text-sm text-apple-secondary mt-2">{t("pricing.free.desc")}</p>
-        <ul class="mt-8 text-sm text-apple-secondary text-left space-y-3 flex-grow">
+        <ul class="mt-8 text-sm text-apple-secondary text-left space-y-3">
           <li>{t("pricing.free.f1")}</li>
           <li>{t("pricing.free.f2")}</li>
           <li>{t("pricing.free.f3")}</li>
           <li>{t("pricing.free.f4")}</li>
+          <li class="invisible">&nbsp;</li>
         </ul>
-        <a href="https://evidoc.hulkdesign.com" class="mt-8 block py-3 text-apple-blue font-medium rounded-full border border-apple-blue/30 hover:bg-apple-blue/5 transition-colors">{t("pricing.free.cta")}</a>
-        <p class="text-xs text-apple-tertiary mt-2">{t("pricing.free.note")}</p>
+        <div class="mt-auto">
+          <a href="https://evidoc.hulkdesign.com" class="block py-3 text-center text-apple-blue font-medium rounded-full border border-apple-blue/30 hover:bg-apple-blue/5 transition-colors">{t("pricing.free.cta")}</a>
+          <p class="text-xs text-apple-tertiary mt-2">{t("pricing.free.note")}</p>
+        </div>
       </div>
 
       <!-- Pro -->
