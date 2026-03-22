@@ -6,16 +6,13 @@ interface Props { lang: Lang }
 const { lang } = Astro.props;
 const t = useTranslations(lang);
 
-const primary = [
-  { slug: "legal", badge: t("useCases.legal.badge"), q: t("useCases.legal.question"), a: t("useCases.legal.answer") },
-  { slug: "finance", badge: t("useCases.finance.badge"), q: t("useCases.finance.question"), a: t("useCases.finance.answer") },
-  { slug: "compliance", badge: t("useCases.compliance.badge"), q: t("useCases.compliance.question"), a: t("useCases.compliance.answer") },
-];
-
-const more = [
-  { slug: "research", badge: t("useCases.research.badge"), q: t("useCases.research.question"), a: t("useCases.research.answer") },
-  { slug: "real-estate", badge: t("useCases.realestate.badge"), q: t("useCases.realestate.question"), a: t("useCases.realestate.answer") },
-  { slug: "personal", badge: t("useCases.personal.badge"), q: t("useCases.personal.question"), a: t("useCases.personal.answer") },
+const items = [
+  { slug: "legal", badge: t("useCases.legal.badge"), q: t("useCases.legal.question") },
+  { slug: "finance", badge: t("useCases.finance.badge"), q: t("useCases.finance.question") },
+  { slug: "compliance", badge: t("useCases.compliance.badge"), q: t("useCases.compliance.question") },
+  { slug: "research", badge: t("useCases.research.badge"), q: t("useCases.research.question") },
+  { slug: "real-estate", badge: t("useCases.realestate.badge"), q: t("useCases.realestate.question") },
+  { slug: "personal", badge: t("useCases.personal.badge"), q: t("useCases.personal.question") },
 ];
 ---
 
@@ -26,46 +23,15 @@ const more = [
       <p class="mt-5 text-lg text-apple-secondary">{t("useCases.subheadline")}</p>
     </div>
 
-    <div class="mt-16 grid grid-cols-1 lg:grid-cols-3 gap-6 max-w-5xl mx-auto">
-      {primary.map((uc) => (
+    <div class="mt-16 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-5xl mx-auto">
+      {items.map((uc) => (
         <a href={getLocalePath(lang, `/use-cases/${uc.slug}`)} class="bg-white p-8 rounded-2xl hover:shadow-lg transition-shadow group block">
           <span class="text-xs font-medium text-apple-blue border border-apple-blue/30 px-3 py-1 rounded-full">{uc.badge}</span>
           <h3 class="mt-4 text-lg font-semibold text-apple-text group-hover:text-apple-blue transition-colors">{uc.q}</h3>
-          <p class="mt-3 text-[15px] text-apple-secondary leading-relaxed" set:html={uc.a} />
           <span class="mt-3 inline-block text-sm text-apple-blue">Learn more ›</span>
         </a>
       ))}
-    </div>
-
-    <div id="more-use-cases" class="mt-6 grid grid-cols-1 lg:grid-cols-3 gap-6 max-w-5xl mx-auto hidden">
-      {more.map((uc) => (
-        <a href={getLocalePath(lang, `/use-cases/${uc.slug}`)} class="bg-white p-8 rounded-2xl hover:shadow-lg transition-shadow group block">
-          <span class="text-xs font-medium text-apple-blue border border-apple-blue/30 px-3 py-1 rounded-full">{uc.badge}</span>
-          <h3 class="mt-4 text-lg font-semibold text-apple-text group-hover:text-apple-blue transition-colors">{uc.q}</h3>
-          <p class="mt-3 text-[15px] text-apple-secondary leading-relaxed" set:html={uc.a} />
-          <span class="mt-3 inline-block text-sm text-apple-blue">Learn more ›</span>
-        </a>
-      ))}
-    </div>
-
-    <div class="text-center mt-10">
-      <button
-        id="toggle-use-cases"
-        class="text-apple-blue text-sm hover:underline"
-        data-more={t("useCases.moreBtn")}
-        data-less={t("useCases.lessBtn")}
-      >
-        {t("useCases.moreBtn")}
-      </button>
     </div>
   </div>
 </section>
 
-<script>
-  const btn = document.getElementById("toggle-use-cases");
-  const panel = document.getElementById("more-use-cases");
-  btn?.addEventListener("click", () => {
-    const isHidden = panel?.classList.toggle("hidden");
-    btn.textContent = isHidden ? btn.dataset.more! : btn.dataset.less!;
-  });
-</script>
