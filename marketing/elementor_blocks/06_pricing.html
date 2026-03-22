@@ -1,4 +1,4 @@
-<!-- ELEMENTOR BLOCK 6: PRICING -->
+<!-- ELEMENTOR BLOCK 6: PRICING (Tabbed: Individual / Business) -->
 <style>
 .evi-pricing {
   padding: 80px 24px;
@@ -8,7 +8,7 @@
 .evi-pricing .evi-section-header {
   text-align: center;
   max-width: 700px;
-  margin: 0 auto 48px;
+  margin: 0 auto 32px;
 }
 .evi-pricing .evi-section-header h2 {
   font-size: clamp(1.6rem, 4vw, 2.2rem);
@@ -21,24 +21,53 @@
   color: #4b5563;
   margin-top: 12px;
 }
+/* Tab toggle */
+.evi-tab-bar {
+  display: flex;
+  justify-content: center;
+  gap: 0;
+  margin: 0 auto 40px;
+  background: #e5e7eb;
+  border-radius: 12px;
+  padding: 4px;
+  width: fit-content;
+}
+.evi-tab-btn {
+  padding: 10px 32px;
+  border: none;
+  border-radius: 10px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  background: transparent;
+  color: #6b7280;
+  transition: all 0.2s;
+}
+.evi-tab-btn.evi-tab-active {
+  background: #ffffff;
+  color: #111827;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+}
+.evi-tab-btn:hover:not(.evi-tab-active) {
+  color: #374151;
+}
+/* Panels */
+.evi-tab-panel { display: none; }
+.evi-tab-panel.evi-tab-visible { display: grid; }
 .evi-pricing-grid {
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 16px;
-  max-width: 1200px;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+  max-width: 960px;
   margin: 0 auto;
 }
-@media (max-width: 1024px) {
-  .evi-pricing-grid { grid-template-columns: repeat(3, 1fr); }
-}
-@media (max-width: 640px) {
+@media (max-width: 768px) {
   .evi-pricing-grid { grid-template-columns: 1fr; }
 }
 .evi-price-card {
   background: #ffffff;
   border: 1px solid #e5e7eb;
   border-radius: 16px;
-  padding: 28px 20px;
+  padding: 32px 24px;
   text-align: center;
   display: flex;
   flex-direction: column;
@@ -66,16 +95,16 @@
   white-space: nowrap;
 }
 .evi-price-card .evi-plan-name {
-  font-size: 1.1rem;
+  font-size: 1.2rem;
   font-weight: 700;
   color: #111827;
   margin: 0;
 }
 .evi-price-card .evi-plan-price {
-  font-size: 2rem;
+  font-size: 2.4rem;
   font-weight: 800;
   color: #111827;
-  margin: 12px 0 4px;
+  margin: 16px 0 4px;
 }
 .evi-price-card .evi-plan-price span {
   font-size: 0.9rem;
@@ -83,33 +112,33 @@
   color: #6b7280;
 }
 .evi-price-card .evi-plan-desc {
-  font-size: 0.8rem;
+  font-size: 0.85rem;
   color: #9ca3af;
-  margin: 0 0 16px;
+  margin: 0 0 20px;
 }
 .evi-plan-features {
   list-style: none;
   padding: 0;
-  margin: 0 0 20px;
+  margin: 0 0 24px;
   text-align: left;
   flex-grow: 1;
 }
 .evi-plan-features li {
-  font-size: 0.85rem;
+  font-size: 0.9rem;
   color: #374151;
-  padding: 6px 0;
+  padding: 7px 0;
   border-bottom: 1px solid #f3f4f6;
-  line-height: 1.4;
+  line-height: 1.5;
 }
 .evi-plan-features li:last-child {
   border-bottom: none;
 }
 .evi-plan-btn {
   display: inline-block;
-  padding: 10px 0;
+  padding: 12px 0;
   width: 100%;
-  border-radius: 8px;
-  font-size: 0.9rem;
+  border-radius: 10px;
+  font-size: 0.95rem;
   font-weight: 600;
   text-decoration: none;
   text-align: center;
@@ -131,6 +160,11 @@
 .evi-plan-btn.evi-btn-primary:hover {
   background: #1d4ed8;
 }
+.evi-plan-extra {
+  font-size: 0.8rem;
+  color: #9ca3af;
+  margin-top: 8px;
+}
 </style>
 
 <div class="evi-pricing" id="pricing">
@@ -139,7 +173,14 @@
     <p>Start free. Upgrade when you need more. No hidden fees.</p>
   </div>
 
-  <div class="evi-pricing-grid">
+  <!-- Tab toggle -->
+  <div class="evi-tab-bar">
+    <button class="evi-tab-btn evi-tab-active" onclick="eviSwitchTab('individual')">Individual</button>
+    <button class="evi-tab-btn" onclick="eviSwitchTab('business')">Business</button>
+  </div>
+
+  <!-- INDIVIDUAL PLANS -->
+  <div id="evi-tab-individual" class="evi-tab-panel evi-tab-visible evi-pricing-grid">
     <!-- Free -->
     <div class="evi-price-card">
       <div class="evi-plan-name">Free</div>
@@ -148,79 +189,96 @@
       <ul class="evi-plan-features">
         <li>2,000 queries/month</li>
         <li>500 credits/month</li>
-        <li>10 documents</li>
-        <li>0.5 GB storage</li>
         <li>Basic retrieval</li>
       </ul>
-      <a href="https://evidoc.hulkdesign.com" class="evi-plan-btn evi-btn-outline">Get Started</a>
+      <a href="https://evidoc.hulkdesign.com" class="evi-plan-btn evi-btn-outline">Get Started Free</a>
+      <div class="evi-plan-extra">No credit card required</div>
     </div>
 
     <!-- Pro -->
     <div class="evi-price-card">
       <div class="evi-plan-name">Pro</div>
       <div class="evi-plan-price">$10 <span>/mo</span></div>
-      <div class="evi-plan-desc">For individuals</div>
+      <div class="evi-plan-desc">For individuals who need more</div>
       <ul class="evi-plan-features">
+        <li>Everything in Free, plus:</li>
         <li>5,000 queries/month</li>
         <li>3,000 credits/month</li>
-        <li>50 documents</li>
-        <li>2 GB storage</li>
         <li>✅ GraphRAG engine</li>
       </ul>
-      <a href="https://evidoc.hulkdesign.com/#/dashboard" class="evi-plan-btn evi-btn-primary">Upgrade</a>
+      <a href="https://evidoc.hulkdesign.com/#/dashboard" class="evi-plan-btn evi-btn-primary">Upgrade to Pro</a>
     </div>
 
-    <!-- Pro+ (Popular) -->
+    <!-- Pro+ -->
     <div class="evi-price-card evi-popular">
       <span class="evi-popular-badge">Most Popular</span>
       <div class="evi-plan-name">Pro+</div>
       <div class="evi-plan-price">$39 <span>/mo</span></div>
       <div class="evi-plan-desc">For power users</div>
       <ul class="evi-plan-features">
+        <li>Everything in Pro, plus:</li>
         <li>20,000 queries/month</li>
         <li>15,000 credits/month</li>
-        <li>500 documents</li>
-        <li>10 GB storage</li>
-        <li>✅ GraphRAG engine</li>
         <li>✅ Advanced Analytics</li>
         <li>✅ API Access</li>
+        <li>✅ Custom Models</li>
       </ul>
-      <a href="https://evidoc.hulkdesign.com/#/dashboard" class="evi-plan-btn evi-btn-primary">Upgrade</a>
+      <a href="https://evidoc.hulkdesign.com/#/dashboard" class="evi-plan-btn evi-btn-primary">Upgrade to Pro+</a>
     </div>
+  </div>
 
+  <!-- BUSINESS PLANS -->
+  <div id="evi-tab-business" class="evi-tab-panel evi-pricing-grid">
     <!-- Business -->
     <div class="evi-price-card">
       <div class="evi-plan-name">Business</div>
       <div class="evi-plan-price">$19 <span>/user/mo</span></div>
-      <div class="evi-plan-desc">For teams (up to 50)</div>
+      <div class="evi-plan-desc">For teams up to 50 users</div>
       <ul class="evi-plan-features">
-        <li>5,000 queries/month</li>
-        <li>5,000 credits/month</li>
-        <li>50 documents</li>
-        <li>4 GB storage</li>
+        <li>5,000 queries/user/month</li>
+        <li>5,000 credits/user/month</li>
         <li>✅ GraphRAG engine</li>
         <li>✅ Centralized Billing</li>
         <li>✅ Audit Logs</li>
+        <li>✅ Policy Controls</li>
       </ul>
-      <a href="https://evidoc.hulkdesign.com/#/dashboard" class="evi-plan-btn evi-btn-primary">Upgrade</a>
+      <a href="https://evidoc.hulkdesign.com/#/dashboard" class="evi-plan-btn evi-btn-primary">Get Business</a>
     </div>
 
     <!-- Enterprise -->
-    <div class="evi-price-card">
+    <div class="evi-price-card evi-popular">
+      <span class="evi-popular-badge">Best Value</span>
       <div class="evi-plan-name">Enterprise</div>
       <div class="evi-plan-price">$39 <span>/user/mo</span></div>
-      <div class="evi-plan-desc">For organizations (up to 500)</div>
+      <div class="evi-plan-desc">For organizations up to 500 users</div>
       <ul class="evi-plan-features">
-        <li>50,000 queries/month</li>
-        <li>14,000 credits/month</li>
-        <li>Unlimited documents</li>
-        <li>10 GB storage</li>
-        <li>✅ GraphRAG engine</li>
+        <li>Everything in Business, plus:</li>
+        <li>50,000 queries/user/month</li>
+        <li>14,000 credits/user/month</li>
         <li>✅ SSO &amp; Custom Branding</li>
         <li>✅ Dedicated Resources</li>
         <li>✅ Priority Support</li>
+        <li>✅ Custom Models</li>
       </ul>
-      <a href="https://evidoc.hulkdesign.com/#/dashboard" class="evi-plan-btn evi-btn-primary">Upgrade</a>
+      <a href="https://evidoc.hulkdesign.com/#/dashboard" class="evi-plan-btn evi-btn-primary">Get Enterprise</a>
+    </div>
+
+    <!-- Contact -->
+    <div class="evi-price-card" style="justify-content: center; align-items: center;">
+      <div class="evi-plan-name">Need more?</div>
+      <p style="color: #6b7280; font-size: 0.95rem; margin: 16px 0 24px; line-height: 1.6;">
+        Custom deployment, dedicated infrastructure, volume licensing, and SLA guarantees.
+      </p>
+      <a href="mailto:j.liu@hulkdesign.com" class="evi-plan-btn evi-btn-outline" style="width: auto; padding: 12px 32px;">Contact Sales</a>
     </div>
   </div>
 </div>
+
+<script>
+function eviSwitchTab(tab) {
+  document.querySelectorAll('.evi-tab-panel').forEach(function(p) { p.classList.remove('evi-tab-visible'); });
+  document.querySelectorAll('.evi-tab-btn').forEach(function(b) { b.classList.remove('evi-tab-active'); });
+  document.getElementById('evi-tab-' + tab).classList.add('evi-tab-visible');
+  event.target.classList.add('evi-tab-active');
+}
+</script>

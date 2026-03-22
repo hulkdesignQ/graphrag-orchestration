@@ -1,843 +1,405 @@
-<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Evidoc - Preview</title><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"></head><body style="margin:0">
-<!-- ELEMENTOR BLOCK 1: HERO -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Evidoc — Homepage Preview</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
-.evi-hero {
-  padding: 80px 24px 60px;
-  text-align: center;
-  background: linear-gradient(180deg, #f0f5ff 0%, #ffffff 100%);
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-}
-.evi-hero .evi-badge {
-  display: inline-block;
-  font-size: 13px;
-  font-weight: 600;
-  color: #2563eb;
-  text-transform: uppercase;
-  letter-spacing: 1.5px;
-  margin-bottom: 16px;
-}
-.evi-hero h1 {
-  font-size: clamp(2.2rem, 5vw, 3.5rem);
-  font-weight: 800;
-  color: #111827;
-  line-height: 1.15;
-  margin: 0 auto;
-  max-width: 720px;
-}
-.evi-hero .evi-subtitle {
-  font-size: clamp(1rem, 2.5vw, 1.25rem);
-  color: #4b5563;
-  margin: 20px auto 0;
-  max-width: 600px;
-  line-height: 1.6;
-}
-.evi-hero .evi-tagline {
-  font-size: 0.95rem;
-  color: #6b7280;
-  font-style: italic;
-  margin-top: 12px;
-}
-.evi-hero .evi-cta-btn {
-  display: inline-block;
-  margin-top: 32px;
-  padding: 14px 36px;
-  background: #2563eb;
-  color: #ffffff;
-  font-size: 1.1rem;
-  font-weight: 600;
-  border-radius: 10px;
-  text-decoration: none;
-  transition: background 0.2s;
-}
-.evi-hero .evi-cta-btn:hover {
-  background: #1d4ed8;
-}
-.evi-hero .evi-trust-line {
-  margin-top: 16px;
-  font-size: 0.85rem;
-  color: #9ca3af;
-}
+  body { font-family: 'Inter', sans-serif; }
+  html { scroll-behavior: smooth; }
 </style>
+</head>
+<body class="bg-white text-gray-800 antialiased">
 
-<div class="evi-hero">
-  <span class="evi-badge">Introducing Evidoc</span>
-  <h1>Ask Your Documents.<br>Trust Every Answer.</h1>
-  <p class="evi-subtitle">
-    AI-powered document intelligence that retrieves answers from your files — with every claim linked to the exact source sentence. Highlighted, clickable, verifiable.
-  </p>
-  <p class="evi-tagline">
-    Not "it's probably on page 12." The actual sentence. The actual words.
-  </p>
-  <div>
-    <a href="https://evidoc.hulkdesign.com" class="evi-cta-btn">Try Evidoc Free</a>
+<!-- ============ HEADER ============ -->
+<header class="sticky top-0 z-50 bg-white/90 backdrop-blur border-b border-gray-100">
+  <div class="container mx-auto px-6 py-4 flex items-center justify-between">
+    <a href="#" class="text-xl font-bold text-gray-900">Evidoc</a>
+    <nav class="hidden md:flex items-center gap-8 text-sm font-medium text-gray-600">
+      <a href="#problem" class="hover:text-blue-600 transition-colors">Problem</a>
+      <a href="#features" class="hover:text-blue-600 transition-colors">Features</a>
+      <a href="#how-it-works" class="hover:text-blue-600 transition-colors">How It Works</a>
+      <a href="#use-cases" class="hover:text-blue-600 transition-colors">Use Cases</a>
+      <a href="#pricing" class="hover:text-blue-600 transition-colors">Pricing</a>
+      <a href="https://evidoc.hulkdesign.com" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">Try Free</a>
+    </nav>
   </div>
-  <p class="evi-trust-line">15+ document formats · 13 languages · Enterprise-grade security</p>
-</div>
-<!-- ELEMENTOR BLOCK 2: THE PROBLEM (Side-by-side comparison) -->
-<style>
-.evi-problem {
-  padding: 80px 24px;
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-  background: #ffffff;
-}
-.evi-problem .evi-section-header {
-  text-align: center;
-  max-width: 700px;
-  margin: 0 auto 48px;
-}
-.evi-problem .evi-section-header h2 {
-  font-size: clamp(1.6rem, 4vw, 2.2rem);
-  font-weight: 700;
-  color: #111827;
-  margin: 0;
-}
-.evi-problem .evi-section-header p {
-  font-size: 1.1rem;
-  color: #4b5563;
-  margin-top: 12px;
-  line-height: 1.6;
-}
-.evi-compare-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 24px;
-  max-width: 960px;
-  margin: 0 auto;
-}
-@media (max-width: 768px) {
-  .evi-compare-grid { grid-template-columns: 1fr; }
-}
-.evi-compare-card {
-  padding: 32px;
-  border-radius: 16px;
-}
-.evi-compare-card.evi-old {
-  background: #f9fafb;
-  border: 1px solid #e5e7eb;
-}
-.evi-compare-card.evi-new {
-  background: #ffffff;
-  border: 2px solid #2563eb;
-  box-shadow: 0 8px 32px rgba(37, 99, 235, 0.1);
-}
-.evi-compare-card h3 {
-  font-size: 1.2rem;
-  font-weight: 600;
-  margin: 0;
-}
-.evi-compare-card.evi-old h3 { color: #374151; }
-.evi-compare-card.evi-new h3 { color: #2563eb; }
-.evi-compare-card > p {
-  color: #6b7280;
-  font-size: 0.95rem;
-  margin-top: 8px;
-  line-height: 1.5;
-}
-.evi-compare-list {
-  list-style: none;
-  padding: 0;
-  margin: 20px 0 0;
-}
-.evi-compare-list li {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  margin-bottom: 14px;
-  font-size: 0.95rem;
-  color: #374151;
-  line-height: 1.5;
-}
-.evi-compare-list .evi-icon-x {
-  color: #ef4444;
-  font-weight: 700;
-  flex-shrink: 0;
-  font-size: 1.1rem;
-}
-.evi-compare-list .evi-icon-check {
-  color: #22c55e;
-  font-weight: 700;
-  flex-shrink: 0;
-  font-size: 1.1rem;
-}
-</style>
+</header>
 
-<div class="evi-problem">
-  <div class="evi-section-header">
-    <h2>Why Today's Document AI Falls Short</h2>
-    <p>Your team spends days cross-referencing documents. The mistakes they catch are luck. The ones they miss are liability.</p>
+<!-- ============ SECTION 1: HERO ============ -->
+<section class="py-20 md:py-32 bg-gradient-to-b from-blue-50 to-white">
+  <div class="container mx-auto px-6 text-center max-w-4xl">
+    <h6 class="text-sm font-semibold text-blue-600 uppercase tracking-wider mb-4">Introducing Evidoc</h6>
+    <h1 class="text-4xl md:text-6xl font-bold text-gray-900 leading-tight">
+      Ask Your Documents.<br>Trust Every Answer.
+    </h1>
+    <p class="mt-6 text-lg md:text-xl text-gray-600 max-w-2xl mx-auto">
+      AI-powered document intelligence that retrieves answers from your files — with every claim linked to the exact source sentence. Highlighted, clickable, verifiable.
+    </p>
+    <p class="mt-4 text-base text-gray-500 italic">
+      Not "it's probably on page 12." The actual sentence. The actual words.
+    </p>
+    <div class="mt-8">
+      <a href="https://evidoc.hulkdesign.com" class="inline-block px-8 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition-colors text-lg">
+        Try Evidoc Free
+      </a>
+    </div>
+    <p class="mt-4 text-sm text-gray-400">15+ document formats · 13 languages · Enterprise-grade security</p>
   </div>
+</section>
 
-  <div class="evi-compare-grid">
-    <div class="evi-compare-card evi-old">
-      <h3>Standard AI Chat + PDF</h3>
-      <p>Summarizes single files but can't truly understand or cross-reference your documents.</p>
-      <ul class="evi-compare-list">
-        <li><span class="evi-icon-x">✕</span><span><strong>Single file only:</strong> Can't answer questions across multiple documents.</span></li>
-        <li><span class="evi-icon-x">✕</span><span><strong>Generates answers:</strong> Text is fabricated, not retrieved. Hallucinations are undetectable.</span></li>
-        <li><span class="evi-icon-x">✕</span><span><strong>No real citations:</strong> "Page 12" at best — no way to click and verify.</span></li>
-      </ul>
+<!-- ============ SECTION 2: THE PROBLEM ============ -->
+<section id="problem" class="py-20 md:py-28 bg-white">
+  <div class="container mx-auto px-6">
+    <div class="text-center max-w-3xl mx-auto">
+      <h2 class="text-3xl md:text-4xl font-bold text-gray-900">Why Today's Document AI Falls Short</h2>
+      <p class="mt-4 text-lg text-gray-600">
+        Your team spends days cross-referencing documents. The mistakes they catch are luck. The ones they miss are liability.
+      </p>
     </div>
 
-    <div class="evi-compare-card evi-new">
-      <h3>Evidoc</h3>
-      <p>Reads across all your documents, connects the dots, and shows its work — every answer traceable to the source.</p>
-      <ul class="evi-compare-list">
-        <li><span class="evi-icon-check">✓</span><span><strong>Cross-document Q&A:</strong> Ask one question across all your files. Get one verified answer.</span></li>
-        <li><span class="evi-icon-check">✓</span><span><strong>Retrieves, never fabricates:</strong> Answers extracted from your documents, not generated.</span></li>
-        <li><span class="evi-icon-check">✓</span><span><strong>Click-to-verify:</strong> Every citation links to the exact sentence, highlighted on the original page.</span></li>
-      </ul>
-    </div>
-  </div>
-</div>
-<!-- ELEMENTOR BLOCK 3: FEATURES -->
-<style>
-.evi-features {
-  padding: 80px 24px;
-  background: #f8fafc;
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-}
-.evi-features .evi-section-header {
-  text-align: center;
-  max-width: 700px;
-  margin: 0 auto 48px;
-}
-.evi-features .evi-section-header h2 {
-  font-size: clamp(1.6rem, 4vw, 2.2rem);
-  font-weight: 700;
-  color: #111827;
-  margin: 0;
-}
-.evi-features .evi-section-header p {
-  font-size: 1.1rem;
-  color: #4b5563;
-  margin-top: 12px;
-  line-height: 1.6;
-}
-.evi-features-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 24px;
-  max-width: 1060px;
-  margin: 0 auto;
-}
-@media (max-width: 768px) {
-  .evi-features-grid { grid-template-columns: 1fr; }
-}
-.evi-feature-card {
-  background: #ffffff;
-  padding: 32px;
-  border-radius: 16px;
-  border: 1px solid #e5e7eb;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.04);
-}
-.evi-feature-icon {
-  width: 48px;
-  height: 48px;
-  background: #eff6ff;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 1.5rem;
-}
-.evi-feature-card h3 {
-  font-size: 1.15rem;
-  font-weight: 600;
-  color: #111827;
-  margin: 16px 0 8px;
-}
-.evi-feature-card p {
-  font-size: 0.95rem;
-  color: #4b5563;
-  line-height: 1.6;
-  margin: 0;
-}
-</style>
+    <div class="mt-16 grid grid-cols-1 md:grid-cols-2 gap-8 max-w-5xl mx-auto">
+      <div class="bg-gray-50/70 p-8 rounded-2xl border border-gray-200 shadow-sm">
+        <h3 class="text-xl font-semibold text-gray-900">Standard AI Chat + PDF</h3>
+        <p class="mt-2 text-gray-600">Summarizes single files but can't truly understand or cross-reference your documents.</p>
+        <ul class="mt-6 space-y-4">
+          <li class="flex items-start">
+            <span class="text-red-500 font-bold mr-3 mt-0.5">✕</span>
+            <span><strong class="text-gray-700">Single file only:</strong> Can't answer questions across multiple documents.</span>
+          </li>
+          <li class="flex items-start">
+            <span class="text-red-500 font-bold mr-3 mt-0.5">✕</span>
+            <span><strong class="text-gray-700">Generates answers:</strong> Text is fabricated, not retrieved. Hallucinations are undetectable.</span>
+          </li>
+          <li class="flex items-start">
+            <span class="text-red-500 font-bold mr-3 mt-0.5">✕</span>
+            <span><strong class="text-gray-700">No real citations:</strong> "Page 12" at best — no way to click and verify.</span>
+          </li>
+        </ul>
+      </div>
 
-<div class="evi-features">
-  <div class="evi-section-header">
-    <h2>Document Intelligence You Can Trust</h2>
-    <p>Evidoc builds a Knowledge Graph across your documents — connecting entities, facts, and relationships to deliver verifiable answers.</p>
+      <div class="bg-white p-8 rounded-2xl border-2 border-blue-600 shadow-xl ring-4 ring-blue-600/10">
+        <h3 class="text-xl font-semibold text-blue-700">Evidoc</h3>
+        <p class="mt-2 text-gray-600">Reads across all your documents, connects the dots, and shows its work — every answer traceable to the source.</p>
+        <ul class="mt-6 space-y-4">
+          <li class="flex items-start">
+            <span class="text-green-500 font-bold mr-3 mt-0.5">✓</span>
+            <span><strong class="text-gray-700">Cross-document Q&A:</strong> Ask one question across all your files. Get one verified answer.</span>
+          </li>
+          <li class="flex items-start">
+            <span class="text-green-500 font-bold mr-3 mt-0.5">✓</span>
+            <span><strong class="text-gray-700">Retrieves, never fabricates:</strong> Answers extracted from your documents, not generated.</span>
+          </li>
+          <li class="flex items-start">
+            <span class="text-green-500 font-bold mr-3 mt-0.5">✓</span>
+            <span><strong class="text-gray-700">Click-to-verify:</strong> Every citation links to the exact sentence, highlighted on the original page.</span>
+          </li>
+        </ul>
+      </div>
+    </div>
   </div>
+</section>
 
-  <div class="evi-features-grid">
-    <div class="evi-feature-card">
-      <div class="evi-feature-icon">🎯</div>
-      <h3>Deterministic Answers</h3>
-      <p>Every answer is extracted directly from your documents — not generated. Knowledge Graph technology ensures factual, traceable responses. Zero hallucination you can't verify.</p>
+<!-- ============ SECTION 3: FEATURES ============ -->
+<section id="features" class="py-20 md:py-28 bg-gray-50">
+  <div class="container mx-auto px-6">
+    <div class="text-center max-w-3xl mx-auto">
+      <h2 class="text-3xl md:text-4xl font-bold text-gray-900">Document Intelligence You Can Trust</h2>
+      <p class="mt-4 text-lg text-gray-600">
+        Evidoc builds a Knowledge Graph across your documents — connecting entities, facts, and relationships to deliver verifiable answers.
+      </p>
     </div>
-    <div class="evi-feature-card">
-      <div class="evi-feature-icon">🔗</div>
-      <h3>Click-to-Verify Citations</h3>
-      <p>Every evidence sentence links back to the exact location in the original document. One click — highlighted text on the source page. See exactly where every fact came from.</p>
-    </div>
-    <div class="evi-feature-card">
-      <div class="evi-feature-icon">🧠</div>
-      <h3>Knowledge Graph Intelligence</h3>
-      <p>Understands that "Acme Corp" on page 3 and "ACME Corporation" on page 47 are the same entity. Connects the dots across hundreds of pages automatically.</p>
+
+    <div class="mt-16 grid grid-cols-1 md:grid-cols-3 gap-8">
+      <div class="bg-white p-8 rounded-2xl shadow-lg border border-gray-100">
+        <div class="w-12 h-12 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center text-2xl">🎯</div>
+        <h3 class="mt-5 text-xl font-semibold text-gray-900">Deterministic Answers</h3>
+        <p class="mt-2 text-gray-600">Every answer is extracted directly from your documents — not generated. Knowledge Graph technology ensures factual, traceable responses. Zero hallucination you can't verify.</p>
+      </div>
+      <div class="bg-white p-8 rounded-2xl shadow-lg border border-gray-100">
+        <div class="w-12 h-12 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center text-2xl">🔗</div>
+        <h3 class="mt-5 text-xl font-semibold text-gray-900">Click-to-Verify Citations</h3>
+        <p class="mt-2 text-gray-600">Every evidence sentence links back to the exact location in the original document. One click — highlighted text on the source page. See exactly where every fact came from.</p>
+      </div>
+      <div class="bg-white p-8 rounded-2xl shadow-lg border border-gray-100">
+        <div class="w-12 h-12 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center text-2xl">🧠</div>
+        <h3 class="mt-5 text-xl font-semibold text-gray-900">Knowledge Graph Intelligence</h3>
+        <p class="mt-2 text-gray-600">Understands that "Acme Corp" on page 3 and "ACME Corporation" on page 47 are the same entity. Connects the dots across hundreds of pages automatically.</p>
+      </div>
     </div>
   </div>
-</div>
-<!-- ELEMENTOR BLOCK 4: HOW IT WORKS -->
-<style>
-.evi-how {
-  padding: 80px 24px;
-  background: #ffffff;
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-}
-.evi-how .evi-section-header {
-  text-align: center;
-  max-width: 700px;
-  margin: 0 auto 56px;
-}
-.evi-how .evi-section-header h2 {
-  font-size: clamp(1.6rem, 4vw, 2.2rem);
-  font-weight: 700;
-  color: #111827;
-  margin: 0;
-}
-.evi-how .evi-section-header p {
-  font-size: 1.1rem;
-  color: #4b5563;
-  margin-top: 12px;
-}
-.evi-steps {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 32px;
-  max-width: 960px;
-  margin: 0 auto;
-}
-@media (max-width: 768px) {
-  .evi-steps { grid-template-columns: 1fr; }
-}
-.evi-step {
-  text-align: center;
-  position: relative;
-}
-.evi-step-number {
-  width: 80px;
-  height: 80px;
-  background: #eff6ff;
-  color: #2563eb;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 2rem;
-  font-weight: 800;
-  margin: 0 auto;
-  position: relative;
-}
-.evi-step h3 {
-  font-size: 1.15rem;
-  font-weight: 600;
-  color: #111827;
-  margin: 20px 0 8px;
-}
-.evi-step p {
-  font-size: 0.95rem;
-  color: #4b5563;
-  line-height: 1.6;
-  margin: 0;
-}
-/* Connector line between steps (desktop only) */
-@media (min-width: 769px) {
-  .evi-step:not(:last-child)::after {
-    content: '';
-    position: absolute;
-    top: 40px;
-    right: -16px;
-    width: 32px;
-    height: 2px;
-    background: #d1d5db;
+</section>
+
+<!-- ============ SECTION 4: HOW IT WORKS ============ -->
+<section id="how-it-works" class="py-20 md:py-28 bg-white">
+  <div class="container mx-auto px-6">
+    <div class="text-center max-w-3xl mx-auto">
+      <h2 class="text-3xl md:text-4xl font-bold text-gray-900">How It Works: 3 Steps to Verified Answers</h2>
+      <p class="mt-4 text-lg text-gray-600">From upload to verified insight — in minutes, not days.</p>
+    </div>
+
+    <div class="mt-20 grid grid-cols-1 md:grid-cols-3 gap-x-8 gap-y-12 max-w-6xl mx-auto">
+      <div class="text-center relative">
+        <div class="relative z-10 w-28 h-28 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center mx-auto ring-8 ring-white text-5xl font-extrabold">1</div>
+        <h3 class="mt-6 text-xl font-semibold text-gray-900">Upload Your Documents</h3>
+        <p class="mt-2 text-gray-600">PDFs, Word docs, spreadsheets, presentations, images — 15+ formats supported. Drag, drop, done.</p>
+      </div>
+
+      <div class="text-center relative">
+        <div class="relative z-10 w-28 h-28 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center mx-auto ring-8 ring-white text-5xl font-extrabold">2</div>
+        <h3 class="mt-6 text-xl font-semibold text-gray-900">AI Builds Knowledge Graph</h3>
+        <p class="mt-2 text-gray-600">Evidoc extracts entities, relationships, and facts — building a connected Knowledge Graph across all your documents.</p>
+      </div>
+
+      <div class="text-center relative">
+        <div class="relative z-10 w-28 h-28 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center mx-auto ring-8 ring-white text-5xl font-extrabold">3</div>
+        <h3 class="mt-6 text-xl font-semibold text-gray-900">Ask &amp; Verify</h3>
+        <p class="mt-2 text-gray-600">Ask questions in your language. Every answer comes with clickable citations — see the exact source text highlighted on the original page.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ SECTION 5: USE CASES ============ -->
+<section id="use-cases" class="py-20 md:py-28 bg-white">
+  <div class="container mx-auto px-6">
+    <div class="text-center max-w-3xl mx-auto">
+      <h2 class="text-3xl md:text-4xl font-bold text-gray-900">Verified Answers for Every Industry</h2>
+      <p class="mt-4 text-lg text-gray-600">
+        The answer is already in your documents. You just couldn't find it — until now.
+      </p>
+    </div>
+
+    <div class="mt-16 grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <div class="bg-gray-50/70 p-8 rounded-2xl border border-gray-200">
+        <span class="inline-block px-3 py-1 text-sm font-medium text-blue-800 bg-blue-100 rounded-full">Legal &amp; Contracts</span>
+        <h3 class="mt-4 text-xl font-semibold text-gray-900">Cross-Document Contract Review</h3>
+        <p class="mt-3 text-gray-600"><strong>The Problem:</strong> "Which of our 2,000 contracts contain a change-of-control clause?" — 12 paralegals, 6 weeks.</p>
+        <p class="mt-3 text-gray-600"><strong>Evidoc:</strong> One question across your entire portfolio. Every relevant clause cited to the exact sentence.</p>
+      </div>
+
+      <div class="bg-gray-50/70 p-8 rounded-2xl border border-gray-200">
+        <span class="inline-block px-3 py-1 text-sm font-medium text-green-800 bg-green-100 rounded-full">Procurement &amp; Finance</span>
+        <h3 class="mt-4 text-xl font-semibold text-gray-900">Invoice &amp; Contract Reconciliation</h3>
+        <p class="mt-3 text-gray-600"><strong>The Problem:</strong> 500 invoices/month. Last year's audit found $230K in overpayments.</p>
+        <p class="mt-3 text-gray-600"><strong>Evidoc:</strong> Every discrepancy cited to the exact line in both documents. A week → minutes.</p>
+      </div>
+
+      <div class="bg-gray-50/70 p-8 rounded-2xl border border-gray-200">
+        <span class="inline-block px-3 py-1 text-sm font-medium text-purple-800 bg-purple-100 rounded-full">Compliance &amp; Audit</span>
+        <h3 class="mt-4 text-xl font-semibold text-gray-900">Instant Audit Readiness</h3>
+        <p class="mt-3 text-gray-600"><strong>The Problem:</strong> "Show me where your policies address data retention." 40 policy docs, 3 days.</p>
+        <p class="mt-3 text-gray-600"><strong>Evidoc:</strong> Answer in seconds — exact policy language highlighted. The answer, the source, the proof.</p>
+      </div>
+    </div>
+
+    <div class="mt-8 grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <div class="bg-gray-50/70 p-8 rounded-2xl border border-gray-200">
+        <span class="inline-block px-3 py-1 text-sm font-medium text-amber-800 bg-amber-100 rounded-full">Manufacturing &amp; Quality</span>
+        <h3 class="mt-4 text-xl font-semibold text-gray-900">Regulatory &amp; SOP Compliance</h3>
+        <p class="mt-3 text-gray-600"><strong>The Problem:</strong> "Where does your SOP address cleaning validation for Line 3?" 400 SOPs to check.</p>
+        <p class="mt-3 text-gray-600"><strong>Evidoc:</strong> Exact SOP section highlighted in 30 seconds. Gap analysis with cited references.</p>
+      </div>
+
+      <div class="bg-gray-50/70 p-8 rounded-2xl border border-gray-200">
+        <span class="inline-block px-3 py-1 text-sm font-medium text-rose-800 bg-rose-100 rounded-full">Real Estate</span>
+        <h3 class="mt-4 text-xl font-semibold text-gray-900">Contract Change Detection</h3>
+        <p class="mt-3 text-gray-600"><strong>The Problem:</strong> Buyer's attorney modified the counter-offer. What changed? Closing is Friday.</p>
+        <p class="mt-3 text-gray-600"><strong>Evidoc:</strong> Every difference highlighted. Cross-reference against HOA docs instantly.</p>
+      </div>
+
+      <div class="bg-gray-50/70 p-8 rounded-2xl border border-gray-200">
+        <span class="inline-block px-3 py-1 text-sm font-medium text-indigo-800 bg-indigo-100 rounded-full">IP &amp; Patents</span>
+        <h3 class="mt-4 text-xl font-semibold text-gray-900">Prior Art &amp; Portfolio Analysis</h3>
+        <p class="mt-3 text-gray-600"><strong>The Problem:</strong> "Does this prior art invalidate claim 3?" 200 references, 20 hours at $600/hr.</p>
+        <p class="mt-3 text-gray-600"><strong>Evidoc:</strong> Cross-reference hundreds of documents. Prior art search: 12 hours → 12 minutes.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ SECTION 6: PRICING (Tabbed) ============ -->
+<section id="pricing" class="py-20 md:py-28 bg-gray-50">
+  <div class="container mx-auto px-6">
+    <div class="text-center max-w-3xl mx-auto">
+      <h2 class="text-3xl md:text-4xl font-bold text-gray-900">Simple, Transparent Pricing</h2>
+      <p class="mt-4 text-lg text-gray-600">Start free. Upgrade when you need more. No hidden fees.</p>
+    </div>
+
+    <!-- Tab toggle -->
+    <div class="flex justify-center mt-10">
+      <div class="inline-flex bg-gray-200 rounded-xl p-1">
+        <button id="tab-individual" onclick="switchPricingTab('individual')" class="px-8 py-2.5 rounded-lg text-sm font-semibold transition-all bg-white text-gray-900 shadow-sm">Individual</button>
+        <button id="tab-business" onclick="switchPricingTab('business')" class="px-8 py-2.5 rounded-lg text-sm font-semibold transition-all text-gray-500">Business</button>
+      </div>
+    </div>
+
+    <!-- INDIVIDUAL PLANS -->
+    <div id="panel-individual" class="mt-12 grid grid-cols-1 md:grid-cols-3 gap-8 max-w-4xl mx-auto">
+      <!-- Free -->
+      <div class="bg-white p-8 rounded-2xl border border-gray-200 shadow-sm text-center flex flex-col">
+        <h3 class="text-xl font-bold text-gray-900">Free</h3>
+        <div class="mt-4 text-5xl font-extrabold text-gray-900">$0</div>
+        <p class="text-sm text-gray-500 mt-2">Get started instantly</p>
+        <ul class="mt-6 text-sm text-gray-600 text-left space-y-3 flex-grow">
+          <li>2,000 queries/month</li>
+          <li>500 credits/month</li>
+          <li>Basic retrieval</li>
+        </ul>
+        <a href="https://evidoc.hulkdesign.com" class="mt-8 block py-3 bg-gray-100 text-gray-700 font-semibold rounded-xl hover:bg-gray-200 transition-colors">Get Started Free</a>
+        <p class="text-xs text-gray-400 mt-2">No credit card required</p>
+      </div>
+
+      <!-- Pro -->
+      <div class="bg-white p-8 rounded-2xl border border-gray-200 shadow-sm text-center flex flex-col">
+        <h3 class="text-xl font-bold text-gray-900">Pro</h3>
+        <div class="mt-4 text-5xl font-extrabold text-gray-900">$10<span class="text-lg font-normal text-gray-500">/mo</span></div>
+        <p class="text-sm text-gray-500 mt-2">For individuals who need more</p>
+        <ul class="mt-6 text-sm text-gray-600 text-left space-y-3 flex-grow">
+          <li>Everything in Free, plus:</li>
+          <li>5,000 queries/month</li>
+          <li>3,000 credits/month</li>
+          <li>✅ GraphRAG engine</li>
+        </ul>
+        <a href="https://evidoc.hulkdesign.com/#/dashboard" class="mt-8 block py-3 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 transition-colors">Upgrade to Pro</a>
+      </div>
+
+      <!-- Pro+ -->
+      <div class="bg-white p-8 rounded-2xl border-2 border-blue-600 shadow-xl text-center flex flex-col relative ring-4 ring-blue-600/10">
+        <span class="absolute -top-3 left-1/2 -translate-x-1/2 bg-blue-600 text-white text-xs font-semibold px-4 py-1 rounded-full">Most Popular</span>
+        <h3 class="text-xl font-bold text-blue-700">Pro+</h3>
+        <div class="mt-4 text-5xl font-extrabold text-gray-900">$39<span class="text-lg font-normal text-gray-500">/mo</span></div>
+        <p class="text-sm text-gray-500 mt-2">For power users</p>
+        <ul class="mt-6 text-sm text-gray-600 text-left space-y-3 flex-grow">
+          <li>Everything in Pro, plus:</li>
+          <li>20,000 queries/month</li>
+          <li>15,000 credits/month</li>
+          <li>✅ Advanced Analytics</li>
+          <li>✅ API Access</li>
+          <li>✅ Custom Models</li>
+        </ul>
+        <a href="https://evidoc.hulkdesign.com/#/dashboard" class="mt-8 block py-3 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 transition-colors">Upgrade to Pro+</a>
+      </div>
+    </div>
+
+    <!-- BUSINESS PLANS -->
+    <div id="panel-business" class="mt-12 grid-cols-1 md:grid-cols-3 gap-8 max-w-4xl mx-auto hidden" style="display: none;">
+      <!-- Business -->
+      <div class="bg-white p-8 rounded-2xl border border-gray-200 shadow-sm text-center flex flex-col">
+        <h3 class="text-xl font-bold text-gray-900">Business</h3>
+        <div class="mt-4 text-5xl font-extrabold text-gray-900">$19<span class="text-lg font-normal text-gray-500">/user/mo</span></div>
+        <p class="text-sm text-gray-500 mt-2">For teams up to 50 users</p>
+        <ul class="mt-6 text-sm text-gray-600 text-left space-y-3 flex-grow">
+          <li>5,000 queries/user/month</li>
+          <li>5,000 credits/user/month</li>
+          <li>✅ GraphRAG engine</li>
+          <li>✅ Centralized Billing</li>
+          <li>✅ Audit Logs</li>
+          <li>✅ Policy Controls</li>
+        </ul>
+        <a href="https://evidoc.hulkdesign.com/#/dashboard" class="mt-8 block py-3 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 transition-colors">Get Business</a>
+      </div>
+
+      <!-- Enterprise -->
+      <div class="bg-white p-8 rounded-2xl border-2 border-blue-600 shadow-xl text-center flex flex-col relative ring-4 ring-blue-600/10">
+        <span class="absolute -top-3 left-1/2 -translate-x-1/2 bg-blue-600 text-white text-xs font-semibold px-4 py-1 rounded-full">Best Value</span>
+        <h3 class="text-xl font-bold text-blue-700">Enterprise</h3>
+        <div class="mt-4 text-5xl font-extrabold text-gray-900">$39<span class="text-lg font-normal text-gray-500">/user/mo</span></div>
+        <p class="text-sm text-gray-500 mt-2">For organizations up to 500 users</p>
+        <ul class="mt-6 text-sm text-gray-600 text-left space-y-3 flex-grow">
+          <li>Everything in Business, plus:</li>
+          <li>50,000 queries/user/month</li>
+          <li>14,000 credits/user/month</li>
+          <li>✅ SSO &amp; Custom Branding</li>
+          <li>✅ Dedicated Resources</li>
+          <li>✅ Priority Support</li>
+          <li>✅ Custom Models</li>
+        </ul>
+        <a href="https://evidoc.hulkdesign.com/#/dashboard" class="mt-8 block py-3 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 transition-colors">Get Enterprise</a>
+      </div>
+
+      <!-- Contact Sales -->
+      <div class="bg-white p-8 rounded-2xl border border-gray-200 shadow-sm text-center flex flex-col items-center justify-center">
+        <h3 class="text-xl font-bold text-gray-900">Need more?</h3>
+        <p class="text-gray-500 mt-4 leading-relaxed">Custom deployment, dedicated infrastructure, volume licensing, and SLA guarantees.</p>
+        <a href="mailto:j.liu@hulkdesign.com" class="mt-8 inline-block px-8 py-3 bg-gray-100 text-gray-700 font-semibold rounded-xl hover:bg-gray-200 transition-colors">Contact Sales</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+function switchPricingTab(tab) {
+  const indPanel = document.getElementById('panel-individual');
+  const bizPanel = document.getElementById('panel-business');
+  const indTab = document.getElementById('tab-individual');
+  const bizTab = document.getElementById('tab-business');
+  if (tab === 'individual') {
+    indPanel.style.display = 'grid';
+    bizPanel.style.display = 'none';
+    indTab.className = 'px-8 py-2.5 rounded-lg text-sm font-semibold transition-all bg-white text-gray-900 shadow-sm';
+    bizTab.className = 'px-8 py-2.5 rounded-lg text-sm font-semibold transition-all text-gray-500';
+  } else {
+    indPanel.style.display = 'none';
+    bizPanel.style.display = 'grid';
+    bizPanel.classList.add('grid-cols-1', 'md:grid-cols-3');
+    bizTab.className = 'px-8 py-2.5 rounded-lg text-sm font-semibold transition-all bg-white text-gray-900 shadow-sm';
+    indTab.className = 'px-8 py-2.5 rounded-lg text-sm font-semibold transition-all text-gray-500';
   }
 }
-</style>
+</script>
 
-<div class="evi-how">
-  <div class="evi-section-header">
-    <h2>How It Works: 3 Steps to Verified Answers</h2>
-    <p>From upload to verified insight — in minutes, not days.</p>
-  </div>
-
-  <div class="evi-steps">
-    <div class="evi-step">
-      <div class="evi-step-number">1</div>
-      <h3>Upload Your Documents</h3>
-      <p>PDFs, Word docs, spreadsheets, presentations, images — 15+ formats supported. Drag, drop, done.</p>
-    </div>
-    <div class="evi-step">
-      <div class="evi-step-number">2</div>
-      <h3>AI Builds Knowledge Graph</h3>
-      <p>Evidoc extracts entities, relationships, and facts — building a connected Knowledge Graph across all your documents.</p>
-    </div>
-    <div class="evi-step">
-      <div class="evi-step-number">3</div>
-      <h3>Ask &amp; Verify</h3>
-      <p>Ask questions in your language. Every answer comes with clickable citations — see the exact source text highlighted on the original page.</p>
-    </div>
-  </div>
-</div>
-<!-- ELEMENTOR BLOCK 5: USE CASES -->
-<style>
-.evi-usecases {
-  padding: 80px 24px;
-  background: #ffffff;
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-}
-.evi-usecases .evi-section-header {
-  text-align: center;
-  max-width: 700px;
-  margin: 0 auto 48px;
-}
-.evi-usecases .evi-section-header h2 {
-  font-size: clamp(1.6rem, 4vw, 2.2rem);
-  font-weight: 700;
-  color: #111827;
-  margin: 0;
-}
-.evi-usecases .evi-section-header p {
-  font-size: 1.1rem;
-  color: #4b5563;
-  margin-top: 12px;
-}
-.evi-uc-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 24px;
-  max-width: 1100px;
-  margin: 0 auto;
-}
-@media (max-width: 960px) {
-  .evi-uc-grid { grid-template-columns: 1fr; }
-}
-.evi-uc-card {
-  background: #f9fafb;
-  padding: 28px;
-  border-radius: 16px;
-  border: 1px solid #e5e7eb;
-}
-.evi-uc-badge {
-  display: inline-block;
-  padding: 4px 12px;
-  font-size: 0.8rem;
-  font-weight: 600;
-  border-radius: 100px;
-}
-.evi-uc-badge.evi-legal { background: #dbeafe; color: #1e40af; }
-.evi-uc-badge.evi-finance { background: #dcfce7; color: #166534; }
-.evi-uc-badge.evi-compliance { background: #f3e8ff; color: #6b21a8; }
-.evi-uc-badge.evi-manufacturing { background: #fef3c7; color: #92400e; }
-.evi-uc-badge.evi-realestate { background: #fce7f3; color: #9d174d; }
-.evi-uc-badge.evi-ip { background: #e0e7ff; color: #3730a3; }
-.evi-uc-card h3 {
-  font-size: 1.1rem;
-  font-weight: 600;
-  color: #111827;
-  margin: 14px 0 10px;
-}
-.evi-uc-card p {
-  font-size: 0.9rem;
-  color: #4b5563;
-  line-height: 1.6;
-  margin: 0 0 10px;
-}
-</style>
-
-<div class="evi-usecases">
-  <div class="evi-section-header">
-    <h2>Verified Answers for Every Industry</h2>
-    <p>The answer is already in your documents. You just couldn't find it — until now.</p>
-  </div>
-
-  <div class="evi-uc-grid">
-    <div class="evi-uc-card">
-      <span class="evi-uc-badge evi-legal">Legal &amp; Contracts</span>
-      <h3>Cross-Document Contract Review</h3>
-      <p><strong>The Problem:</strong> "Which of our 2,000 contracts contain a change-of-control clause?" — 12 paralegals, 6 weeks.</p>
-      <p><strong>Evidoc:</strong> One question across your entire portfolio. Every relevant clause cited to the exact sentence.</p>
-    </div>
-
-    <div class="evi-uc-card">
-      <span class="evi-uc-badge evi-finance">Procurement &amp; Finance</span>
-      <h3>Invoice &amp; Contract Reconciliation</h3>
-      <p><strong>The Problem:</strong> 500 invoices/month. Last year's audit found $230K in overpayments.</p>
-      <p><strong>Evidoc:</strong> Every discrepancy cited to the exact line in both documents. A week → minutes.</p>
-    </div>
-
-    <div class="evi-uc-card">
-      <span class="evi-uc-badge evi-compliance">Compliance &amp; Audit</span>
-      <h3>Instant Audit Readiness</h3>
-      <p><strong>The Problem:</strong> "Show me where your policies address data retention." 40 policy docs, 3 days.</p>
-      <p><strong>Evidoc:</strong> Answer in seconds — exact policy language highlighted. The answer, the source, the proof.</p>
-    </div>
-
-    <div class="evi-uc-card">
-      <span class="evi-uc-badge evi-manufacturing">Manufacturing &amp; Quality</span>
-      <h3>Regulatory &amp; SOP Compliance</h3>
-      <p><strong>The Problem:</strong> "Where does your SOP address cleaning validation for Line 3?" 400 SOPs to check.</p>
-      <p><strong>Evidoc:</strong> Exact SOP section highlighted in 30 seconds. Gap analysis with cited references.</p>
-    </div>
-
-    <div class="evi-uc-card">
-      <span class="evi-uc-badge evi-realestate">Real Estate</span>
-      <h3>Contract Change Detection</h3>
-      <p><strong>The Problem:</strong> Buyer's attorney modified the counter-offer. What changed? Closing is Friday.</p>
-      <p><strong>Evidoc:</strong> Every difference highlighted. Cross-reference against HOA docs instantly.</p>
-    </div>
-
-    <div class="evi-uc-card">
-      <span class="evi-uc-badge evi-ip">IP &amp; Patents</span>
-      <h3>Prior Art &amp; Portfolio Analysis</h3>
-      <p><strong>The Problem:</strong> "Does this prior art invalidate claim 3?" 200 references, 20 hours at $600/hr.</p>
-      <p><strong>Evidoc:</strong> Cross-reference hundreds of documents. Prior art search: 12 hours → 12 minutes.</p>
+<!-- ============ SECTION 7: ENTERPRISE SECURITY ============ -->
+<section class="py-16 bg-gray-50">
+  <div class="container mx-auto px-6">
+    <h3 class="text-center text-xl font-semibold text-gray-900">Enterprise-Grade Security &amp; Capabilities</h3>
+    <div class="mt-8 grid grid-cols-2 md:grid-cols-4 gap-8 text-center max-w-5xl mx-auto">
+      <div class="bg-white p-6 rounded-2xl shadow-lg border border-gray-100">
+        <div class="text-3xl mb-3">🔒</div>
+        <h4 class="font-semibold text-gray-700">Role-Based Access Control</h4>
+      </div>
+      <div class="bg-white p-6 rounded-2xl shadow-lg border border-gray-100">
+        <div class="text-3xl mb-3">👥</div>
+        <h4 class="font-semibold text-gray-700">Multi-Tenancy</h4>
+      </div>
+      <div class="bg-white p-6 rounded-2xl shadow-lg border border-gray-100">
+        <div class="text-3xl mb-3">🌍</div>
+        <h4 class="font-semibold text-gray-700">13 Languages + Voice</h4>
+      </div>
+      <div class="bg-white p-6 rounded-2xl shadow-lg border border-gray-100">
+        <div class="text-3xl mb-3">📁</div>
+        <h4 class="font-semibold text-gray-700">15+ Document Formats</h4>
+      </div>
     </div>
   </div>
-</div>
-<!-- ELEMENTOR BLOCK 6: PRICING -->
-<style>
-.evi-pricing {
-  padding: 80px 24px;
-  background: #f8fafc;
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-}
-.evi-pricing .evi-section-header {
-  text-align: center;
-  max-width: 700px;
-  margin: 0 auto 48px;
-}
-.evi-pricing .evi-section-header h2 {
-  font-size: clamp(1.6rem, 4vw, 2.2rem);
-  font-weight: 700;
-  color: #111827;
-  margin: 0;
-}
-.evi-pricing .evi-section-header p {
-  font-size: 1.1rem;
-  color: #4b5563;
-  margin-top: 12px;
-}
-.evi-pricing-grid {
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 16px;
-  max-width: 1200px;
-  margin: 0 auto;
-}
-@media (max-width: 1024px) {
-  .evi-pricing-grid { grid-template-columns: repeat(3, 1fr); }
-}
-@media (max-width: 640px) {
-  .evi-pricing-grid { grid-template-columns: 1fr; }
-}
-.evi-price-card {
-  background: #ffffff;
-  border: 1px solid #e5e7eb;
-  border-radius: 16px;
-  padding: 28px 20px;
-  text-align: center;
-  display: flex;
-  flex-direction: column;
-  transition: box-shadow 0.2s;
-}
-.evi-price-card:hover {
-  box-shadow: 0 8px 24px rgba(0,0,0,0.08);
-}
-.evi-price-card.evi-popular {
-  border: 2px solid #2563eb;
-  box-shadow: 0 8px 32px rgba(37, 99, 235, 0.12);
-  position: relative;
-}
-.evi-popular-badge {
-  position: absolute;
-  top: -12px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: #2563eb;
-  color: #fff;
-  font-size: 0.75rem;
-  font-weight: 600;
-  padding: 4px 16px;
-  border-radius: 100px;
-  white-space: nowrap;
-}
-.evi-price-card .evi-plan-name {
-  font-size: 1.1rem;
-  font-weight: 700;
-  color: #111827;
-  margin: 0;
-}
-.evi-price-card .evi-plan-price {
-  font-size: 2rem;
-  font-weight: 800;
-  color: #111827;
-  margin: 12px 0 4px;
-}
-.evi-price-card .evi-plan-price span {
-  font-size: 0.9rem;
-  font-weight: 400;
-  color: #6b7280;
-}
-.evi-price-card .evi-plan-desc {
-  font-size: 0.8rem;
-  color: #9ca3af;
-  margin: 0 0 16px;
-}
-.evi-plan-features {
-  list-style: none;
-  padding: 0;
-  margin: 0 0 20px;
-  text-align: left;
-  flex-grow: 1;
-}
-.evi-plan-features li {
-  font-size: 0.85rem;
-  color: #374151;
-  padding: 6px 0;
-  border-bottom: 1px solid #f3f4f6;
-  line-height: 1.4;
-}
-.evi-plan-features li:last-child {
-  border-bottom: none;
-}
-.evi-plan-btn {
-  display: inline-block;
-  padding: 10px 0;
-  width: 100%;
-  border-radius: 8px;
-  font-size: 0.9rem;
-  font-weight: 600;
-  text-decoration: none;
-  text-align: center;
-  transition: background 0.2s;
-  cursor: pointer;
-  border: none;
-}
-.evi-plan-btn.evi-btn-outline {
-  background: #f3f4f6;
-  color: #374151;
-}
-.evi-plan-btn.evi-btn-outline:hover {
-  background: #e5e7eb;
-}
-.evi-plan-btn.evi-btn-primary {
-  background: #2563eb;
-  color: #ffffff;
-}
-.evi-plan-btn.evi-btn-primary:hover {
-  background: #1d4ed8;
-}
-</style>
+</section>
 
-<div class="evi-pricing" id="pricing">
-  <div class="evi-section-header">
-    <h2>Simple, Transparent Pricing</h2>
-    <p>Start free. Upgrade when you need more. No hidden fees.</p>
+<!-- ============ SECTION 8: CTA ============ -->
+<section class="py-20 md:py-28 bg-gradient-to-br from-blue-800 via-blue-600 to-blue-500">
+  <div class="container mx-auto px-6 text-center max-w-3xl">
+    <h2 class="text-3xl md:text-4xl font-bold text-white">Ready to Trust Your Documents?</h2>
+    <p class="mt-4 text-lg text-blue-100">
+      See how Evidoc eliminates document uncertainty. Start free — no credit card required.
+    </p>
+    <div class="mt-8">
+      <a href="https://evidoc.hulkdesign.com" class="inline-block px-8 py-3 bg-white text-blue-800 font-bold rounded-lg hover:bg-blue-50 transition-colors text-lg shadow-lg">
+        Try Evidoc Free
+      </a>
+    </div>
+    <p class="mt-4 text-sm text-blue-200/60">Free plan includes 2,000 queries/month · Upgrade anytime</p>
   </div>
+</section>
 
-  <div class="evi-pricing-grid">
-    <!-- Free -->
-    <div class="evi-price-card">
-      <div class="evi-plan-name">Free</div>
-      <div class="evi-plan-price">$0</div>
-      <div class="evi-plan-desc">Get started instantly</div>
-      <ul class="evi-plan-features">
-        <li>2,000 queries/month</li>
-        <li>500 credits/month</li>
-        <li>10 documents</li>
-        <li>0.5 GB storage</li>
-        <li>Basic retrieval</li>
-      </ul>
-      <a href="https://evidoc.hulkdesign.com" class="evi-plan-btn evi-btn-outline">Get Started</a>
-    </div>
-
-    <!-- Pro -->
-    <div class="evi-price-card">
-      <div class="evi-plan-name">Pro</div>
-      <div class="evi-plan-price">$10 <span>/mo</span></div>
-      <div class="evi-plan-desc">For individuals</div>
-      <ul class="evi-plan-features">
-        <li>5,000 queries/month</li>
-        <li>3,000 credits/month</li>
-        <li>50 documents</li>
-        <li>2 GB storage</li>
-        <li>✅ GraphRAG engine</li>
-      </ul>
-      <a href="https://evidoc.hulkdesign.com/#/dashboard" class="evi-plan-btn evi-btn-primary">Upgrade</a>
-    </div>
-
-    <!-- Pro+ (Popular) -->
-    <div class="evi-price-card evi-popular">
-      <span class="evi-popular-badge">Most Popular</span>
-      <div class="evi-plan-name">Pro+</div>
-      <div class="evi-plan-price">$39 <span>/mo</span></div>
-      <div class="evi-plan-desc">For power users</div>
-      <ul class="evi-plan-features">
-        <li>20,000 queries/month</li>
-        <li>15,000 credits/month</li>
-        <li>500 documents</li>
-        <li>10 GB storage</li>
-        <li>✅ GraphRAG engine</li>
-        <li>✅ Advanced Analytics</li>
-        <li>✅ API Access</li>
-      </ul>
-      <a href="https://evidoc.hulkdesign.com/#/dashboard" class="evi-plan-btn evi-btn-primary">Upgrade</a>
-    </div>
-
-    <!-- Business -->
-    <div class="evi-price-card">
-      <div class="evi-plan-name">Business</div>
-      <div class="evi-plan-price">$19 <span>/user/mo</span></div>
-      <div class="evi-plan-desc">For teams (up to 50)</div>
-      <ul class="evi-plan-features">
-        <li>5,000 queries/month</li>
-        <li>5,000 credits/month</li>
-        <li>50 documents</li>
-        <li>4 GB storage</li>
-        <li>✅ GraphRAG engine</li>
-        <li>✅ Centralized Billing</li>
-        <li>✅ Audit Logs</li>
-      </ul>
-      <a href="https://evidoc.hulkdesign.com/#/dashboard" class="evi-plan-btn evi-btn-primary">Upgrade</a>
-    </div>
-
-    <!-- Enterprise -->
-    <div class="evi-price-card">
-      <div class="evi-plan-name">Enterprise</div>
-      <div class="evi-plan-price">$39 <span>/user/mo</span></div>
-      <div class="evi-plan-desc">For organizations (up to 500)</div>
-      <ul class="evi-plan-features">
-        <li>50,000 queries/month</li>
-        <li>14,000 credits/month</li>
-        <li>Unlimited documents</li>
-        <li>10 GB storage</li>
-        <li>✅ GraphRAG engine</li>
-        <li>✅ SSO &amp; Custom Branding</li>
-        <li>✅ Dedicated Resources</li>
-        <li>✅ Priority Support</li>
-      </ul>
-      <a href="https://evidoc.hulkdesign.com/#/dashboard" class="evi-plan-btn evi-btn-primary">Upgrade</a>
-    </div>
+<!-- ============ FOOTER ============ -->
+<footer class="py-8 bg-gray-50 border-t border-gray-200">
+  <div class="container mx-auto px-6 text-center text-sm text-gray-400">
+    © 2026 Hulkdesign AI. All rights reserved.
   </div>
-</div>
-<!-- ELEMENTOR BLOCK 7: ENTERPRISE SECURITY BAR -->
-<style>
-.evi-security {
-  padding: 60px 24px;
-  background: #f8fafc;
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-}
-.evi-security h3 {
-  text-align: center;
-  font-size: 1.2rem;
-  font-weight: 600;
-  color: #111827;
-  margin: 0 0 28px;
-}
-.evi-security-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
-  max-width: 900px;
-  margin: 0 auto;
-}
-@media (max-width: 768px) {
-  .evi-security-grid { grid-template-columns: repeat(2, 1fr); }
-}
-.evi-sec-item {
-  background: #ffffff;
-  padding: 20px;
-  border-radius: 14px;
-  border: 1px solid #e5e7eb;
-  text-align: center;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.03);
-}
-.evi-sec-item .evi-sec-icon {
-  font-size: 2rem;
-  margin-bottom: 8px;
-}
-.evi-sec-item h4 {
-  font-size: 0.9rem;
-  font-weight: 600;
-  color: #374151;
-  margin: 0;
-}
-</style>
+</footer>
 
-<div class="evi-security">
-  <h3>Enterprise-Grade Security &amp; Capabilities</h3>
-  <div class="evi-security-grid">
-    <div class="evi-sec-item">
-      <div class="evi-sec-icon">🔒</div>
-      <h4>Role-Based Access Control</h4>
-    </div>
-    <div class="evi-sec-item">
-      <div class="evi-sec-icon">👥</div>
-      <h4>Multi-Tenancy</h4>
-    </div>
-    <div class="evi-sec-item">
-      <div class="evi-sec-icon">🌍</div>
-      <h4>13 Languages + Voice</h4>
-    </div>
-    <div class="evi-sec-item">
-      <div class="evi-sec-icon">📁</div>
-      <h4>15+ Document Formats</h4>
-    </div>
-  </div>
-</div>
-<!-- ELEMENTOR BLOCK 8: CTA (Call to Action) -->
-<style>
-.evi-cta {
-  padding: 80px 24px;
-  background: linear-gradient(135deg, #1e40af 0%, #2563eb 50%, #3b82f6 100%);
-  text-align: center;
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-}
-.evi-cta h2 {
-  font-size: clamp(1.6rem, 4vw, 2.2rem);
-  font-weight: 700;
-  color: #ffffff;
-  margin: 0 auto;
-  max-width: 600px;
-}
-.evi-cta p {
-  font-size: 1.1rem;
-  color: rgba(255, 255, 255, 0.85);
-  margin: 16px auto 0;
-  max-width: 500px;
-  line-height: 1.6;
-}
-.evi-cta .evi-cta-btn {
-  display: inline-block;
-  margin-top: 32px;
-  padding: 14px 40px;
-  background: #ffffff;
-  color: #1e40af;
-  font-size: 1.1rem;
-  font-weight: 700;
-  border-radius: 10px;
-  text-decoration: none;
-  transition: all 0.2s;
-}
-.evi-cta .evi-cta-btn:hover {
-  background: #f0f4ff;
-  transform: translateY(-1px);
-  box-shadow: 0 4px 16px rgba(0,0,0,0.2);
-}
-.evi-cta .evi-cta-note {
-  margin-top: 14px;
-  font-size: 0.85rem;
-  color: rgba(255, 255, 255, 0.6);
-}
-</style>
-
-<div class="evi-cta">
-  <h2>Ready to Trust Your Documents?</h2>
-  <p>See how Evidoc eliminates document uncertainty. Start free — no credit card required.</p>
-  <div>
-    <a href="https://evidoc.hulkdesign.com" class="evi-cta-btn">Try Evidoc Free</a>
-  </div>
-  <p class="evi-cta-note">Free plan includes 2,000 queries/month · Upgrade anytime</p>
-</div>
-</body></html>
+</body>
+</html>
