@@ -4,6 +4,19 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Evidoc — Homepage Preview</title>
+<!--
+  DESIGN SYSTEM TOKENS
+  ────────────────────
+  Fonts:     DM Serif Display (h1, h2) · Inter (everything else)
+  Blue:      blue-600 (primary) · blue-700 (hover) · blue-100 (light bg) · blue-50 (tint)
+  Gray:      gray-900 (headings) · gray-600 (body) · gray-500 (secondary) · gray-400 (muted)
+  Borders:   border-gray-200 (all cards, dividers) · border-blue-600 (featured/highlight)
+  Radius:    rounded-2xl (cards) · rounded-lg (buttons) · rounded-full (pills, badges)
+  Shadows:   shadow-sm (default cards) · shadow-xl (featured) · shadow-2xl (hero frame)
+  Padding:   p-8 (cards) · py-20 md:py-28 (full sections) · py-12 md:py-14 (compact)
+  h3 weight: font-semibold (600) — never font-bold on card titles
+  Max-width: max-w-5xl (content grids) · max-w-4xl (hero, stats) · max-w-3xl (text blocks)
+-->
 <script src="https://cdn.tailwindcss.com"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -17,7 +30,7 @@
 <body class="bg-white text-gray-800 antialiased">
 
 <!-- ============ HEADER ============ -->
-<header class="sticky top-0 z-50 bg-white/90 backdrop-blur border-b border-gray-100">
+<header class="sticky top-0 z-50 bg-white/90 backdrop-blur border-b border-gray-200">
  <div class="container mx-auto px-6 py-4 flex items-center justify-between">
   <a href="#" class="text-xl font-bold text-gray-900">Evidoc</a>
   <nav class="hidden md:flex items-center gap-8 text-sm font-medium text-gray-600">
@@ -79,7 +92,7 @@
   </div>
 
   <div class="mt-16 grid grid-cols-1 md:grid-cols-2 gap-8 max-w-5xl mx-auto">
-   <div class="bg-gray-50/70 p-8 rounded-2xl border border-gray-200 shadow-sm">
+   <div class="bg-gray-50 p-8 rounded-2xl border border-gray-200 shadow-sm">
     <h3 class="text-xl font-semibold text-gray-900">ChatGPT / Claude / Gemini</h3>
     <p class="mt-2 text-gray-600">Upload files and get answers — but can you trust them? Can you prove them?</p>
     <ul class="mt-6 space-y-4">
@@ -189,17 +202,17 @@
   </div>
 
   <div class="mt-14 grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">
-   <div class="p-8 rounded-2xl border border-gray-100 bg-gray-50/50 hover:shadow-md transition-shadow">
+   <div class="p-8 rounded-2xl border border-gray-200 bg-gray-50 hover:shadow-md transition-shadow">
     <div class="w-10 h-10 bg-blue-100 text-blue-600 rounded-lg flex items-center justify-center text-xl">🎯</div>
     <h3 class="mt-4 text-lg font-semibold text-gray-900">Answers You Can Stand Behind</h3>
     <p class="mt-2 text-gray-600 text-sm leading-relaxed">Every answer is pulled directly from your documents — not generated or paraphrased. If it's not in your files, Evidoc won't make it up.</p>
    </div>
-   <div class="p-8 rounded-2xl border border-gray-100 bg-gray-50/50 hover:shadow-md transition-shadow">
+   <div class="p-8 rounded-2xl border border-gray-200 bg-gray-50 hover:shadow-md transition-shadow">
     <div class="w-10 h-10 bg-blue-100 text-blue-600 rounded-lg flex items-center justify-center text-xl">🔗</div>
     <h3 class="mt-4 text-lg font-semibold text-gray-900">One Click to See the Source</h3>
     <p class="mt-2 text-gray-600 text-sm leading-relaxed">Every citation is a link. Click it — you see the exact sentence, highlighted on the original page. Proof in seconds, not minutes.</p>
    </div>
-   <div class="p-8 rounded-2xl border border-gray-100 bg-gray-50/50 hover:shadow-md transition-shadow">
+   <div class="p-8 rounded-2xl border border-gray-200 bg-gray-50 hover:shadow-md transition-shadow">
     <div class="w-10 h-10 bg-blue-100 text-blue-600 rounded-lg flex items-center justify-center text-xl">🧠</div>
     <h3 class="mt-4 text-lg font-semibold text-gray-900">Sees What You'd Miss</h3>
     <p class="mt-2 text-gray-600 text-sm leading-relaxed">"Acme Corp" on page 3 and "ACME Corporation" on page 47? Same entity. Evidoc links them automatically — across hundreds of pages.</p>
@@ -219,19 +232,19 @@
   </div>
 
   <div class="mt-14 grid grid-cols-1 lg:grid-cols-3 gap-6 max-w-5xl mx-auto">
-   <div class="bg-white p-7 rounded-2xl border border-gray-200">
+   <div class="bg-white p-8 rounded-2xl border border-gray-200">
     <span class="inline-block px-3 py-1 text-xs font-medium text-blue-800 bg-blue-100 rounded-full">Legal</span>
     <h3 class="mt-3 text-lg font-semibold text-gray-900">"Which contracts have a change-of-control clause?"</h3>
     <p class="mt-2 text-sm text-gray-600 leading-relaxed">Before: 12 paralegals, 6 weeks. With Evidoc: one question, every clause cited.</p>
    </div>
 
-   <div class="bg-white p-7 rounded-2xl border border-gray-200">
+   <div class="bg-white p-8 rounded-2xl border border-gray-200">
     <span class="inline-block px-3 py-1 text-xs font-medium text-green-800 bg-green-100 rounded-full">Finance</span>
     <h3 class="mt-3 text-lg font-semibold text-gray-900">"Do these invoices match the contract terms?"</h3>
     <p class="mt-2 text-sm text-gray-600 leading-relaxed">Before: 500 invoices/month, $230K in overpayments found. With Evidoc: every discrepancy cited.</p>
    </div>
 
-   <div class="bg-white p-7 rounded-2xl border border-gray-200">
+   <div class="bg-white p-8 rounded-2xl border border-gray-200">
     <span class="inline-block px-3 py-1 text-xs font-medium text-purple-800 bg-purple-100 rounded-full">Compliance</span>
     <h3 class="mt-3 text-lg font-semibold text-gray-900">"Where do our policies address data retention?"</h3>
     <p class="mt-2 text-sm text-gray-600 leading-relaxed">Before: 40 docs, 3 days. With Evidoc: exact policy language highlighted. Seconds.</p>
@@ -240,19 +253,19 @@
 
   <!-- Expandable second row -->
   <div id="more-use-cases" class="mt-6 grid grid-cols-1 lg:grid-cols-3 gap-6 max-w-5xl mx-auto hidden">
-   <div class="bg-white p-7 rounded-2xl border border-gray-200">
+   <div class="bg-white p-8 rounded-2xl border border-gray-200">
     <span class="inline-block px-3 py-1 text-xs font-medium text-amber-800 bg-amber-100 rounded-full">Research</span>
     <h3 class="mt-3 text-lg font-semibold text-gray-900">"What do these 50 papers say about treatment X?"</h3>
     <p class="mt-2 text-sm text-gray-600 leading-relaxed">Before: weeks of reading. With Evidoc: consolidated findings, each cited to the source.</p>
    </div>
 
-   <div class="bg-white p-7 rounded-2xl border border-gray-200">
+   <div class="bg-white p-8 rounded-2xl border border-gray-200">
     <span class="inline-block px-3 py-1 text-xs font-medium text-rose-800 bg-rose-100 rounded-full">Real Estate</span>
     <h3 class="mt-3 text-lg font-semibold text-gray-900">"What changed in the counter-offer?"</h3>
     <p class="mt-2 text-sm text-gray-600 leading-relaxed">Before: comparing PDFs side by side. With Evidoc: every difference cross-referenced.</p>
    </div>
 
-   <div class="bg-white p-7 rounded-2xl border border-gray-200">
+   <div class="bg-white p-8 rounded-2xl border border-gray-200">
     <span class="inline-block px-3 py-1 text-xs font-medium text-indigo-800 bg-indigo-100 rounded-full">Personal</span>
     <h3 class="mt-3 text-lg font-semibold text-gray-900">"What does my insurance actually cover?"</h3>
     <p class="mt-2 text-sm text-gray-600 leading-relaxed">Before: 80 pages of legalese. With Evidoc: plain-language answer, exact clause highlighted.</p>
@@ -316,7 +329,7 @@
   <div id="panel-individual" class="mt-12 grid grid-cols-1 md:grid-cols-3 gap-8 max-w-4xl mx-auto">
    <!-- Free -->
    <div class="bg-white p-8 rounded-2xl border border-gray-200 shadow-sm text-center flex flex-col">
-    <h3 class="text-xl font-bold text-gray-900">Free</h3>
+    <h3 class="text-xl font-semibold text-gray-900">Free</h3>
     <div class="mt-4 text-5xl font-extrabold text-gray-900">$0</div>
     <p class="text-sm text-gray-500 mt-2">Get started instantly</p>
     <ul class="mt-6 text-sm text-gray-600 text-left space-y-3 flex-grow">
@@ -325,13 +338,13 @@
      <li>0.5 GB storage</li>
      <li>Multi-document search</li>
     </ul>
-    <a href="https://evidoc.hulkdesign.com" class="mt-8 block py-3 bg-gray-100 text-gray-700 font-semibold rounded-xl hover:bg-gray-200 transition-colors">Get Started Free</a>
+    <a href="https://evidoc.hulkdesign.com" class="mt-8 block py-3 bg-gray-100 text-gray-700 font-semibold rounded-lg hover:bg-gray-200 transition-colors">Get Started Free</a>
     <p class="text-xs text-gray-400 mt-2">No credit card required</p>
    </div>
 
    <!-- Pro -->
    <div class="bg-white p-8 rounded-2xl border border-gray-200 shadow-sm text-center flex flex-col">
-    <h3 class="text-xl font-bold text-gray-900">Pro</h3>
+    <h3 class="text-xl font-semibold text-gray-900">Pro</h3>
     <div class="mt-4 text-5xl font-extrabold text-gray-900">$10<span class="text-lg font-normal text-gray-500">/mo</span></div>
     <p class="text-sm text-gray-500 mt-2">For individuals who need more</p>
     <ul class="mt-6 text-sm text-gray-600 text-left space-y-3 flex-grow">
@@ -341,13 +354,13 @@
      <li>2 GB storage</li>
      <li>✅ GraphRAG engine</li>
     </ul>
-    <a href="https://evidoc.hulkdesign.com/#/dashboard" class="mt-8 block py-3 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 transition-colors">Upgrade to Pro</a>
+    <a href="https://evidoc.hulkdesign.com/#/dashboard" class="mt-8 block py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition-colors">Upgrade to Pro</a>
    </div>
 
    <!-- Pro+ -->
    <div class="bg-white p-8 rounded-2xl border-2 border-blue-600 shadow-xl text-center flex flex-col relative ring-4 ring-blue-600/10">
     <span class="absolute -top-3 left-1/2 -translate-x-1/2 bg-blue-600 text-white text-xs font-semibold px-4 py-1 rounded-full">Most Popular</span>
-    <h3 class="text-xl font-bold text-blue-700">Pro+</h3>
+    <h3 class="text-xl font-semibold text-blue-700">Pro+</h3>
     <div class="mt-4 text-5xl font-extrabold text-gray-900">$39<span class="text-lg font-normal text-gray-500">/mo</span></div>
     <p class="text-sm text-gray-500 mt-2">For power users</p>
     <ul class="mt-6 text-sm text-gray-600 text-left space-y-3 flex-grow">
@@ -358,7 +371,7 @@
      <li>✅ Advanced Analytics</li>
      <li>✅ API Access</li>
     </ul>
-    <a href="https://evidoc.hulkdesign.com/#/dashboard" class="mt-8 block py-3 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 transition-colors">Upgrade to Pro+</a>
+    <a href="https://evidoc.hulkdesign.com/#/dashboard" class="mt-8 block py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition-colors">Upgrade to Pro+</a>
    </div>
   </div>
 
@@ -366,7 +379,7 @@
   <div id="panel-business" class="mt-12 grid-cols-1 md:grid-cols-2 gap-8 max-w-3xl mx-auto hidden" style="display: none;">
    <!-- Business -->
    <div class="bg-white p-8 rounded-2xl border border-gray-200 shadow-sm text-center flex flex-col">
-    <h3 class="text-xl font-bold text-gray-900">Business</h3>
+    <h3 class="text-xl font-semibold text-gray-900">Business</h3>
     <div class="mt-4 text-5xl font-extrabold text-gray-900">$19<span class="text-lg font-normal text-gray-500">/user/mo</span></div>
     <p class="text-sm text-gray-500 mt-2">For teams up to 50 users</p>
     <ul class="mt-6 text-sm text-gray-600 text-left space-y-3 flex-grow">
@@ -378,13 +391,13 @@
      <li>✅ Audit Logs</li>
      <li>✅ Policy Controls</li>
     </ul>
-    <a href="https://evidoc.hulkdesign.com/#/dashboard" class="mt-8 block py-3 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 transition-colors">Get Business</a>
+    <a href="https://evidoc.hulkdesign.com/#/dashboard" class="mt-8 block py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition-colors">Get Business</a>
    </div>
 
    <!-- Enterprise -->
    <div class="bg-white p-8 rounded-2xl border-2 border-blue-600 shadow-xl text-center flex flex-col relative ring-4 ring-blue-600/10">
     <span class="absolute -top-3 left-1/2 -translate-x-1/2 bg-blue-600 text-white text-xs font-semibold px-4 py-1 rounded-full">Best Value</span>
-    <h3 class="text-xl font-bold text-blue-700">Enterprise</h3>
+    <h3 class="text-xl font-semibold text-blue-700">Enterprise</h3>
     <div class="mt-4 text-5xl font-extrabold text-gray-900">$39<span class="text-lg font-normal text-gray-500">/user/mo</span></div>
     <p class="text-sm text-gray-500 mt-2">For organizations up to 500 users</p>
     <ul class="mt-6 text-sm text-gray-600 text-left space-y-3 flex-grow">
@@ -394,7 +407,7 @@
      <li>10 GB storage</li>
      <li>✅ Priority Support</li>
     </ul>
-    <a href="https://evidoc.hulkdesign.com/#/dashboard" class="mt-8 block py-3 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 transition-colors">Get Enterprise</a>
+    <a href="https://evidoc.hulkdesign.com/#/dashboard" class="mt-8 block py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition-colors">Get Enterprise</a>
    </div>
   </div>
  </div>
@@ -422,7 +435,7 @@ function switchPricingTab(tab) {
 </script>
 
 <!-- ============ SECTION 8: SECURITY (slim trust strip) ============ -->
-<section class="py-10 bg-gray-50 border-t border-gray-100">
+<section class="py-10 bg-gray-50 border-t border-gray-200">
  <div class="container mx-auto px-6">
   <div class="flex flex-wrap justify-center gap-x-10 gap-y-4 text-center text-sm text-gray-600">
    <span class="inline-flex items-center gap-2"><span class="text-lg">🔒</span> Your data stays yours — never shared or trained on</span>
