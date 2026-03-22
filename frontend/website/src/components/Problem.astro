@@ -1,0 +1,65 @@
+---
+import type { Lang } from "@/i18n/languages";
+import { useTranslations } from "@/i18n/utils";
+
+interface Props { lang: Lang }
+const { lang } = Astro.props;
+const t = useTranslations(lang);
+
+const otherItems = [
+  { q: t("problem.other1q"), a: t("problem.other1a") },
+  { q: t("problem.other2q"), a: t("problem.other2a") },
+  { q: t("problem.other3q"), a: t("problem.other3a") },
+  { q: t("problem.other4q"), a: t("problem.other4a") },
+];
+
+const evidocItems = [
+  { q: t("problem.evidoc1q"), a: t("problem.evidoc1a") },
+  { q: t("problem.evidoc2q"), a: t("problem.evidoc2a") },
+  { q: t("problem.evidoc3q"), a: t("problem.evidoc3a") },
+  { q: t("problem.evidoc4q"), a: t("problem.evidoc4a") },
+];
+---
+
+<section id="problem" class="py-20 md:py-32 bg-apple-bg">
+  <div class="container mx-auto px-6">
+    <div class="text-center max-w-3xl mx-auto">
+      <h2 class="text-3xl md:text-5xl text-apple-text tracking-tight" set:html={t("problem.headline")} />
+      <p class="mt-5 text-lg text-apple-secondary max-w-xl mx-auto">{t("problem.subheadline")}</p>
+    </div>
+
+    <div class="mt-16 grid grid-cols-1 md:grid-cols-2 gap-6 max-w-5xl mx-auto">
+      <!-- Other tools -->
+      <div class="p-8 md:p-10 rounded-2xl bg-white">
+        <h3 class="text-lg font-semibold text-apple-text">{t("problem.otherTitle")}</h3>
+        <ul class="mt-6 space-y-5">
+          {otherItems.map((item) => (
+            <li class="flex items-start gap-3">
+              <span class="text-red-500/70 text-sm mt-0.5">✕</span>
+              <div>
+                <p class="font-medium text-apple-text text-[15px]">{item.q}</p>
+                <p class="text-sm text-apple-secondary mt-0.5">{item.a}</p>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      <!-- Evidoc -->
+      <div class="p-8 md:p-10 rounded-2xl bg-white shadow-lg">
+        <h3 class="text-lg font-semibold text-apple-blue">{t("problem.evidocTitle")}</h3>
+        <ul class="mt-6 space-y-5">
+          {evidocItems.map((item) => (
+            <li class="flex items-start gap-3">
+              <span class="text-apple-green text-sm mt-0.5">✓</span>
+              <div>
+                <p class="font-medium text-apple-text text-[15px]">{item.q}</p>
+                <p class="text-sm text-apple-secondary mt-0.5">{item.a}</p>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>

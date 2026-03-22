@@ -1,0 +1,35 @@
+---
+import type { Lang } from "@/i18n/languages";
+import { useTranslations } from "@/i18n/utils";
+
+interface Props { lang: Lang }
+const { lang } = Astro.props;
+const t = useTranslations(lang);
+
+const steps = [
+  { num: "1", title: t("howItWorks.step1Title"), desc: t("howItWorks.step1Desc") },
+  { num: "2", title: t("howItWorks.step2Title"), desc: t("howItWorks.step2Desc") },
+  { num: "3", title: t("howItWorks.step3Title"), desc: t("howItWorks.step3Desc") },
+];
+---
+
+<section id="how-it-works" class="py-20 md:py-32 bg-apple-bg">
+  <div class="container mx-auto px-6">
+    <div class="text-center max-w-3xl mx-auto">
+      <h2 class="text-3xl md:text-5xl text-apple-text tracking-tight">{t("howItWorks.headline")}</h2>
+      <p class="mt-5 text-lg text-apple-secondary max-w-xl mx-auto">{t("howItWorks.subheadline")}</p>
+    </div>
+
+    <div class="mt-20 grid grid-cols-1 md:grid-cols-3 gap-16 max-w-4xl mx-auto">
+      {steps.map((step) => (
+        <div class="text-center">
+          <div class="w-12 h-12 rounded-full border border-apple-blue/30 text-apple-blue text-lg font-medium flex items-center justify-center mx-auto">
+            {step.num}
+          </div>
+          <h3 class="mt-4 text-xl font-semibold text-apple-text">{step.title}</h3>
+          <p class="mt-3 text-apple-secondary leading-relaxed">{step.desc}</p>
+        </div>
+      ))}
+    </div>
+  </div>
+</section>

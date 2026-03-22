@@ -1,0 +1,23 @@
+---
+import LanguageSwitcher from "./LanguageSwitcher.astro";
+import type { Lang } from "@/i18n/languages";
+import { useTranslations } from "@/i18n/utils";
+
+interface Props { lang: Lang }
+const { lang } = Astro.props;
+const t = useTranslations(lang);
+---
+
+<nav class="sticky top-0 z-50 backdrop-blur-xl backdrop-saturate-[180%]" style="background-color: rgba(29,29,31,0.72)">
+  <div class="container mx-auto px-6 flex items-center justify-between h-11">
+    <a href="/" class="text-sm font-semibold text-white/90 tracking-tight">{t("nav.brand")}</a>
+    <div class="hidden md:flex items-center gap-7 text-xs text-white/80">
+      <a href="#how-it-works" class="hover:text-white transition-colors">{t("nav.howItWorks")}</a>
+      <a href="#features" class="hover:text-white transition-colors">{t("nav.features")}</a>
+      <a href="#use-cases" class="hover:text-white transition-colors">{t("nav.useCases")}</a>
+      <a href="#pricing" class="hover:text-white transition-colors">{t("nav.pricing")}</a>
+      <a href="https://evidoc.hulkdesign.com" class="text-[#2997ff] hover:text-white transition-colors">{t("nav.cta")}</a>
+      <LanguageSwitcher lang={lang} />
+    </div>
+  </div>
+</nav>

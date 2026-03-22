@@ -1,0 +1,26 @@
+---
+import { languages, type Lang } from "@/i18n/languages";
+import { getLocalePath } from "@/i18n/utils";
+
+interface Props { lang: Lang }
+const { lang } = Astro.props;
+---
+
+<div class="relative group">
+  <button class="text-white/60 hover:text-white text-xs transition-colors">
+    {languages[lang].flag} {languages[lang].name}
+  </button>
+  <div class="absolute right-0 top-full mt-1 bg-white rounded-lg shadow-xl py-1 min-w-[140px] opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50">
+    {Object.entries(languages).map(([code, { name, flag }]) => (
+      <a
+        href={getLocalePath(code, "/")}
+        class:list={[
+          "block px-4 py-1.5 text-xs hover:bg-apple-bg transition-colors",
+          code === lang ? "text-apple-blue font-medium" : "text-apple-text",
+        ]}
+      >
+        {flag} {name}
+      </a>
+    ))}
+  </div>
+</div>

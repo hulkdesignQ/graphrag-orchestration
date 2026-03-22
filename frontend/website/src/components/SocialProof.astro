@@ -1,0 +1,33 @@
+---
+import type { Lang } from "@/i18n/languages";
+import { useTranslations } from "@/i18n/utils";
+
+interface Props { lang: Lang }
+const { lang } = Astro.props;
+const t = useTranslations(lang);
+
+const stats = [
+  { value: t("socialProof.stat1"), label: t("socialProof.stat1Label") },
+  { value: t("socialProof.stat2"), label: t("socialProof.stat2Label") },
+  { value: t("socialProof.stat3"), label: t("socialProof.stat3Label") },
+  { value: t("socialProof.stat4"), label: t("socialProof.stat4Label") },
+];
+---
+
+<section class="py-16 md:py-24 bg-[#1d1d1f]">
+  <div class="container mx-auto px-6">
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-8 max-w-4xl mx-auto text-center">
+      {stats.map((s) => (
+        <div>
+          <div class="text-4xl md:text-5xl font-bold text-white">{s.value}</div>
+          <p class="mt-2 text-sm text-white/40">{s.label}</p>
+        </div>
+      ))}
+    </div>
+
+    <div class="mt-14 max-w-2xl mx-auto text-center">
+      <p class="text-xl text-white/60 italic leading-relaxed">{t("socialProof.testimonial")}</p>
+      <p class="mt-4 text-sm text-white/25">{t("socialProof.testimonialAuthor")}</p>
+    </div>
+  </div>
+</section>

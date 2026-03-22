@@ -1,0 +1,139 @@
+---
+import type { Lang } from "@/i18n/languages";
+import { useTranslations } from "@/i18n/utils";
+
+interface Props { lang: Lang }
+const { lang } = Astro.props;
+const t = useTranslations(lang);
+---
+
+<section id="pricing" class="py-20 md:py-32 bg-white">
+  <div class="container mx-auto px-6">
+    <div class="text-center max-w-3xl mx-auto">
+      <h2 class="text-3xl md:text-5xl text-apple-text tracking-tight">{t("pricing.headline")}</h2>
+      <p class="mt-5 text-lg text-apple-secondary">{t("pricing.subheadline")}</p>
+    </div>
+
+    <!-- Tab toggle -->
+    <div class="flex justify-center mt-10">
+      <div class="inline-flex bg-apple-bg rounded-full p-1">
+        <button id="tab-individual" class="px-7 py-2 rounded-full text-sm font-medium transition-all bg-white text-apple-text shadow-sm">{t("pricing.tabIndividual")}</button>
+        <button id="tab-business" class="px-7 py-2 rounded-full text-sm font-medium transition-all text-apple-secondary">{t("pricing.tabBusiness")}</button>
+      </div>
+    </div>
+
+    <!-- INDIVIDUAL PLANS -->
+    <div id="panel-individual" class="mt-14 grid grid-cols-1 md:grid-cols-3 gap-6 max-w-4xl mx-auto">
+      <!-- Free -->
+      <div class="bg-apple-bg p-8 rounded-2xl text-center flex flex-col">
+        <h3 class="text-xl font-semibold text-apple-text">{t("pricing.free.name")}</h3>
+        <div class="mt-4 text-5xl font-bold text-apple-text">{t("pricing.free.price")}</div>
+        <p class="text-sm text-apple-secondary mt-2">{t("pricing.free.desc")}</p>
+        <ul class="mt-8 text-sm text-apple-secondary text-left space-y-3 flex-grow">
+          <li>{t("pricing.free.f1")}</li>
+          <li>{t("pricing.free.f2")}</li>
+          <li>{t("pricing.free.f3")}</li>
+          <li>{t("pricing.free.f4")}</li>
+        </ul>
+        <a href="https://evidoc.hulkdesign.com" class="mt-8 block py-3 text-apple-blue font-medium rounded-full border border-apple-blue/30 hover:bg-apple-blue/5 transition-colors">{t("pricing.free.cta")}</a>
+        <p class="text-xs text-apple-tertiary mt-2">{t("pricing.free.note")}</p>
+      </div>
+
+      <!-- Pro -->
+      <div class="bg-apple-bg p-8 rounded-2xl text-center flex flex-col">
+        <h3 class="text-xl font-semibold text-apple-text">{t("pricing.pro.name")}</h3>
+        <div class="mt-4 text-5xl font-bold text-apple-text">{t("pricing.pro.price")}<span class="text-lg font-normal text-apple-secondary">{t("pricing.pro.period")}</span></div>
+        <p class="text-sm text-apple-secondary mt-2">{t("pricing.pro.desc")}</p>
+        <ul class="mt-8 text-sm text-apple-secondary text-left space-y-3 flex-grow">
+          <li>{t("pricing.pro.f1")}</li>
+          <li>{t("pricing.pro.f2")}</li>
+          <li>{t("pricing.pro.f3")}</li>
+          <li>{t("pricing.pro.f4")}</li>
+          <li>{t("pricing.pro.f5")}</li>
+        </ul>
+        <a href="https://evidoc.hulkdesign.com/#/dashboard" class="mt-8 block py-3 bg-apple-blue text-white font-medium rounded-full hover:bg-apple-bluehover transition-colors">{t("pricing.pro.cta")}</a>
+      </div>
+
+      <!-- Pro+ -->
+      <div class="bg-white p-8 rounded-2xl text-center flex flex-col relative shadow-lg ring-1 ring-apple-blue/20">
+        <span class="absolute -top-3 left-1/2 -translate-x-1/2 bg-apple-blue text-white text-xs font-medium px-4 py-1 rounded-full">{t("pricing.proplus.badge")}</span>
+        <h3 class="text-xl font-semibold text-apple-blue">{t("pricing.proplus.name")}</h3>
+        <div class="mt-4 text-5xl font-bold text-apple-text">{t("pricing.proplus.price")}<span class="text-lg font-normal text-apple-secondary">{t("pricing.proplus.period")}</span></div>
+        <p class="text-sm text-apple-secondary mt-2">{t("pricing.proplus.desc")}</p>
+        <ul class="mt-8 text-sm text-apple-secondary text-left space-y-3 flex-grow">
+          <li>{t("pricing.proplus.f1")}</li>
+          <li>{t("pricing.proplus.f2")}</li>
+          <li>{t("pricing.proplus.f3")}</li>
+          <li>{t("pricing.proplus.f4")}</li>
+          <li>{t("pricing.proplus.f5")}</li>
+          <li>{t("pricing.proplus.f6")}</li>
+        </ul>
+        <a href="https://evidoc.hulkdesign.com/#/dashboard" class="mt-8 block py-3 bg-apple-blue text-white font-medium rounded-full hover:bg-apple-bluehover transition-colors">{t("pricing.proplus.cta")}</a>
+      </div>
+    </div>
+
+    <!-- BUSINESS PLANS -->
+    <div id="panel-business" class="mt-14 grid-cols-1 md:grid-cols-2 gap-6 max-w-3xl mx-auto hidden" style="display: none;">
+      <!-- Business -->
+      <div class="bg-apple-bg p-8 rounded-2xl text-center flex flex-col">
+        <h3 class="text-xl font-semibold text-apple-text">{t("pricing.business.name")}</h3>
+        <div class="mt-4 text-5xl font-bold text-apple-text">{t("pricing.business.price")}<span class="text-lg font-normal text-apple-secondary">{t("pricing.business.period")}</span></div>
+        <p class="text-sm text-apple-secondary mt-2">{t("pricing.business.desc")}</p>
+        <ul class="mt-8 text-sm text-apple-secondary text-left space-y-3 flex-grow">
+          <li>{t("pricing.business.f1")}</li>
+          <li>{t("pricing.business.f2")}</li>
+          <li>{t("pricing.business.f3")}</li>
+          <li>{t("pricing.business.f4")}</li>
+          <li>{t("pricing.business.f5")}</li>
+          <li>{t("pricing.business.f6")}</li>
+          <li>{t("pricing.business.f7")}</li>
+        </ul>
+        <a href="https://evidoc.hulkdesign.com/#/dashboard" class="mt-8 block py-3 bg-apple-blue text-white font-medium rounded-full hover:bg-apple-bluehover transition-colors">{t("pricing.business.cta")}</a>
+      </div>
+
+      <!-- Enterprise -->
+      <div class="bg-white p-8 rounded-2xl text-center flex flex-col relative shadow-lg ring-1 ring-apple-blue/20">
+        <span class="absolute -top-3 left-1/2 -translate-x-1/2 bg-apple-blue text-white text-xs font-medium px-4 py-1 rounded-full">{t("pricing.enterprise.badge")}</span>
+        <h3 class="text-xl font-semibold text-apple-blue">{t("pricing.enterprise.name")}</h3>
+        <div class="mt-4 text-5xl font-bold text-apple-text">{t("pricing.enterprise.price")}<span class="text-lg font-normal text-apple-secondary">{t("pricing.enterprise.period")}</span></div>
+        <p class="text-sm text-apple-secondary mt-2">{t("pricing.enterprise.desc")}</p>
+        <ul class="mt-8 text-sm text-apple-secondary text-left space-y-3 flex-grow">
+          <li>{t("pricing.enterprise.f1")}</li>
+          <li>{t("pricing.enterprise.f2")}</li>
+          <li>{t("pricing.enterprise.f3")}</li>
+          <li>{t("pricing.enterprise.f4")}</li>
+          <li>{t("pricing.enterprise.f5")}</li>
+        </ul>
+        <a href="https://evidoc.hulkdesign.com/#/dashboard" class="mt-8 block py-3 bg-apple-blue text-white font-medium rounded-full hover:bg-apple-bluehover transition-colors">{t("pricing.enterprise.cta")}</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+  function setupPricingTabs() {
+    const indPanel = document.getElementById("panel-individual");
+    const bizPanel = document.getElementById("panel-business");
+    const indTab = document.getElementById("tab-individual");
+    const bizTab = document.getElementById("tab-business");
+
+    const activeClasses = "px-7 py-2 rounded-full text-sm font-medium transition-all bg-white text-apple-text shadow-sm";
+    const inactiveClasses = "px-7 py-2 rounded-full text-sm font-medium transition-all text-apple-secondary";
+
+    indTab?.addEventListener("click", () => {
+      indPanel!.style.display = "grid";
+      bizPanel!.style.display = "none";
+      indTab!.className = activeClasses;
+      bizTab!.className = inactiveClasses;
+    });
+
+    bizTab?.addEventListener("click", () => {
+      indPanel!.style.display = "none";
+      bizPanel!.style.display = "grid";
+      bizPanel!.classList.add("grid-cols-1", "md:grid-cols-2");
+      bizTab!.className = activeClasses;
+      indTab!.className = inactiveClasses;
+    });
+  }
+  setupPricingTabs();
+</script>

@@ -1,0 +1,14 @@
+---
+import type { Lang } from "@/i18n/languages";
+import { useTranslations } from "@/i18n/utils";
+
+interface Props { lang: Lang }
+const { lang } = Astro.props;
+const t = useTranslations(lang);
+---
+
+<footer class="py-6 border-t border-[#d2d2d7]">
+  <div class="container mx-auto px-6 text-center text-xs text-apple-tertiary">
+    {t("footer.copyright")}
+  </div>
+</footer>
