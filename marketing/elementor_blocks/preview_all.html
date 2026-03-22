@@ -5,488 +5,468 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Evidoc — Homepage Preview</title>
 <!--
-  DESIGN SYSTEM TOKENS (v2 — Bold)
-  ─────────────────────────────────
+  DESIGN SYSTEM TOKENS
+  ────────────────────
   Fonts:     DM Serif Display (h1, h2) · Inter (everything else)
-  Navy:      slate-900 #0f172a (hero, dark sections, nav CTA)
-  Accent:    blue-400 #60a5fa (on dark) · blue-500 #3b82f6 (on light)
-  Light:     white (cards) · slate-50 #f8fafc (alt bg)
-  Text:      white (on dark) · slate-900 (headings on light) · slate-600 (body) · slate-400 (muted)
-  Borders:   slate-700 (on dark) · slate-200 (on light) · blue-500 (featured)
-  Radius:    rounded-2xl (cards) · rounded-full (buttons, nav, pills, badges)
-  Shadows:   shadow-sm (cards) · shadow-xl (featured) · shadow-2xl (hero)
-  Buttons:   Pill: dark bg + accent text + arrow circle (primary)
-  Nav:       Floating pill, backdrop-blur, rounded-full
+  Blue:      blue-600 (primary) · blue-700 (hover) · blue-100 (light bg) · blue-50 (tint)
+  Gray:      gray-900 (headings) · gray-600 (body) · gray-500 (secondary) · gray-400 (muted)
+  Borders:   border-gray-200 (all cards, dividers) · border-blue-600 (featured/highlight)
+  Radius:    rounded-2xl (cards) · rounded-lg (buttons) · rounded-full (pills, badges)
+  Shadows:   shadow-sm (default cards) · shadow-xl (featured) · shadow-2xl (hero frame)
+  Padding:   p-8 (cards) · py-20 md:py-28 (full sections) · py-12 md:py-14 (compact)
+  h3 weight: font-semibold (600) — never font-bold on card titles
+  Max-width: max-w-5xl (content grids) · max-w-4xl (hero, stats) · max-w-3xl (text blocks)
 -->
 <script src="https://cdn.tailwindcss.com"></script>
-<script>
-tailwind.config = {
-  theme: {
-    extend: {
-      keyframes: {
-        'fade-up': {
-          '0%': { opacity: '0', transform: 'translateY(24px)' },
-          '100%': { opacity: '1', transform: 'translateY(0)' },
-        }
-      },
-      animation: {
-        'fade-up': 'fade-up 0.6s ease-out forwards',
-        'fade-up-d1': 'fade-up 0.6s ease-out 0.1s forwards',
-        'fade-up-d2': 'fade-up 0.6s ease-out 0.2s forwards',
-        'fade-up-d3': 'fade-up 0.6s ease-out 0.3s forwards',
-        'fade-up-d4': 'fade-up 0.6s ease-out 0.4s forwards',
-      }
-    }
-  }
-}
-</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
-  body { font-family: 'Inter', sans-serif; }
-  h1, h2 { font-family: 'DM Serif Display', serif; font-weight: 400; }
-  html { scroll-behavior: smooth; }
+ body { font-family: 'Inter', sans-serif; }
+ h1, h2 { font-family: 'DM Serif Display', serif; font-weight: 400; }
+ html { scroll-behavior: smooth; }
 </style>
 </head>
-<body class="bg-white text-slate-800 antialiased">
+<body class="bg-white text-gray-800 antialiased">
 
-<!-- ============ HEADER (floating pill nav) ============ -->
-<header class="fixed top-0 left-0 right-0 z-50 flex justify-center px-4 pt-4">
-  <div class="flex items-center justify-between w-full max-w-5xl px-6 py-3 bg-white/90 backdrop-blur-lg rounded-full shadow-lg shadow-slate-900/5 border border-slate-200/60">
-    <a href="#" class="text-lg font-bold text-slate-900 tracking-tight">Evidoc</a>
-    <nav class="hidden md:flex items-center gap-8 text-sm font-medium text-slate-500">
-      <a href="#how-it-works" class="hover:text-slate-900 transition-colors">How It Works</a>
-      <a href="#features" class="hover:text-slate-900 transition-colors">Features</a>
-      <a href="#use-cases" class="hover:text-slate-900 transition-colors">Use Cases</a>
-      <a href="#pricing" class="hover:text-slate-900 transition-colors">Pricing</a>
-      <a href="https://evidoc.hulkdesign.com" class="inline-flex items-center gap-2 pl-5 pr-1.5 py-1.5 bg-slate-900 text-blue-300 font-semibold rounded-full hover:bg-slate-800 transition-colors group">
-        Try Free
-        <span class="w-7 h-7 bg-blue-400 rounded-full flex items-center justify-center text-slate-900 group-hover:rotate-[-45deg] transition-transform text-sm">&#8594;</span>
-      </a>
-    </nav>
-  </div>
+<!-- ============ HEADER ============ -->
+<header class="sticky top-0 z-50 bg-white/90 backdrop-blur border-b border-gray-200">
+ <div class="container mx-auto px-6 py-4 flex items-center justify-between">
+  <a href="#" class="text-xl font-bold text-gray-900">Evidoc</a>
+  <nav class="hidden md:flex items-center gap-8 text-sm font-medium text-gray-600">
+   <a href="#how-it-works" class="hover:text-blue-600 transition-colors">How It Works</a>
+   <a href="#features" class="hover:text-blue-600 transition-colors">Features</a>
+   <a href="#use-cases" class="hover:text-blue-600 transition-colors">Use Cases</a>
+   <a href="#pricing" class="hover:text-blue-600 transition-colors">Pricing</a>
+   <a href="https://evidoc.hulkdesign.com" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">Try Free</a>
+  </nav>
+ </div>
 </header>
 
-<!-- ============ SECTION 1: HERO (dark, bold) ============ -->
-<section class="pt-32 pb-20 md:pt-44 md:pb-28 bg-slate-900 relative overflow-hidden">
-  <div class="absolute inset-0 bg-gradient-to-br from-blue-900/20 via-transparent to-indigo-900/20"></div>
-
-  <div class="container mx-auto px-6 text-center max-w-4xl relative z-10">
-    <span class="inline-flex items-center gap-2 px-4 py-1.5 bg-blue-500/10 border border-blue-400/20 rounded-full text-blue-400 text-sm font-medium mb-6 opacity-0 animate-fade-up">
-      &#10022; Introducing Evidoc
-    </span>
-    <h1 class="text-4xl md:text-6xl lg:text-7xl text-white leading-[1.1] opacity-0 animate-fade-up-d1">
-      What if every AI answer<br>came with <span class="text-blue-400">proof?</span>
-    </h1>
-    <p class="mt-6 text-lg md:text-xl text-slate-400 max-w-2xl mx-auto opacity-0 animate-fade-up-d2">
-      Ask a question. Get an answer. Click the citation &#8212; see the exact sentence highlighted on the original page.
-    </p>
-    <div class="mt-10 flex justify-center gap-4 flex-wrap opacity-0 animate-fade-up-d3">
-      <a href="https://evidoc.hulkdesign.com" class="inline-flex items-center gap-3 pl-7 pr-2 py-2 bg-white text-slate-900 font-semibold rounded-full hover:bg-blue-50 transition-colors text-base group">
-        Try Evidoc Free
-        <span class="w-9 h-9 bg-blue-500 rounded-full flex items-center justify-center text-white group-hover:rotate-[-45deg] transition-transform text-lg">&#8594;</span>
-      </a>
-      <a href="#demo-video" class="inline-flex items-center gap-2 px-7 py-3 border border-slate-700 text-slate-300 font-medium rounded-full hover:border-slate-500 hover:text-white transition-colors text-base">
-        &#9654; Watch Demo
-      </a>
-    </div>
-    <p class="mt-5 text-sm text-slate-500 opacity-0 animate-fade-up-d4">No credit card required &#183; 15+ formats &#183; 13 languages</p>
-
-    <!-- Product screenshot / demo video -->
-    <div class="mt-14 mx-auto max-w-4xl rounded-2xl overflow-hidden shadow-2xl shadow-blue-500/10 border border-slate-700/50 opacity-0 animate-fade-up-d4">
-      <div class="flex items-center gap-1.5 px-4 py-3 bg-slate-800 border-b border-slate-700/50">
-        <span class="w-2.5 h-2.5 rounded-full bg-red-400/80"></span>
-        <span class="w-2.5 h-2.5 rounded-full bg-yellow-400/80"></span>
-        <span class="w-2.5 h-2.5 rounded-full bg-green-400/80"></span>
-      </div>
-      <div class="bg-gradient-to-br from-slate-800 to-slate-900 py-24 px-8 text-center">
-        <div class="text-5xl mb-4 opacity-40">&#128444;</div>
-        <p class="text-slate-500 font-medium">Product screenshot or demo video</p>
-        <p class="text-slate-600 text-sm mt-1">Question &#8594; answer with citations &#8594; click &#8594; highlighted source</p>
-      </div>
-    </div>
+<!-- ============ SECTION 1: HERO (Show the Moment) ============ -->
+<section class="py-20 md:py-28 bg-gradient-to-b from-blue-50 to-white">
+ <div class="container mx-auto px-6 text-center max-w-4xl">
+  <h6 class="text-sm font-semibold text-blue-600 uppercase tracking-wider mb-4">Introducing Evidoc</h6>
+  <h1 class="text-4xl md:text-6xl text-gray-900 leading-tight">
+   What if every AI answer<br>came with proof?
+  </h1>
+  <p class="mt-6 text-lg md:text-xl text-gray-600 max-w-2xl mx-auto">
+   Ask a question. Get an answer. Click the citation — see the exact sentence highlighted on the original page. That's Evidoc.
+  </p>
+  <div class="mt-8 flex justify-center gap-4 flex-wrap">
+   <a href="https://evidoc.hulkdesign.com" class="inline-block px-8 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition-colors text-lg">
+    Try Evidoc Free
+   </a>
+   <a href="#demo-video" class="inline-flex items-center gap-2 px-7 py-3 border border-gray-300 text-gray-700 font-semibold rounded-lg hover:bg-gray-50 transition-colors text-lg">
+    ▶ Watch Demo
+   </a>
   </div>
+  <p class="mt-4 text-sm text-gray-400">No credit card required · 15+ formats · 13 languages</p>
+
+  <!-- Product screenshot / demo video -->
+  <div class="mt-12 mx-auto max-w-4xl rounded-2xl overflow-hidden shadow-2xl border border-gray-200">
+   <div class="flex items-center gap-1.5 px-4 py-3 bg-gray-800">
+    <span class="w-2.5 h-2.5 rounded-full bg-red-500"></span>
+    <span class="w-2.5 h-2.5 rounded-full bg-yellow-400"></span>
+    <span class="w-2.5 h-2.5 rounded-full bg-green-500"></span>
+   </div>
+   <div class="bg-gradient-to-br from-blue-50 to-indigo-50 py-20 px-8 text-center">
+    <!-- Replace with: <img src="screenshot.png" alt="Evidoc" class="w-full"> -->
+    <!-- Or: <video src="demo.mp4" autoplay muted loop playsinline class="w-full"></video> -->
+    <div class="text-5xl mb-4">🖼️</div>
+    <p class="text-gray-500 font-medium">Product screenshot or demo video goes here</p>
+    <p class="text-gray-400 text-sm mt-1">Show: question → answer with citations → click → highlighted source sentence</p>
+   </div>
+  </div>
+ </div>
 </section>
 
-<!-- ============ SECTION 2: THE PROBLEM (light, contrast) ============ -->
+<!-- ============ SECTION 2: THE PROBLEM ============ -->
 <section id="problem" class="py-20 md:py-28 bg-white">
-  <div class="container mx-auto px-6">
-    <div class="text-center max-w-3xl mx-auto">
-      <h2 class="text-3xl md:text-4xl text-slate-900">You've Tried the AI Chatbots. You Know the Limits.</h2>
-      <p class="mt-4 text-lg text-slate-600">
-        ChatGPT, Claude, and Gemini can upload your files. But can you trust what comes back?
-      </p>
-    </div>
-
-    <div class="mt-16 grid grid-cols-1 md:grid-cols-2 gap-8 max-w-5xl mx-auto">
-      <div class="bg-slate-50 p-8 rounded-2xl border border-slate-200">
-        <h3 class="text-xl font-semibold text-slate-900">ChatGPT / Claude / Gemini</h3>
-        <p class="mt-2 text-slate-600">Upload files and get answers &#8212; but can you trust them?</p>
-        <ul class="mt-6 space-y-4">
-          <li class="flex items-start">
-            <span class="text-red-500 font-bold mr-3 mt-0.5">&#10005;</span>
-            <span class="text-slate-600"><strong class="text-slate-700">"Is this answer correct?"</strong> You read and hope. No way to verify.</span>
-          </li>
-          <li class="flex items-start">
-            <span class="text-red-500 font-bold mr-3 mt-0.5">&#10005;</span>
-            <span class="text-slate-600"><strong class="text-slate-700">"Where does it say that?"</strong> You get a summary, then spend 20 minutes searching.</span>
-          </li>
-          <li class="flex items-start">
-            <span class="text-red-500 font-bold mr-3 mt-0.5">&#10005;</span>
-            <span class="text-slate-600"><strong class="text-slate-700">"Upload everything again?"</strong> New chat = start over. Files aren't remembered.</span>
-          </li>
-          <li class="flex items-start">
-            <span class="text-red-500 font-bold mr-3 mt-0.5">&#10005;</span>
-            <span class="text-slate-600"><strong class="text-slate-700">"Who can see my files?"</strong> Shared infrastructure. Privacy policies change.</span>
-          </li>
-        </ul>
-      </div>
-
-      <div class="bg-white p-8 rounded-2xl border-2 border-blue-500 shadow-xl ring-4 ring-blue-500/10">
-        <h3 class="text-xl font-semibold text-blue-600">Evidoc</h3>
-        <p class="mt-2 text-slate-600">A private knowledge base you can trust &#8212; every answer comes with proof.</p>
-        <ul class="mt-6 space-y-4">
-          <li class="flex items-start">
-            <span class="text-emerald-500 font-bold mr-3 mt-0.5">&#10003;</span>
-            <span class="text-slate-600"><strong class="text-slate-700">"I see exactly where it came from."</strong> Click any citation &#8594; highlighted source.</span>
-          </li>
-          <li class="flex items-start">
-            <span class="text-emerald-500 font-bold mr-3 mt-0.5">&#10003;</span>
-            <span class="text-slate-600"><strong class="text-slate-700">"Verified in one click."</strong> The proof is built into every answer.</span>
-          </li>
-          <li class="flex items-start">
-            <span class="text-emerald-500 font-bold mr-3 mt-0.5">&#10003;</span>
-            <span class="text-slate-600"><strong class="text-slate-700">"My documents are always there."</strong> Upload once, ask anytime.</span>
-          </li>
-          <li class="flex items-start">
-            <span class="text-emerald-500 font-bold mr-3 mt-0.5">&#10003;</span>
-            <span class="text-slate-600"><strong class="text-slate-700">"My data, my rules."</strong> Isolated, private, never used for training.</span>
-          </li>
-        </ul>
-      </div>
-    </div>
+ <div class="container mx-auto px-6">
+  <div class="text-center max-w-3xl mx-auto">
+   <h2 class="text-3xl md:text-4xl text-gray-900">You've Tried the AI Chatbots. You Know the Limits.</h2>
+   <p class="mt-4 text-lg text-gray-600">
+    ChatGPT, Claude, and Gemini can upload your files. But can you trust what comes back?
+   </p>
   </div>
+
+  <div class="mt-16 grid grid-cols-1 md:grid-cols-2 gap-8 max-w-5xl mx-auto">
+   <div class="bg-gray-50 p-8 rounded-2xl border border-gray-200 shadow-sm">
+    <h3 class="text-xl font-semibold text-gray-900">ChatGPT / Claude / Gemini</h3>
+    <p class="mt-2 text-gray-600">Upload files and get answers — but can you trust them? Can you prove them?</p>
+    <ul class="mt-6 space-y-4">
+     <li class="flex items-start">
+      <span class="text-red-500 font-bold mr-3 mt-0.5">✕</span>
+      <span><strong class="text-gray-700">"Is this answer actually correct?"</strong> You read the response and hope it's right. No easy way to verify.</span>
+     </li>
+     <li class="flex items-start">
+      <span class="text-red-500 font-bold mr-3 mt-0.5">✕</span>
+      <span><strong class="text-gray-700">"Where exactly does it say that?"</strong> You get a summary, then spend 20 minutes searching the original document to confirm.</span>
+     </li>
+     <li class="flex items-start">
+      <span class="text-red-500 font-bold mr-3 mt-0.5">✕</span>
+      <span><strong class="text-gray-700">"I have to upload everything again?"</strong> New chat session = start over. Your files aren't remembered.</span>
+     </li>
+     <li class="flex items-start">
+      <span class="text-red-500 font-bold mr-3 mt-0.5">✕</span>
+      <span><strong class="text-gray-700">"Who else can see what I uploaded?"</strong> Your sensitive documents are processed on shared infrastructure. Privacy policies change without notice.</span>
+     </li>
+    </ul>
+   </div>
+
+   <div class="bg-white p-8 rounded-2xl border-2 border-blue-600 shadow-xl ring-4 ring-blue-600/10">
+    <h3 class="text-xl font-semibold text-blue-700">Evidoc</h3>
+    <p class="mt-2 text-gray-600">A private knowledge base you can trust — every answer comes with proof.</p>
+    <ul class="mt-6 space-y-4">
+     <li class="flex items-start">
+      <span class="text-green-500 font-bold mr-3 mt-0.5">✓</span>
+      <span><strong class="text-gray-700">"I can see exactly where it came from."</strong> Click any citation → see the exact sentence highlighted on the original page.</span>
+     </li>
+     <li class="flex items-start">
+      <span class="text-green-500 font-bold mr-3 mt-0.5">✓</span>
+      <span><strong class="text-gray-700">"Verified in one click, not twenty minutes."</strong> No manual searching. The proof is built into every answer.</span>
+     </li>
+     <li class="flex items-start">
+      <span class="text-green-500 font-bold mr-3 mt-0.5">✓</span>
+      <span><strong class="text-gray-700">"My documents are always there."</strong> Upload once, ask anytime. Your knowledge base grows with you.</span>
+     </li>
+     <li class="flex items-start">
+      <span class="text-green-500 font-bold mr-3 mt-0.5">✓</span>
+      <span><strong class="text-gray-700">"My documents, my cloud, my rules."</strong> Your data is isolated in a secure, private environment. Never shared with other users or used for AI training. Share with your team when you choose to.</span>
+     </li>
+    </ul>
+   </div>
+  </div>
+ </div>
 </section>
 
-<!-- ============ SECTION 2.5: IDENTITY (compact breather) ============ -->
-<section class="py-12 md:py-14 bg-slate-50">
-  <div class="container mx-auto px-6 max-w-2xl text-center">
-    <h2 class="text-xl md:text-2xl text-slate-900">Sound familiar?</h2>
-    <div class="mt-6 flex flex-wrap justify-center gap-3">
-      <span class="inline-flex items-center gap-2 bg-white px-4 py-2.5 rounded-full border border-slate-200 text-sm text-slate-700 shadow-sm">&#128269; Ctrl+F through 100-page PDFs</span>
-      <span class="inline-flex items-center gap-2 bg-white px-4 py-2.5 rounded-full border border-slate-200 text-sm text-slate-700 shadow-sm">&#128553; Read the same paragraph five times</span>
-      <span class="inline-flex items-center gap-2 bg-white px-4 py-2.5 rounded-full border border-slate-200 text-sm text-slate-700 shadow-sm">&#128228; Need answers with proof for your boss</span>
-      <span class="inline-flex items-center gap-2 bg-white px-4 py-2.5 rounded-full border border-slate-200 text-sm text-slate-700 shadow-sm">&#9200; Wish you could just ask your documents</span>
-    </div>
-    <p class="mt-6 text-base text-slate-500">You're not alone. Here's how Evidoc fixes this &#8212; in three steps.</p>
+<!-- ============ SECTION 2.5: USER IDENTITY (compact breather) ============ -->
+<section class="py-12 md:py-14 bg-gradient-to-b from-gray-50 to-white">
+ <div class="container mx-auto px-6 max-w-2xl text-center">
+  <h2 class="text-xl md:text-2xl text-gray-900">Sound familiar?</h2>
+  <div class="mt-6 flex flex-wrap justify-center gap-3">
+   <span class="inline-flex items-center gap-2 bg-white px-4 py-2.5 rounded-full border border-gray-200 text-sm text-gray-700 shadow-sm">🔍 Ctrl+F through 100-page PDFs</span>
+   <span class="inline-flex items-center gap-2 bg-white px-4 py-2.5 rounded-full border border-gray-200 text-sm text-gray-700 shadow-sm">😩 Read the same paragraph five times</span>
+   <span class="inline-flex items-center gap-2 bg-white px-4 py-2.5 rounded-full border border-gray-200 text-sm text-gray-700 shadow-sm">📤 Need answers with proof for your boss</span>
+   <span class="inline-flex items-center gap-2 bg-white px-4 py-2.5 rounded-full border border-gray-200 text-sm text-gray-700 shadow-sm">⏰ Wish you could just ask your documents</span>
   </div>
+  <p class="mt-6 text-base text-gray-500">You're not alone. Here's how Evidoc fixes this — in three steps.</p>
+ </div>
 </section>
 
-<!-- ============ SECTION 3: HOW IT WORKS (dark, bold) ============ -->
-<section id="how-it-works" class="py-24 md:py-32 bg-slate-900 relative">
-  <div class="absolute inset-0 bg-gradient-to-b from-slate-900 via-slate-900 to-slate-800"></div>
-  <div class="container mx-auto px-6 relative z-10">
-    <div class="text-center max-w-3xl mx-auto">
-      <h2 class="text-3xl md:text-4xl text-white">Three Steps. That's It.</h2>
-      <p class="mt-4 text-lg text-slate-400">From "I have 200 PDFs" to "here's the exact answer, with proof" &#8212; in minutes.</p>
-    </div>
-
-    <div class="mt-20 relative max-w-5xl mx-auto">
-      <div class="hidden md:block absolute top-14 left-[16.67%] right-[16.67%] h-0.5 bg-gradient-to-r from-slate-700 via-blue-500/40 to-slate-700 z-0"></div>
-
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-12 md:gap-8">
-        <div class="text-center relative">
-          <div class="relative z-10 w-28 h-28 bg-slate-800 text-blue-400 rounded-full flex items-center justify-center mx-auto border-2 border-blue-500/30 shadow-lg shadow-blue-500/10 text-5xl font-extrabold">1</div>
-          <h3 class="mt-8 text-xl font-semibold text-white">Drop Your Files</h3>
-          <p class="mt-3 text-slate-400 leading-relaxed">PDFs, Word docs, spreadsheets, scanned images &#8212; 15+ formats. Drag, drop, done.</p>
-        </div>
-        <div class="text-center relative">
-          <div class="relative z-10 w-28 h-28 bg-slate-800 text-blue-400 rounded-full flex items-center justify-center mx-auto border-2 border-blue-500/30 shadow-lg shadow-blue-500/10 text-5xl font-extrabold">2</div>
-          <h3 class="mt-8 text-xl font-semibold text-white">Evidoc Connects the Dots</h3>
-          <p class="mt-3 text-slate-400 leading-relaxed">Every name, date, clause, and concept is linked across all your documents.</p>
-        </div>
-        <div class="text-center relative">
-          <div class="relative z-10 w-28 h-28 bg-slate-800 text-blue-400 rounded-full flex items-center justify-center mx-auto border-2 border-blue-500/30 shadow-lg shadow-blue-500/10 text-5xl font-extrabold">3</div>
-          <h3 class="mt-8 text-xl font-semibold text-white">Ask. Verify. Done.</h3>
-          <p class="mt-3 text-slate-400 leading-relaxed">Ask in plain English (or 12 other languages). Click any citation to see the highlighted source.</p>
-        </div>
-      </div>
-    </div>
+<!-- ============ SECTION 3: HOW IT WORKS (spacious, light bg lift) ============ -->
+<section id="how-it-works" class="py-24 md:py-32 bg-gradient-to-b from-blue-50/60 to-white">
+ <div class="container mx-auto px-6">
+  <div class="text-center max-w-3xl mx-auto">
+   <h2 class="text-3xl md:text-4xl text-gray-900">Three Steps. That's It.</h2>
+   <p class="mt-4 text-lg text-gray-600">From "I have 200 PDFs" to "here's the exact answer, with proof" — in minutes.</p>
   </div>
+
+  <!-- Steps with connecting line -->
+  <div class="mt-20 relative max-w-5xl mx-auto">
+   <!-- Connecting line (desktop only) -->
+   <div class="hidden md:block absolute top-14 left-[16.67%] right-[16.67%] h-0.5 bg-gradient-to-r from-blue-200 via-blue-300 to-blue-200 z-0"></div>
+
+   <div class="grid grid-cols-1 md:grid-cols-3 gap-12 md:gap-8">
+    <div class="text-center relative">
+     <div class="relative z-10 w-28 h-28 bg-white text-blue-600 rounded-full flex items-center justify-center mx-auto shadow-lg border-2 border-blue-200 text-5xl font-extrabold">1</div>
+     <h3 class="mt-8 text-xl font-semibold text-gray-900">Drop Your Files</h3>
+     <p class="mt-3 text-gray-600 leading-relaxed">PDFs, Word docs, spreadsheets, scanned images — 15+ formats. Drag, drop, done.</p>
+    </div>
+
+    <div class="text-center relative">
+     <div class="relative z-10 w-28 h-28 bg-white text-blue-600 rounded-full flex items-center justify-center mx-auto shadow-lg border-2 border-blue-200 text-5xl font-extrabold">2</div>
+     <h3 class="mt-8 text-xl font-semibold text-gray-900">Evidoc Connects the Dots</h3>
+     <p class="mt-3 text-gray-600 leading-relaxed">Every name, date, clause, and concept is linked across all your documents — so nothing gets missed.</p>
+    </div>
+
+    <div class="text-center relative">
+     <div class="relative z-10 w-28 h-28 bg-white text-blue-600 rounded-full flex items-center justify-center mx-auto shadow-lg border-2 border-blue-200 text-5xl font-extrabold">3</div>
+     <h3 class="mt-8 text-xl font-semibold text-gray-900">Ask. Verify. Done.</h3>
+     <p class="mt-3 text-gray-600 leading-relaxed">Ask in plain English (or 12 other languages). Click any citation to see the highlighted source.</p>
+    </div>
+   </div>
+  </div>
+ </div>
 </section>
 
-<!-- ============ SECTION 4: FEATURES (light, interactive cards) ============ -->
+<!-- ============ SECTION 4: FEATURES (medium depth) ============ -->
 <section id="features" class="py-16 md:py-24 bg-white">
-  <div class="container mx-auto px-6">
-    <div class="text-center max-w-3xl mx-auto">
-      <h2 class="text-3xl md:text-4xl text-slate-900">What Makes It Different</h2>
-      <p class="mt-4 text-lg text-slate-600">Simple to use. Impossible to fool.</p>
-    </div>
-
-    <div class="mt-14 grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">
-      <div class="p-8 rounded-2xl border border-slate-200 bg-white hover:shadow-lg hover:border-blue-300 transition-all group">
-        <div class="w-10 h-10 bg-blue-500/10 text-blue-500 rounded-full flex items-center justify-center text-xl group-hover:bg-blue-500 group-hover:text-white transition-colors">&#127919;</div>
-        <h3 class="mt-4 text-lg font-semibold text-slate-900">Answers You Can Stand Behind</h3>
-        <p class="mt-2 text-slate-600 text-sm leading-relaxed">Every answer is pulled directly from your documents &#8212; not generated. If it's not in your files, Evidoc won't make it up.</p>
-      </div>
-      <div class="p-8 rounded-2xl border border-slate-200 bg-white hover:shadow-lg hover:border-blue-300 transition-all group">
-        <div class="w-10 h-10 bg-blue-500/10 text-blue-500 rounded-full flex items-center justify-center text-xl group-hover:bg-blue-500 group-hover:text-white transition-colors">&#128279;</div>
-        <h3 class="mt-4 text-lg font-semibold text-slate-900">One Click to See the Source</h3>
-        <p class="mt-2 text-slate-600 text-sm leading-relaxed">Every citation is a link. Click it &#8212; the exact sentence, highlighted on the original page. Proof in seconds.</p>
-      </div>
-      <div class="p-8 rounded-2xl border border-slate-200 bg-white hover:shadow-lg hover:border-blue-300 transition-all group">
-        <div class="w-10 h-10 bg-blue-500/10 text-blue-500 rounded-full flex items-center justify-center text-xl group-hover:bg-blue-500 group-hover:text-white transition-colors">&#129504;</div>
-        <h3 class="mt-4 text-lg font-semibold text-slate-900">Sees What You'd Miss</h3>
-        <p class="mt-2 text-slate-600 text-sm leading-relaxed">"Acme Corp" on page 3 and "ACME Corporation" on page 47? Same entity. Linked automatically.</p>
-      </div>
-    </div>
+ <div class="container mx-auto px-6">
+  <div class="text-center max-w-3xl mx-auto">
+   <h2 class="text-3xl md:text-4xl text-gray-900">What Makes It Different</h2>
+   <p class="mt-4 text-lg text-gray-600">
+    Simple to use. Impossible to fool. Here's what's under the hood.
+   </p>
   </div>
+
+  <div class="mt-14 grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">
+   <div class="p-8 rounded-2xl border border-gray-200 bg-gray-50 hover:shadow-md transition-shadow">
+    <div class="w-10 h-10 bg-blue-100 text-blue-600 rounded-lg flex items-center justify-center text-xl">🎯</div>
+    <h3 class="mt-4 text-lg font-semibold text-gray-900">Answers You Can Stand Behind</h3>
+    <p class="mt-2 text-gray-600 text-sm leading-relaxed">Every answer is pulled directly from your documents — not generated or paraphrased. If it's not in your files, Evidoc won't make it up.</p>
+   </div>
+   <div class="p-8 rounded-2xl border border-gray-200 bg-gray-50 hover:shadow-md transition-shadow">
+    <div class="w-10 h-10 bg-blue-100 text-blue-600 rounded-lg flex items-center justify-center text-xl">🔗</div>
+    <h3 class="mt-4 text-lg font-semibold text-gray-900">One Click to See the Source</h3>
+    <p class="mt-2 text-gray-600 text-sm leading-relaxed">Every citation is a link. Click it — you see the exact sentence, highlighted on the original page. Proof in seconds, not minutes.</p>
+   </div>
+   <div class="p-8 rounded-2xl border border-gray-200 bg-gray-50 hover:shadow-md transition-shadow">
+    <div class="w-10 h-10 bg-blue-100 text-blue-600 rounded-lg flex items-center justify-center text-xl">🧠</div>
+    <h3 class="mt-4 text-lg font-semibold text-gray-900">Sees What You'd Miss</h3>
+    <p class="mt-2 text-gray-600 text-sm leading-relaxed">"Acme Corp" on page 3 and "ACME Corporation" on page 47? Same entity. Evidoc links them automatically — across hundreds of pages.</p>
+   </div>
+  </div>
+ </div>
 </section>
 
-<!-- ============ SECTION 5: USE CASES (soft bg) ============ -->
-<section id="use-cases" class="py-16 md:py-24 bg-slate-50">
-  <div class="container mx-auto px-6">
-    <div class="text-center max-w-3xl mx-auto">
-      <h2 class="text-3xl md:text-4xl text-slate-900">See It in Action</h2>
-      <p class="mt-4 text-lg text-slate-600">Real questions people ask their documents &#8212; and what Evidoc finds.</p>
-    </div>
-
-    <div class="mt-14 grid grid-cols-1 lg:grid-cols-3 gap-6 max-w-5xl mx-auto">
-      <div class="bg-white p-8 rounded-2xl border border-slate-200 hover:shadow-md transition-shadow">
-        <span class="inline-block px-3 py-1 text-xs font-semibold text-blue-700 bg-blue-100 rounded-full">Legal</span>
-        <h3 class="mt-3 text-lg font-semibold text-slate-900">"Which contracts have a change-of-control clause?"</h3>
-        <p class="mt-2 text-sm text-slate-600 leading-relaxed">Before: 12 paralegals, 6 weeks. With Evidoc: one question, every clause cited.</p>
-      </div>
-      <div class="bg-white p-8 rounded-2xl border border-slate-200 hover:shadow-md transition-shadow">
-        <span class="inline-block px-3 py-1 text-xs font-semibold text-emerald-700 bg-emerald-100 rounded-full">Finance</span>
-        <h3 class="mt-3 text-lg font-semibold text-slate-900">"Do these invoices match the contract terms?"</h3>
-        <p class="mt-2 text-sm text-slate-600 leading-relaxed">Before: 500 invoices/month, $230K overpayments. With Evidoc: every discrepancy cited.</p>
-      </div>
-      <div class="bg-white p-8 rounded-2xl border border-slate-200 hover:shadow-md transition-shadow">
-        <span class="inline-block px-3 py-1 text-xs font-semibold text-violet-700 bg-violet-100 rounded-full">Compliance</span>
-        <h3 class="mt-3 text-lg font-semibold text-slate-900">"Where do our policies address data retention?"</h3>
-        <p class="mt-2 text-sm text-slate-600 leading-relaxed">Before: 40 docs, 3 days. With Evidoc: exact language highlighted. Seconds.</p>
-      </div>
-    </div>
-
-    <div id="more-use-cases" class="mt-6 grid grid-cols-1 lg:grid-cols-3 gap-6 max-w-5xl mx-auto hidden">
-      <div class="bg-white p-8 rounded-2xl border border-slate-200 hover:shadow-md transition-shadow">
-        <span class="inline-block px-3 py-1 text-xs font-semibold text-amber-700 bg-amber-100 rounded-full">Research</span>
-        <h3 class="mt-3 text-lg font-semibold text-slate-900">"What do these 50 papers say about treatment X?"</h3>
-        <p class="mt-2 text-sm text-slate-600 leading-relaxed">Before: weeks of reading. With Evidoc: consolidated findings, each cited.</p>
-      </div>
-      <div class="bg-white p-8 rounded-2xl border border-slate-200 hover:shadow-md transition-shadow">
-        <span class="inline-block px-3 py-1 text-xs font-semibold text-rose-700 bg-rose-100 rounded-full">Real Estate</span>
-        <h3 class="mt-3 text-lg font-semibold text-slate-900">"What changed in the counter-offer?"</h3>
-        <p class="mt-2 text-sm text-slate-600 leading-relaxed">Before: comparing PDFs side by side. With Evidoc: every difference cross-referenced.</p>
-      </div>
-      <div class="bg-white p-8 rounded-2xl border border-slate-200 hover:shadow-md transition-shadow">
-        <span class="inline-block px-3 py-1 text-xs font-semibold text-indigo-700 bg-indigo-100 rounded-full">Personal</span>
-        <h3 class="mt-3 text-lg font-semibold text-slate-900">"What does my insurance actually cover?"</h3>
-        <p class="mt-2 text-sm text-slate-600 leading-relaxed">Before: 80 pages of legalese. With Evidoc: plain-language answer, exact clause.</p>
-      </div>
-    </div>
-
-    <div class="text-center mt-8">
-      <button onclick="document.getElementById('more-use-cases').classList.toggle('hidden'); this.textContent = this.textContent.includes('More') ? '&#8593; Show Less' : '&#8595; More Use Cases'" class="text-sm font-medium text-blue-500 hover:text-blue-600 transition-colors">&#8595; More Use Cases</button>
-    </div>
+<!-- ============ SECTION 5: USE CASES (medium, soft bg) ============ -->
+<section id="use-cases" class="py-16 md:py-24 bg-gray-50">
+ <div class="container mx-auto px-6">
+  <div class="text-center max-w-3xl mx-auto">
+   <h2 class="text-3xl md:text-4xl text-gray-900">See It in Action</h2>
+   <p class="mt-4 text-lg text-gray-600">
+    Real questions people ask their documents — and what Evidoc finds.
+   </p>
   </div>
+
+  <div class="mt-14 grid grid-cols-1 lg:grid-cols-3 gap-6 max-w-5xl mx-auto">
+   <div class="bg-white p-8 rounded-2xl border border-gray-200">
+    <span class="inline-block px-3 py-1 text-xs font-medium text-blue-800 bg-blue-100 rounded-full">Legal</span>
+    <h3 class="mt-3 text-lg font-semibold text-gray-900">"Which contracts have a change-of-control clause?"</h3>
+    <p class="mt-2 text-sm text-gray-600 leading-relaxed">Before: 12 paralegals, 6 weeks. With Evidoc: one question, every clause cited.</p>
+   </div>
+
+   <div class="bg-white p-8 rounded-2xl border border-gray-200">
+    <span class="inline-block px-3 py-1 text-xs font-medium text-green-800 bg-green-100 rounded-full">Finance</span>
+    <h3 class="mt-3 text-lg font-semibold text-gray-900">"Do these invoices match the contract terms?"</h3>
+    <p class="mt-2 text-sm text-gray-600 leading-relaxed">Before: 500 invoices/month, $230K in overpayments found. With Evidoc: every discrepancy cited.</p>
+   </div>
+
+   <div class="bg-white p-8 rounded-2xl border border-gray-200">
+    <span class="inline-block px-3 py-1 text-xs font-medium text-purple-800 bg-purple-100 rounded-full">Compliance</span>
+    <h3 class="mt-3 text-lg font-semibold text-gray-900">"Where do our policies address data retention?"</h3>
+    <p class="mt-2 text-sm text-gray-600 leading-relaxed">Before: 40 docs, 3 days. With Evidoc: exact policy language highlighted. Seconds.</p>
+   </div>
+  </div>
+
+  <!-- Expandable second row -->
+  <div id="more-use-cases" class="mt-6 grid grid-cols-1 lg:grid-cols-3 gap-6 max-w-5xl mx-auto hidden">
+   <div class="bg-white p-8 rounded-2xl border border-gray-200">
+    <span class="inline-block px-3 py-1 text-xs font-medium text-amber-800 bg-amber-100 rounded-full">Research</span>
+    <h3 class="mt-3 text-lg font-semibold text-gray-900">"What do these 50 papers say about treatment X?"</h3>
+    <p class="mt-2 text-sm text-gray-600 leading-relaxed">Before: weeks of reading. With Evidoc: consolidated findings, each cited to the source.</p>
+   </div>
+
+   <div class="bg-white p-8 rounded-2xl border border-gray-200">
+    <span class="inline-block px-3 py-1 text-xs font-medium text-rose-800 bg-rose-100 rounded-full">Real Estate</span>
+    <h3 class="mt-3 text-lg font-semibold text-gray-900">"What changed in the counter-offer?"</h3>
+    <p class="mt-2 text-sm text-gray-600 leading-relaxed">Before: comparing PDFs side by side. With Evidoc: every difference cross-referenced.</p>
+   </div>
+
+   <div class="bg-white p-8 rounded-2xl border border-gray-200">
+    <span class="inline-block px-3 py-1 text-xs font-medium text-indigo-800 bg-indigo-100 rounded-full">Personal</span>
+    <h3 class="mt-3 text-lg font-semibold text-gray-900">"What does my insurance actually cover?"</h3>
+    <p class="mt-2 text-sm text-gray-600 leading-relaxed">Before: 80 pages of legalese. With Evidoc: plain-language answer, exact clause highlighted.</p>
+   </div>
+  </div>
+
+  <div class="text-center mt-8">
+   <button onclick="document.getElementById('more-use-cases').classList.toggle('hidden'); this.textContent = this.textContent.includes('More') ? '↑ Show Less' : '↓ More Use Cases'" class="text-sm font-medium text-blue-600 hover:text-blue-700 transition-colors">↓ More Use Cases</button>
+  </div>
+ </div>
 </section>
 
-<!-- ============ SECTION 6: SOCIAL PROOF (dark contrast) ============ -->
-<section class="py-14 md:py-16 bg-slate-900">
-  <div class="container mx-auto px-6">
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-8 max-w-4xl mx-auto text-center">
-      <div>
-        <div class="text-3xl md:text-4xl font-extrabold text-blue-400">15+</div>
-        <p class="mt-1 text-sm text-slate-500">Document formats</p>
-      </div>
-      <div>
-        <div class="text-3xl md:text-4xl font-extrabold text-blue-400">13</div>
-        <p class="mt-1 text-sm text-slate-500">Languages + voice</p>
-      </div>
-      <div>
-        <div class="text-3xl md:text-4xl font-extrabold text-blue-400">100%</div>
-        <p class="mt-1 text-sm text-slate-500">Cited &amp; verifiable</p>
-      </div>
-      <div>
-        <div class="text-3xl md:text-4xl font-extrabold text-blue-400">0</div>
-        <p class="mt-1 text-sm text-slate-500">Unverifiable claims</p>
-      </div>
-    </div>
-
-    <div class="mt-10 max-w-2xl mx-auto text-center">
-      <p class="text-lg text-slate-400 italic leading-relaxed">"We used to spend 3 days cross-referencing contracts. Now we ask one question and get every relevant clause &#8212; cited to the exact sentence."</p>
-      <p class="mt-3 text-sm text-slate-600">&#8212; Early Access User, Legal Operations</p>
-    </div>
+<!-- ============ SECTION 6: SOCIAL PROOF (dark contrast break) ============ -->
+<section class="py-14 md:py-16 bg-gray-900 text-white">
+ <div class="container mx-auto px-6">
+  <!-- Stat bar — compact, high contrast -->
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-8 max-w-4xl mx-auto text-center">
+   <div>
+    <div class="text-3xl md:text-4xl font-extrabold text-blue-400">15+</div>
+    <p class="mt-1 text-sm text-gray-400">Document formats</p>
+   </div>
+   <div>
+    <div class="text-3xl md:text-4xl font-extrabold text-blue-400">13</div>
+    <p class="mt-1 text-sm text-gray-400">Languages + voice</p>
+   </div>
+   <div>
+    <div class="text-3xl md:text-4xl font-extrabold text-blue-400">100%</div>
+    <p class="mt-1 text-sm text-gray-400">Cited & verifiable</p>
+   </div>
+   <div>
+    <div class="text-3xl md:text-4xl font-extrabold text-blue-400">0</div>
+    <p class="mt-1 text-sm text-gray-400">Unverifiable claims</p>
+   </div>
   </div>
+
+  <!-- Testimonial -->
+  <div class="mt-10 max-w-2xl mx-auto text-center">
+   <p class="text-lg text-gray-300 italic leading-relaxed">"We used to spend 3 days cross-referencing contracts. Now we ask one question and get every relevant clause — cited to the exact sentence."</p>
+   <p class="mt-3 text-sm text-gray-500">— Early Access User, Legal Operations</p>
+  </div>
+ </div>
 </section>
 
-<!-- ============ SECTION 7: PRICING (clean white) ============ -->
+<!-- ============ SECTION 7: PRICING (clean white, decision zone) ============ -->
 <section id="pricing" class="py-20 md:py-28 bg-white">
-  <div class="container mx-auto px-6">
-    <div class="text-center max-w-3xl mx-auto">
-      <h2 class="text-3xl md:text-4xl text-slate-900">Simple, Transparent Pricing</h2>
-      <p class="mt-4 text-lg text-slate-600">Start free. Upgrade when you need more.</p>
-    </div>
-
-    <!-- Tab toggle -->
-    <div class="flex justify-center mt-10">
-      <div class="inline-flex bg-slate-100 rounded-full p-1">
-        <button id="tab-individual" onclick="switchPricingTab('individual')" class="px-8 py-2.5 rounded-full text-sm font-semibold transition-all bg-white text-slate-900 shadow-sm">Individual</button>
-        <button id="tab-business" onclick="switchPricingTab('business')" class="px-8 py-2.5 rounded-full text-sm font-semibold transition-all text-slate-500">Business</button>
-      </div>
-    </div>
-
-    <!-- INDIVIDUAL PLANS -->
-    <div id="panel-individual" class="mt-12 grid grid-cols-1 md:grid-cols-3 gap-8 max-w-4xl mx-auto">
-      <!-- Free -->
-      <div class="bg-white p-8 rounded-2xl border border-slate-200 text-center flex flex-col">
-        <h3 class="text-xl font-semibold text-slate-900">Free</h3>
-        <div class="mt-4 text-5xl font-extrabold text-slate-900">$0</div>
-        <p class="text-sm text-slate-500 mt-2">Get started instantly</p>
-        <ul class="mt-6 text-sm text-slate-600 text-left space-y-3 flex-grow">
-          <li>2,000 queries/month</li>
-          <li>500 credits/month</li>
-          <li>0.5 GB storage</li>
-          <li>Multi-document search</li>
-        </ul>
-        <a href="https://evidoc.hulkdesign.com" class="mt-8 block py-3 bg-slate-100 text-slate-700 font-semibold rounded-full hover:bg-slate-200 transition-colors">Get Started Free</a>
-        <p class="text-xs text-slate-400 mt-2">No credit card required</p>
-      </div>
-
-      <!-- Pro -->
-      <div class="bg-white p-8 rounded-2xl border border-slate-200 text-center flex flex-col">
-        <h3 class="text-xl font-semibold text-slate-900">Pro</h3>
-        <div class="mt-4 text-5xl font-extrabold text-slate-900">$10<span class="text-lg font-normal text-slate-500">/mo</span></div>
-        <p class="text-sm text-slate-500 mt-2">For individuals who need more</p>
-        <ul class="mt-6 text-sm text-slate-600 text-left space-y-3 flex-grow">
-          <li>Everything in Free, plus:</li>
-          <li>5,000 queries/month</li>
-          <li>3,000 credits/month</li>
-          <li>2 GB storage</li>
-          <li>&#10022; GraphRAG engine</li>
-        </ul>
-        <a href="https://evidoc.hulkdesign.com/#/dashboard" class="mt-8 inline-flex items-center justify-center gap-2 py-3 bg-slate-900 text-blue-300 font-semibold rounded-full hover:bg-slate-800 transition-colors">
-          Upgrade to Pro
-        </a>
-      </div>
-
-      <!-- Pro+ -->
-      <div class="bg-white p-8 rounded-2xl border-2 border-blue-500 shadow-xl text-center flex flex-col relative ring-4 ring-blue-500/10">
-        <span class="absolute -top-3 left-1/2 -translate-x-1/2 bg-blue-500 text-white text-xs font-semibold px-4 py-1 rounded-full">Most Popular</span>
-        <h3 class="text-xl font-semibold text-blue-600">Pro+</h3>
-        <div class="mt-4 text-5xl font-extrabold text-slate-900">$39<span class="text-lg font-normal text-slate-500">/mo</span></div>
-        <p class="text-sm text-slate-500 mt-2">For power users</p>
-        <ul class="mt-6 text-sm text-slate-600 text-left space-y-3 flex-grow">
-          <li>Everything in Pro, plus:</li>
-          <li>20,000 queries/month</li>
-          <li>15,000 credits/month</li>
-          <li>10 GB storage</li>
-          <li>&#10022; Advanced Analytics</li>
-          <li>&#10022; API Access</li>
-        </ul>
-        <a href="https://evidoc.hulkdesign.com/#/dashboard" class="mt-8 inline-flex items-center justify-center gap-2 py-3 bg-slate-900 text-blue-300 font-semibold rounded-full hover:bg-slate-800 transition-colors">
-          Upgrade to Pro+
-        </a>
-      </div>
-    </div>
-
-    <!-- BUSINESS PLANS -->
-    <div id="panel-business" class="mt-12 grid-cols-1 md:grid-cols-2 gap-8 max-w-3xl mx-auto hidden" style="display: none;">
-      <!-- Business -->
-      <div class="bg-white p-8 rounded-2xl border border-slate-200 text-center flex flex-col">
-        <h3 class="text-xl font-semibold text-slate-900">Business</h3>
-        <div class="mt-4 text-5xl font-extrabold text-slate-900">$19<span class="text-lg font-normal text-slate-500">/user/mo</span></div>
-        <p class="text-sm text-slate-500 mt-2">For teams up to 50 users</p>
-        <ul class="mt-6 text-sm text-slate-600 text-left space-y-3 flex-grow">
-          <li>5,000 queries/user/month</li>
-          <li>5,000 credits/user/month</li>
-          <li>4 GB storage</li>
-          <li>&#10022; GraphRAG engine</li>
-          <li>&#10022; Centralized Billing</li>
-          <li>&#10022; Audit Logs</li>
-          <li>&#10022; Policy Controls</li>
-        </ul>
-        <a href="https://evidoc.hulkdesign.com/#/dashboard" class="mt-8 inline-flex items-center justify-center gap-2 py-3 bg-slate-900 text-blue-300 font-semibold rounded-full hover:bg-slate-800 transition-colors">Get Business</a>
-      </div>
-
-      <!-- Enterprise -->
-      <div class="bg-white p-8 rounded-2xl border-2 border-blue-500 shadow-xl text-center flex flex-col relative ring-4 ring-blue-500/10">
-        <span class="absolute -top-3 left-1/2 -translate-x-1/2 bg-blue-500 text-white text-xs font-semibold px-4 py-1 rounded-full">Best Value</span>
-        <h3 class="text-xl font-semibold text-blue-600">Enterprise</h3>
-        <div class="mt-4 text-5xl font-extrabold text-slate-900">$39<span class="text-lg font-normal text-slate-500">/user/mo</span></div>
-        <p class="text-sm text-slate-500 mt-2">For organizations up to 500 users</p>
-        <ul class="mt-6 text-sm text-slate-600 text-left space-y-3 flex-grow">
-          <li>Everything in Business, plus:</li>
-          <li>50,000 queries/user/month</li>
-          <li>14,000 credits/user/month</li>
-          <li>10 GB storage</li>
-          <li>&#10022; Priority Support</li>
-        </ul>
-        <a href="https://evidoc.hulkdesign.com/#/dashboard" class="mt-8 inline-flex items-center justify-center gap-2 py-3 bg-slate-900 text-blue-300 font-semibold rounded-full hover:bg-slate-800 transition-colors">Get Enterprise</a>
-      </div>
-    </div>
+ <div class="container mx-auto px-6">
+  <div class="text-center max-w-3xl mx-auto">
+   <h2 class="text-3xl md:text-4xl text-gray-900">Simple, Transparent Pricing</h2>
+   <p class="mt-4 text-lg text-gray-600">Start free. Upgrade when you need more.</p>
   </div>
+
+  <!-- Tab toggle -->
+  <div class="flex justify-center mt-10">
+   <div class="inline-flex bg-gray-200 rounded-xl p-1">
+    <button id="tab-individual" onclick="switchPricingTab('individual')" class="px-8 py-2.5 rounded-lg text-sm font-semibold transition-all bg-white text-gray-900 shadow-sm">Individual</button>
+    <button id="tab-business" onclick="switchPricingTab('business')" class="px-8 py-2.5 rounded-lg text-sm font-semibold transition-all text-gray-500">Business</button>
+   </div>
+  </div>
+
+  <!-- INDIVIDUAL PLANS -->
+  <div id="panel-individual" class="mt-12 grid grid-cols-1 md:grid-cols-3 gap-8 max-w-4xl mx-auto">
+   <!-- Free -->
+   <div class="bg-white p-8 rounded-2xl border border-gray-200 shadow-sm text-center flex flex-col">
+    <h3 class="text-xl font-semibold text-gray-900">Free</h3>
+    <div class="mt-4 text-5xl font-extrabold text-gray-900">$0</div>
+    <p class="text-sm text-gray-500 mt-2">Get started instantly</p>
+    <ul class="mt-6 text-sm text-gray-600 text-left space-y-3 flex-grow">
+     <li>2,000 queries/month</li>
+     <li>500 credits/month</li>
+     <li>0.5 GB storage</li>
+     <li>Multi-document search</li>
+    </ul>
+    <a href="https://evidoc.hulkdesign.com" class="mt-8 block py-3 bg-gray-100 text-gray-700 font-semibold rounded-lg hover:bg-gray-200 transition-colors">Get Started Free</a>
+    <p class="text-xs text-gray-400 mt-2">No credit card required</p>
+   </div>
+
+   <!-- Pro -->
+   <div class="bg-white p-8 rounded-2xl border border-gray-200 shadow-sm text-center flex flex-col">
+    <h3 class="text-xl font-semibold text-gray-900">Pro</h3>
+    <div class="mt-4 text-5xl font-extrabold text-gray-900">$10<span class="text-lg font-normal text-gray-500">/mo</span></div>
+    <p class="text-sm text-gray-500 mt-2">For individuals who need more</p>
+    <ul class="mt-6 text-sm text-gray-600 text-left space-y-3 flex-grow">
+     <li>Everything in Free, plus:</li>
+     <li>5,000 queries/month</li>
+     <li>3,000 credits/month</li>
+     <li>2 GB storage</li>
+     <li>✅ GraphRAG engine</li>
+    </ul>
+    <a href="https://evidoc.hulkdesign.com/#/dashboard" class="mt-8 block py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition-colors">Upgrade to Pro</a>
+   </div>
+
+   <!-- Pro+ -->
+   <div class="bg-white p-8 rounded-2xl border-2 border-blue-600 shadow-xl text-center flex flex-col relative ring-4 ring-blue-600/10">
+    <span class="absolute -top-3 left-1/2 -translate-x-1/2 bg-blue-600 text-white text-xs font-semibold px-4 py-1 rounded-full">Most Popular</span>
+    <h3 class="text-xl font-semibold text-blue-700">Pro+</h3>
+    <div class="mt-4 text-5xl font-extrabold text-gray-900">$39<span class="text-lg font-normal text-gray-500">/mo</span></div>
+    <p class="text-sm text-gray-500 mt-2">For power users</p>
+    <ul class="mt-6 text-sm text-gray-600 text-left space-y-3 flex-grow">
+     <li>Everything in Pro, plus:</li>
+     <li>20,000 queries/month</li>
+     <li>15,000 credits/month</li>
+     <li>10 GB storage</li>
+     <li>✅ Advanced Analytics</li>
+     <li>✅ API Access</li>
+    </ul>
+    <a href="https://evidoc.hulkdesign.com/#/dashboard" class="mt-8 block py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition-colors">Upgrade to Pro+</a>
+   </div>
+  </div>
+
+  <!-- BUSINESS PLANS -->
+  <div id="panel-business" class="mt-12 grid-cols-1 md:grid-cols-2 gap-8 max-w-3xl mx-auto hidden" style="display: none;">
+   <!-- Business -->
+   <div class="bg-white p-8 rounded-2xl border border-gray-200 shadow-sm text-center flex flex-col">
+    <h3 class="text-xl font-semibold text-gray-900">Business</h3>
+    <div class="mt-4 text-5xl font-extrabold text-gray-900">$19<span class="text-lg font-normal text-gray-500">/user/mo</span></div>
+    <p class="text-sm text-gray-500 mt-2">For teams up to 50 users</p>
+    <ul class="mt-6 text-sm text-gray-600 text-left space-y-3 flex-grow">
+     <li>5,000 queries/user/month</li>
+     <li>5,000 credits/user/month</li>
+     <li>4 GB storage</li>
+     <li>✅ GraphRAG engine</li>
+     <li>✅ Centralized Billing</li>
+     <li>✅ Audit Logs</li>
+     <li>✅ Policy Controls</li>
+    </ul>
+    <a href="https://evidoc.hulkdesign.com/#/dashboard" class="mt-8 block py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition-colors">Get Business</a>
+   </div>
+
+   <!-- Enterprise -->
+   <div class="bg-white p-8 rounded-2xl border-2 border-blue-600 shadow-xl text-center flex flex-col relative ring-4 ring-blue-600/10">
+    <span class="absolute -top-3 left-1/2 -translate-x-1/2 bg-blue-600 text-white text-xs font-semibold px-4 py-1 rounded-full">Best Value</span>
+    <h3 class="text-xl font-semibold text-blue-700">Enterprise</h3>
+    <div class="mt-4 text-5xl font-extrabold text-gray-900">$39<span class="text-lg font-normal text-gray-500">/user/mo</span></div>
+    <p class="text-sm text-gray-500 mt-2">For organizations up to 500 users</p>
+    <ul class="mt-6 text-sm text-gray-600 text-left space-y-3 flex-grow">
+     <li>Everything in Business, plus:</li>
+     <li>50,000 queries/user/month</li>
+     <li>14,000 credits/user/month</li>
+     <li>10 GB storage</li>
+     <li>✅ Priority Support</li>
+    </ul>
+    <a href="https://evidoc.hulkdesign.com/#/dashboard" class="mt-8 block py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition-colors">Get Enterprise</a>
+   </div>
+  </div>
+ </div>
 </section>
 
 <script>
 function switchPricingTab(tab) {
-  var indPanel = document.getElementById('panel-individual');
-  var bizPanel = document.getElementById('panel-business');
-  var indTab = document.getElementById('tab-individual');
-  var bizTab = document.getElementById('tab-business');
-  if (tab === 'individual') {
-    indPanel.style.display = 'grid';
-    bizPanel.style.display = 'none';
-    indTab.className = 'px-8 py-2.5 rounded-full text-sm font-semibold transition-all bg-white text-slate-900 shadow-sm';
-    bizTab.className = 'px-8 py-2.5 rounded-full text-sm font-semibold transition-all text-slate-500';
-  } else {
-    indPanel.style.display = 'none';
-    bizPanel.style.display = 'grid';
-    bizPanel.classList.add('grid-cols-1', 'md:grid-cols-2');
-    bizTab.className = 'px-8 py-2.5 rounded-full text-sm font-semibold transition-all bg-white text-slate-900 shadow-sm';
-    indTab.className = 'px-8 py-2.5 rounded-full text-sm font-semibold transition-all text-slate-500';
-  }
+ const indPanel = document.getElementById('panel-individual');
+ const bizPanel = document.getElementById('panel-business');
+ const indTab = document.getElementById('tab-individual');
+ const bizTab = document.getElementById('tab-business');
+ if (tab === 'individual') {
+  indPanel.style.display = 'grid';
+  bizPanel.style.display = 'none';
+  indTab.className = 'px-8 py-2.5 rounded-lg text-sm font-semibold transition-all bg-white text-gray-900 shadow-sm';
+  bizTab.className = 'px-8 py-2.5 rounded-lg text-sm font-semibold transition-all text-gray-500';
+ } else {
+  indPanel.style.display = 'none';
+  bizPanel.style.display = 'grid';
+  bizPanel.classList.add('grid-cols-1', 'md:grid-cols-2');
+  bizTab.className = 'px-8 py-2.5 rounded-lg text-sm font-semibold transition-all bg-white text-gray-900 shadow-sm';
+  indTab.className = 'px-8 py-2.5 rounded-lg text-sm font-semibold transition-all text-gray-500';
+ }
 }
 </script>
 
-<!-- ============ SECTION 8: TRUST STRIP (slim) ============ -->
-<section class="py-10 bg-slate-50 border-t border-slate-200">
-  <div class="container mx-auto px-6">
-    <div class="flex flex-wrap justify-center gap-x-10 gap-y-4 text-center text-sm text-slate-600">
-      <span class="inline-flex items-center gap-2"><span class="text-lg">&#128274;</span> Your data stays yours &#8212; never shared or trained on</span>
-      <span class="inline-flex items-center gap-2"><span class="text-lg">&#128101;</span> Folder &amp; team access controls</span>
-      <span class="inline-flex items-center gap-2"><span class="text-lg">&#127758;</span> 13 languages + voice input</span>
-      <span class="inline-flex items-center gap-2"><span class="text-lg">&#128193;</span> 15+ document formats</span>
-    </div>
+<!-- ============ SECTION 8: SECURITY (slim trust strip) ============ -->
+<section class="py-10 bg-gray-50 border-t border-gray-200">
+ <div class="container mx-auto px-6">
+  <div class="flex flex-wrap justify-center gap-x-10 gap-y-4 text-center text-sm text-gray-600">
+   <span class="inline-flex items-center gap-2"><span class="text-lg">🔒</span> Your data stays yours — never shared or trained on</span>
+   <span class="inline-flex items-center gap-2"><span class="text-lg">👥</span> Folder & team access controls</span>
+   <span class="inline-flex items-center gap-2"><span class="text-lg">🌍</span> 13 languages + voice input</span>
+   <span class="inline-flex items-center gap-2"><span class="text-lg">📁</span> 15+ document formats</span>
   </div>
+ </div>
 </section>
 
-<!-- ============ SECTION 9: CTA (dark, bold) ============ -->
-<section class="py-20 md:py-28 bg-slate-900 relative overflow-hidden">
-  <div class="absolute inset-0 bg-gradient-to-br from-blue-900/30 via-transparent to-indigo-900/30"></div>
-  <div class="container mx-auto px-6 text-center max-w-3xl relative z-10">
-    <h2 class="text-3xl md:text-4xl text-white">Stop Guessing. Start Knowing.</h2>
-    <p class="mt-4 text-lg text-slate-400">
-      Try Evidoc free &#8212; see what it feels like when every answer comes with proof.
-    </p>
-    <div class="mt-10">
-      <a href="https://evidoc.hulkdesign.com" class="inline-flex items-center gap-3 pl-7 pr-2 py-2 bg-white text-slate-900 font-semibold rounded-full hover:bg-blue-50 transition-colors text-lg group">
-        Try Evidoc Free
-        <span class="w-9 h-9 bg-blue-500 rounded-full flex items-center justify-center text-white group-hover:rotate-[-45deg] transition-transform text-lg">&#8594;</span>
-      </a>
-    </div>
-    <p class="mt-5 text-sm text-slate-500">Free plan includes 2,000 queries/month &#183; Upgrade anytime</p>
+<!-- ============ SECTION 8: CTA ============ -->
+<section class="py-20 md:py-28 bg-gradient-to-br from-blue-800 via-blue-600 to-blue-500">
+ <div class="container mx-auto px-6 text-center max-w-3xl">
+  <h2 class="text-3xl md:text-4xl text-white">Stop Guessing. Start Knowing.</h2>
+  <p class="mt-4 text-lg text-blue-100">
+   Try Evidoc free — see what it feels like when every answer comes with proof.
+  </p>
+  <div class="mt-8">
+   <a href="https://evidoc.hulkdesign.com" class="inline-block px-8 py-3 bg-white text-blue-800 font-bold rounded-lg hover:bg-blue-50 transition-colors text-lg shadow-lg">
+    Try Evidoc Free
+   </a>
   </div>
+  <p class="mt-4 text-sm text-blue-200/60">Free plan includes 2,000 queries/month · Upgrade anytime</p>
+ </div>
 </section>
 
 <!-- ============ FOOTER ============ -->
-<footer class="py-8 bg-slate-950 border-t border-slate-800">
-  <div class="container mx-auto px-6 text-center text-sm text-slate-500">
-    &#169; 2026 Hulkdesign AI. All rights reserved.
-  </div>
+<footer class="py-8 bg-gray-50 border-t border-gray-200">
+ <div class="container mx-auto px-6 text-center text-sm text-gray-400">
+  © 2026 Hulkdesign AI. All rights reserved.
+ </div>
 </footer>
 
 </body>
