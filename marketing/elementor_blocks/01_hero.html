@@ -1,4 +1,4 @@
-<!-- ELEMENTOR BLOCK 1: HERO -->
+<!-- ELEMENTOR BLOCK 1: HERO (Show the Moment) -->
 <style>
 .evi-hero {
   padding: 80px 24px 60px;
@@ -30,15 +30,15 @@
   max-width: 600px;
   line-height: 1.6;
 }
-.evi-hero .evi-tagline {
-  font-size: 0.95rem;
-  color: #6b7280;
-  font-style: italic;
-  margin-top: 12px;
+.evi-hero .evi-cta-row {
+  margin-top: 32px;
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+  flex-wrap: wrap;
 }
 .evi-hero .evi-cta-btn {
   display: inline-block;
-  margin-top: 32px;
   padding: 14px 36px;
   background: #2563eb;
   color: #ffffff;
@@ -51,24 +51,108 @@
 .evi-hero .evi-cta-btn:hover {
   background: #1d4ed8;
 }
+.evi-hero .evi-cta-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 28px;
+  background: transparent;
+  color: #374151;
+  font-size: 1.05rem;
+  font-weight: 600;
+  border-radius: 10px;
+  text-decoration: none;
+  border: 1px solid #d1d5db;
+  transition: background 0.2s;
+}
+.evi-hero .evi-cta-secondary:hover {
+  background: #f9fafb;
+}
 .evi-hero .evi-trust-line {
   margin-top: 16px;
   font-size: 0.85rem;
   color: #9ca3af;
 }
+/* Demo visual */
+.evi-demo-frame {
+  margin: 48px auto 0;
+  max-width: 900px;
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.05);
+  background: #1e293b;
+  position: relative;
+}
+.evi-demo-frame .evi-demo-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 16px;
+  background: #1e293b;
+}
+.evi-demo-frame .evi-demo-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+.evi-demo-frame .evi-demo-dot.evi-r { background: #ef4444; }
+.evi-demo-frame .evi-demo-dot.evi-y { background: #eab308; }
+.evi-demo-frame .evi-demo-dot.evi-g { background: #22c55e; }
+.evi-demo-frame .evi-demo-content {
+  background: #f8fafc;
+  padding: 0;
+  line-height: 0;
+}
+.evi-demo-frame .evi-demo-content img {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+.evi-demo-frame .evi-demo-placeholder {
+  padding: 80px 24px;
+  text-align: center;
+  line-height: 1.6;
+  background: linear-gradient(135deg, #f0f5ff 0%, #e8ecf8 100%);
+}
+.evi-demo-frame .evi-demo-placeholder p {
+  color: #6b7280;
+  font-size: 0.95rem;
+  margin: 0;
+}
+.evi-demo-frame .evi-demo-placeholder .evi-demo-icon {
+  font-size: 3rem;
+  margin-bottom: 12px;
+}
 </style>
 
 <div class="evi-hero">
   <span class="evi-badge">Introducing Evidoc</span>
-  <h1>Ask Your Documents.<br>Trust Every Answer.</h1>
+  <h1>What if every AI answer<br>came with proof?</h1>
   <p class="evi-subtitle">
-    AI-powered document intelligence that retrieves answers from your files — with every claim linked to the exact source sentence. Highlighted, clickable, verifiable.
+    Ask a question. Get an answer. Click the citation — see the exact sentence highlighted on the original page. That's Evidoc.
   </p>
-  <p class="evi-tagline">
-    Not "it's probably on page 12." The actual sentence. The actual words.
-  </p>
-  <div>
+  <div class="evi-cta-row">
     <a href="https://evidoc.hulkdesign.com" class="evi-cta-btn">Try Evidoc Free</a>
+    <a href="#demo-video" class="evi-cta-secondary">▶ Watch Demo</a>
   </div>
-  <p class="evi-trust-line">15+ document formats · 13 languages · Enterprise-grade security</p>
+  <p class="evi-trust-line">No credit card required · 15+ formats · 13 languages</p>
+
+  <!-- Product screenshot / demo video placeholder -->
+  <div class="evi-demo-frame">
+    <div class="evi-demo-bar">
+      <span class="evi-demo-dot evi-r"></span>
+      <span class="evi-demo-dot evi-y"></span>
+      <span class="evi-demo-dot evi-g"></span>
+    </div>
+    <div class="evi-demo-content">
+      <!-- Replace with: <img src="screenshot.png" alt="Evidoc screenshot"> -->
+      <!-- Or embed: <video src="demo.mp4" autoplay muted loop playsinline></video> -->
+      <div class="evi-demo-placeholder">
+        <div class="evi-demo-icon">🖼️</div>
+        <p><strong>Product screenshot or demo video goes here</strong></p>
+        <p>Show: question → answer with citations → click citation → highlighted source sentence</p>
+      </div>
+    </div>
+  </div>
 </div>
+
