@@ -1,19 +1,32 @@
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
-import { Button } from "@fluentui/react-components";
+import { Button, Spinner } from "@fluentui/react-components";
 import {
     ArrowUpload24Regular,
     Chat24Regular,
     CheckmarkCircle24Regular,
     ArrowRight16Regular,
+    DocumentCopy24Regular,
 } from "@fluentui/react-icons";
-import { markOnboardingSeen } from "../../utils/onboarding";
+import { useMsal } from "@azure/msal-react";
+import { useLogin, getToken } from "../../authConfig";
+import { createFolderApi } from "../../api/folders";
+import { uploadFilesApi } from "../../api/files";
+import { createSampleFiles, SAMPLE_FOLDER_NAME } from "../../utils/sampleDocuments";
+import { markOnboardingSeen, hasSampleDocsLoaded, markSampleDocsLoaded } from "../../utils/onboarding";
 import styles from "./GettingStarted.module.css";
 
 const GettingStarted = () => {
     const { t } = useTranslation();
     const navigate = useNavigate();
+    const client = useLogin ? useMsal().instance : null;
+
+    const [sampleStatus, setSampleStatus] = useState<"idle" | "loading" | "done" | "error">(
+        hasSampleDocsLoaded() ? "done" : "idle"
+    );
+    const [sampleError, setSampleError] = useState("");
 
     const handleGetStarted = () => {
         markOnboardingSeen();
@@ -23,6 +36,25 @@ const GettingStarted = () => {
     const handleGoToChat = () => {
         markOnboardingSeen();
         navigate("/");
+    };
+
+    const handleLoadSamples = async () => {
+        setSampleStatus("loading");
+        setSampleError("");
+        try {
+            const token = client ? await getToken(client) : undefined;
+            if (useLogin && !token) throw new Error("Not authenticated");
+            const folder = await createFolderApi({ name: SAMPLE_FOLDER_NAME }, token as string);
+            const files = createSampleFiles();
+            await uploadFilesApi(files, token as string, undefined, folder.id);
+            markSampleDocsLoaded(folder.id);
+            markOnboardingSeen();
+            setSampleStatus("done");
+            setTimeout(() => navigate("/"), 1500);
+        } catch (err: unknown) {
+            setSampleStatus("error");
+            setSampleError(err instanceof Error ? err.message : "Failed to load sample documents");
+        }
     };
 
     const steps = [
@@ -117,6 +149,48 @@ const GettingStarted = () => {
                         </div>
                     ))}
                 </div>
+            </div>
+
+            <div className={styles.sampleSection}>
+                <h2 className={styles.sectionTitle}>
+                    {t("onboarding.trySamplesTitle", "Try it now")}
+                </h2>
+                <p className={styles.sampleDescription}>
+                    {t(
+                        "onboarding.trySamplesDescription",
+                        "Load 3 sample documents — a service agreement, an invoice, and a data policy — then try asking questions across them."
+                    )}
+                </p>
+                {sampleStatus === "idle" && (
+                    <Button appearance="primary" size="large" icon={<DocumentCopy24Regular />} onClick={handleLoadSamples}>
+                        {t("onboarding.loadSamples", "Load sample documents")}
+                    </Button>
+                )}
+                {sampleStatus === "loading" && (
+                    <div className={styles.sampleLoading}>
+                        <Spinner size="small" />
+                        <span>{t("onboarding.loadingSamples", "Setting up sample documents...")}</span>
+                    </div>
+                )}
+                {sampleStatus === "done" && (
+                    <div className={styles.sampleDone}>
+                        <CheckmarkCircle24Regular />
+                        <span>
+                            {t(
+                                "onboarding.samplesReady",
+                                "Sample documents ready! Select \"Sample Documents\" from the folder dropdown in Chat."
+                            )}
+                        </span>
+                    </div>
+                )}
+                {sampleStatus === "error" && (
+                    <div className={styles.sampleError}>
+                        <p>{sampleError}</p>
+                        <Button appearance="outline" size="medium" onClick={handleLoadSamples}>
+                            {t("onboarding.retryLoad", "Try again")}
+                        </Button>
+                    </div>
+                )}
             </div>
 
             <div className={styles.actions}>

@@ -75,8 +75,8 @@
 
 | # | Item | Status | Notes |
 |---|---|---|---|
-| 43 | Onboarding flow (welcome + tutorial) | 🔴 Pending | No first-time UX |
-| 44 | Sample/demo documents | 🔴 Pending | Pre-loaded docs for new users to try |
+| 43 | Onboarding flow + sample documents | ✅ Done | Welcome banner, Getting Started page, 3 sample docs (agreement/invoice/policy) |
+| 44 | *(merged into #43)* | ✅ Done | — |
 | 45 | Getting Started guide | ✅ Done | `docs/GETTING_STARTED.md` + in-app `/getting-started` page |
 | 46 | Error messages (user-friendly) | ✅ Done | Network, timeout, rate limit, server errors |
 | 47 | Session expiry handling | ✅ Done | Auto-refresh + re-login prompt |
@@ -119,11 +119,11 @@
 | Pricing & Billing | 7 | 0 | 0 |
 | Marketing Materials | 7 | 0 | 0 |
 | Public Website | 1 | 4 | 2 |
-| User Experience | 3 | 2 | 0 |
+| User Experience | 5 | 0 | 0 |
 | Analytics & Monitoring | 4 | 0 | 0 |
 | Legal & Compliance | 0 | 3 | 2 |
 | Technical Debt | 1 | 2 | 0 |
-| **Total** | **43** | **11** | **4** |
+| **Total** | **45** | **9** | **4** |
 
 ---
 

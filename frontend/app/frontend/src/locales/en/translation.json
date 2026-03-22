@@ -388,6 +388,12 @@
         "uploadFirst": "Upload your first document",
         "skipToChat": "Go to Chat",
         "welcomeBanner": "New to Evidoc? Check out our Getting Started guide to learn the basics.",
-        "welcomeBannerAction": "Show me →"
+        "welcomeBannerAction": "Show me →",
+        "trySamplesTitle": "Try it now",
+        "trySamplesDescription": "Load 3 sample documents — a service agreement, an invoice, and a data policy — then try asking questions across them.",
+        "loadSamples": "Load sample documents",
+        "loadingSamples": "Setting up sample documents...",
+        "samplesReady": "Sample documents ready! Select \"Sample Documents\" from the folder dropdown in Chat.",
+        "retryLoad": "Try again"
     }
 }
