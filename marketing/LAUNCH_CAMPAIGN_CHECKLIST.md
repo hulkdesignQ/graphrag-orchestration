@@ -62,9 +62,9 @@
 
 | # | Item | Status | Notes |
 |---|---|---|---|
-| 35 | Astro site scaffolding | 🔴 Pending | Stack decided, not yet created |
-| 36 | Homepage (from HTML prototype) | 🔴 Pending | Prototype ready, needs Astro conversion |
-| 37 | Pricing page | 🔴 Pending | Tier data defined in code |
+| 35 | Astro site scaffolding | ✅ Done | Astro 5 + Tailwind, 13-language i18n routing |
+| 36 | Homepage (from HTML prototype) | ✅ Done | 12 components, 130+ translation keys, builds 13 pages |
+| 37 | Pricing page | ✅ Done | Embedded in homepage with Individual/Business tab toggle |
 | 38 | How It Works page | ✅ Done | Embedded in homepage as #how-it-works section |
 | 39 | Use-case landing pages | 🟡 Later | Legal, manufacturing, procurement (Phase 2) |
 | 40 | Blog infrastructure | 🟡 Later | Astro content collections (Phase 2) |
@@ -118,12 +118,12 @@
 | Infrastructure | 11 | 0 | 0 |
 | Pricing & Billing | 7 | 0 | 0 |
 | Marketing Materials | 7 | 0 | 0 |
-| Public Website | 1 | 4 | 2 |
+| Public Website | 4 | 1 | 2 |
 | User Experience | 5 | 0 | 0 |
 | Analytics & Monitoring | 4 | 0 | 0 |
 | Legal & Compliance | 0 | 3 | 2 |
 | Technical Debt | 1 | 2 | 0 |
-| **Total** | **45** | **9** | **4** |
+| **Total** | **48** | **6** | **4** |
 
 ---
 
