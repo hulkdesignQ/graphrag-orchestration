@@ -103,7 +103,7 @@ PDF, DOCX, XLSX, PPTX, HTML, TXT, CSV, PNG, JPG, JPEG, BMP, TIFF — and more vi
 
 | Plan | Price | Queries/Month | Credits/Month | Storage |
 |------|-------|---------------|---------------|---------|
-| **Free** | $0 | 2,000 | 100 | 0.5 GB |
+| **Free** | $0 | 90 | 1,350 | 0.5 GB |
 | **Pro** | $10/mo | 5,000 | 500 | 2 GB |
 | **Pro+** | $39/mo | 20,000 | 2,000 | 10 GB |
 | **Business** | $99/mo | Unlimited | 10,000 | 50 GB |

@@ -113,7 +113,7 @@ export const zhCn: Record<string, string> = {
   "pricing.free.name": "免费版",
   "pricing.free.price": "$0",
   "pricing.free.desc": "立即开始",
-  "pricing.free.f1": "每月 2,000 次查询",
+  "pricing.free.f1": "每月 90 次查询",
   "pricing.free.f2": "每月 500 积分",
   "pricing.free.f3": "0.5 GB 存储空间",
   "pricing.free.f4": "多文档搜索",
@@ -175,7 +175,7 @@ export const zhCn: Record<string, string> = {
   "cta.headline": "别再猜测。<br>开始确信。",
   "cta.subheadline": "免费试用 Evidoc——体验每个回答都附有证据的感觉。",
   "cta.button": "免费试用 Evidoc",
-  "cta.note": "免费版含每月2,000次查询 · 随时可升级",
+  "cta.note": "免费版含每月90次查询 · 随时可升级",
 
   // Footer
   "footer.copyright": "© 2026 Hulkdesign AI. All rights reserved.",

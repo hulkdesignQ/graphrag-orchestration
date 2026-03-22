@@ -113,7 +113,7 @@ export const th: Record<string, string> = {
   "pricing.free.name": "ฟรี",
   "pricing.free.price": "$0",
   "pricing.free.desc": "เริ่มใช้งานได้ทันที",
-  "pricing.free.f1": "2,000 คำถาม/เดือน",
+  "pricing.free.f1": "90 คำถาม/เดือน",
   "pricing.free.f2": "500 เครดิต/เดือน",
   "pricing.free.f3": "0.5 GB พื้นที่จัดเก็บ",
   "pricing.free.f4": "ค้นหาหลายเอกสาร",
@@ -175,7 +175,7 @@ export const th: Record<string, string> = {
   "cta.headline": "หยุดเดา<br>เริ่มรู้จริง",
   "cta.subheadline": "ทดลอง Evidoc ฟรี — สัมผัสความรู้สึกเมื่อทุกคำตอบมาพร้อมหลักฐาน",
   "cta.button": "ทดลอง Evidoc ฟรี",
-  "cta.note": "แผนฟรีรวม 2,000 คำถาม/เดือน · อัปเกรดได้ทุกเมื่อ",
+  "cta.note": "แผนฟรีรวม 90 คำถาม/เดือน · อัปเกรดได้ทุกเมื่อ",
 
   // Footer
   "footer.copyright": "© 2026 Hulkdesign AI. All rights reserved.",

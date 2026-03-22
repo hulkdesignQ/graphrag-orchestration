@@ -112,7 +112,7 @@ export const ko: Record<string, string> = {
   "pricing.free.name": "무료",
   "pricing.free.price": "$0",
   "pricing.free.desc": "바로 시작하세요",
-  "pricing.free.f1": "월 2,000 쿼리",
+  "pricing.free.f1": "월 90 쿼리",
   "pricing.free.f2": "월 500 크레딧",
   "pricing.free.f3": "0.5 GB 저장 공간",
   "pricing.free.f4": "다중 문서 검색",
@@ -174,7 +174,7 @@ export const ko: Record<string, string> = {
   "cta.headline": "추측을 멈추세요.<br>확신을 가지세요.",
   "cta.subheadline": "Evidoc을 무료로 체험하세요 — 모든 답변에 증거가 따라오는 경험을 느껴보세요.",
   "cta.button": "Evidoc 무료 체험",
-  "cta.note": "무료 플랜에 월 2,000 쿼리 포함 · 언제든 업그레이드",
+  "cta.note": "무료 플랜에 월 90 쿼리 포함 · 언제든 업그레이드",
 
   // Footer
   "footer.copyright": "© 2026 Hulkdesign AI. All rights reserved.",

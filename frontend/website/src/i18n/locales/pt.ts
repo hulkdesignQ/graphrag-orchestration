@@ -112,7 +112,7 @@ export const pt: Record<string, string> = {
   "pricing.free.name": "Grátis",
   "pricing.free.price": "$0",
   "pricing.free.desc": "Comece instantaneamente",
-  "pricing.free.f1": "2.000 consultas/mês",
+  "pricing.free.f1": "90 consultas/mês",
   "pricing.free.f2": "500 créditos/mês",
   "pricing.free.f3": "0.5 GB de armazenamento",
   "pricing.free.f4": "Busca em múltiplos documentos",
@@ -174,7 +174,7 @@ export const pt: Record<string, string> = {
   "cta.headline": "Pare de adivinhar.<br>Comece a saber.",
   "cta.subheadline": "Experimente o Evidoc grátis — sinta como é quando cada resposta vem com provas.",
   "cta.button": "Experimente o Evidoc grátis",
-  "cta.note": "Plano grátis inclui 2.000 consultas/mês · Faça upgrade a qualquer momento",
+  "cta.note": "Plano grátis inclui 90 consultas/mês · Faça upgrade a qualquer momento",
 
   // Footer
   "footer.copyright": "© 2026 Hulkdesign AI. Todos os direitos reservados.",

@@ -82,9 +82,9 @@ class PlanLimits(BaseModel):
 # Pricing mirrors GitHub Copilot tiers: Free / Pro $10 / Pro+ $39 / Business $19/user / Enterprise $39/user
 PLAN_DEFINITIONS: Dict[PlanTier, PlanLimits] = {
     PlanTier.FREE: PlanLimits(
-        queries_per_month=2000,
+        queries_per_month=90,
         max_tokens_per_query=2048,
-        monthly_credits=500,          # ~$0.50/month — trial usage
+        monthly_credits=1_350,        # ~$1.35/month — ~90 queries at ~15 credits/query
         max_documents=10,
         max_document_size_mb=5,
         max_storage_gb=0.5,

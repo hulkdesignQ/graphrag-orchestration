@@ -127,8 +127,8 @@ export const ui = {
     "pricing.free.name": "Free",
     "pricing.free.price": "$0",
     "pricing.free.desc": "Get started instantly",
-    "pricing.free.f1": "2,000 queries/month",
-    "pricing.free.f2": "500 credits/month",
+    "pricing.free.f1": "90 queries/month",
+    "pricing.free.f2": "1,350 credits/month",
     "pricing.free.f3": "0.5 GB storage",
     "pricing.free.f4": "Multi-document search",
     "pricing.free.cta": "Get Started Free",
@@ -189,7 +189,7 @@ export const ui = {
     "cta.headline": "Stop guessing.<br>Start knowing.",
     "cta.subheadline": "Try Evidoc free — see what it feels like when every answer comes with proof.",
     "cta.button": "Try Evidoc Free",
-    "cta.note": "Free plan includes 2,000 queries/month · Upgrade anytime",
+    "cta.note": "Free plan includes 90 queries/month · Upgrade anytime",
 
     // Footer
     "footer.copyright": "© 2026 Hulkdesign AI. All rights reserved.",

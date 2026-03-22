@@ -112,8 +112,8 @@ export const da: Record<string, string> = {
   "pricing.free.name": "Gratis",
   "pricing.free.price": "$0",
   "pricing.free.desc": "Kom i gang med det samme",
-  "pricing.free.f1": "2.000 forespørgsler/måned",
-  "pricing.free.f2": "500 credits/måned",
+  "pricing.free.f1": "90 forespørgsler/måned",
+  "pricing.free.f2": "1.350 credits/måned",
   "pricing.free.f3": "0.5 GB lagerplads",
   "pricing.free.f4": "Multi-dokument søgning",
   "pricing.free.cta": "Start gratis",
@@ -174,7 +174,7 @@ export const da: Record<string, string> = {
   "cta.headline": "Stop med at gætte.<br>Begynd at vide.",
   "cta.subheadline": "Prøv Evidoc gratis — oplev hvordan det føles, når hvert svar kommer med bevis.",
   "cta.button": "Prøv Evidoc gratis",
-  "cta.note": "Gratis plan inkluderer 2.000 forespørgsler/måned · Opgrader når som helst",
+  "cta.note": "Gratis plan inkluderer 90 forespørgsler/måned · Opgrader når som helst",
 
   // Footer
   "footer.copyright": "© 2026 Hulkdesign AI. Alle rettigheder forbeholdes.",

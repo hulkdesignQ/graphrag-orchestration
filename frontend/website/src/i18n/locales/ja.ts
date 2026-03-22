@@ -113,7 +113,7 @@ export const ja: Record<string, string> = {
   "pricing.free.name": "無料",
   "pricing.free.price": "$0",
   "pricing.free.desc": "すぐに始められます",
-  "pricing.free.f1": "2,000 クエリ/月",
+  "pricing.free.f1": "90 クエリ/月",
   "pricing.free.f2": "500 クレジット/月",
   "pricing.free.f3": "0.5 GB ストレージ",
   "pricing.free.f4": "マルチドキュメント検索",
@@ -175,7 +175,7 @@ export const ja: Record<string, string> = {
   "cta.headline": "推測をやめよう。<br>確信を持とう。",
   "cta.subheadline": "Evidoc を無料で試す — すべての回答に証拠が付いてくる体験をしてみてください。",
   "cta.button": "Evidoc を無料で試す",
-  "cta.note": "無料プランは2,000クエリ/月を含みます · いつでもアップグレード可能",
+  "cta.note": "無料プランは90クエリ/月を含みます · いつでもアップグレード可能",
 
   // Footer
   "footer.copyright": "© 2026 Hulkdesign AI. All rights reserved.",

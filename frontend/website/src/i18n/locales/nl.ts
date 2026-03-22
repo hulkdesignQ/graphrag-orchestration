@@ -112,8 +112,8 @@ export const nl: Record<string, string> = {
   "pricing.free.name": "Gratis",
   "pricing.free.price": "$0",
   "pricing.free.desc": "Direct aan de slag",
-  "pricing.free.f1": "2.000 zoekopdrachten/maand",
-  "pricing.free.f2": "500 credits/maand",
+  "pricing.free.f1": "90 zoekopdrachten/maand",
+  "pricing.free.f2": "1.350 credits/maand",
   "pricing.free.f3": "0.5 GB opslag",
   "pricing.free.f4": "Multi-document zoeken",
   "pricing.free.cta": "Gratis beginnen",
@@ -174,7 +174,7 @@ export const nl: Record<string, string> = {
   "cta.headline": "Stop met gokken.<br>Begin met weten.",
   "cta.subheadline": "Probeer Evidoc gratis — ervaar hoe het voelt als elk antwoord met bewijs komt.",
   "cta.button": "Probeer Evidoc gratis",
-  "cta.note": "Gratis plan bevat 2.000 zoekopdrachten/maand · Op elk moment upgraden",
+  "cta.note": "Gratis plan bevat 90 zoekopdrachten/maand · Op elk moment upgraden",
 
   // Footer
   "footer.copyright": "© 2026 Hulkdesign AI. Alle rechten voorbehouden.",
