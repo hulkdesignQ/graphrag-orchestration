@@ -66,7 +66,7 @@
 | 36 | Homepage (from HTML prototype) | ✅ Done | 12 components, 130+ translation keys, builds 13 pages |
 | 37 | Pricing page | ✅ Done | Embedded in homepage with Individual/Business tab toggle |
 | 38 | How It Works page | ✅ Done | Embedded in homepage as #how-it-works section |
-| 39 | Use-case landing pages | 🟡 Later | Legal, manufacturing, procurement (Phase 2) |
+| 39 | Use-case landing pages | ✅ Done | 6 pages (Legal, Finance, Compliance, Research, Real Estate, Personal) × 13 locales |
 | 40 | Blog infrastructure | 🟡 Later | Astro content collections (Phase 2) |
 | 41 | Custom domain deployment | ✅ Done | Bicep + GitHub Actions workflow, DNS setup documented |
 | 42 | Demo video (60s screen recording) | 🔴 Pending | Upload → Ask → Click-to-verify flow |
@@ -118,12 +118,12 @@
 | Infrastructure | 11 | 0 | 0 |
 | Pricing & Billing | 7 | 0 | 0 |
 | Marketing Materials | 7 | 0 | 0 |
-| Public Website | 5 | 0 | 2 |
+| Public Website | 6 | 0 | 1 |
 | User Experience | 5 | 0 | 0 |
 | Analytics & Monitoring | 4 | 0 | 0 |
 | Legal & Compliance | 3 | 0 | 2 |
 | Technical Debt | 1 | 2 | 0 |
-| **Total** | **52** | **2** | **4** |
+| **Total** | **53** | **2** | **3** |
 
 ---
 
