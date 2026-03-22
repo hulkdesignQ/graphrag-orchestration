@@ -200,7 +200,6 @@ dump.rdb
 # ─── Root-level ephemeral files (session artifacts, not source code) ───
 
 # Handover / analysis / architecture / implementation session docs
-/HANDOVER_*.md
 /ANALYSIS_*.md
 /ARCHITECTURE_*.md
 /IMPLEMENTATION_*.md
@@ -221,7 +220,6 @@ dump.rdb
 /NEO4J_*.md
 /PHASE*.md
 /PROPOSED_*.md
-/QUESTION_BANK_*.md
 /RE-INDEXING_*.md
 /REINDEX_*.md
 /RESTRUCTURE_*.md
@@ -236,7 +234,6 @@ dump.rdb
 /TODO_*.md
 /V2_GROUND_TRUTH_*.md
 /VOYAGE_*.md
-/HANDOVER_*.md
 /analysis_*.md
 /code_change_trace.md
 /validation_*.md
