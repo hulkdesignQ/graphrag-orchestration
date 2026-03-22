@@ -949,6 +949,21 @@ module apim './core/gateway/apim.bicep' = if (enableApim) {
   }
 }
 
+// ── Marketing website (Azure Static Web Apps) ──
+
+param websiteCustomDomain string = ''
+
+module website './core/host/static-web-app.bicep' = {
+  name: 'evidoc-website'
+  scope: rg
+  params: {
+    name: 'evidoc-website-${uniqueString(rg.id)}'
+    location: 'eastus2'
+    tags: tags
+    customDomainName: websiteCustomDomain
+  }
+}
+
 // Outputs
 output AZURE_LOCATION string = location
 output AZURE_CONTAINER_REGISTRY_ENDPOINT string = '${containerRegistry.name}.azurecr.io'
@@ -969,3 +984,5 @@ output AZURE_USERSTORAGE_CONTAINER string = useUserUpload ? userStorageContainer
 output KEY_VAULT_NAME string = keyVault.outputs.vaultName
 output KEY_VAULT_URI string = keyVault.outputs.vaultUri
 output MANAGED_IDENTITY_ID string = managedIdentity.outputs.id
+output WEBSITE_URI string = website.outputs.uri
+output WEBSITE_HOSTNAME string = website.outputs.defaultHostname
