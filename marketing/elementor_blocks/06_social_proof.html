@@ -1,0 +1,107 @@
+<!-- ELEMENTOR BLOCK 6: SOCIAL PROOF -->
+<!--
+  RECOMMENDED PAGE ORDER:
+  01_hero → 02_problem → 04_how_it_works → 03_features → 05_use_cases → 06_social_proof → 06_pricing → 07_security → 08_cta
+-->
+<style>
+.evi-social {
+  padding: 64px 24px;
+  background: #f8fafc;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+.evi-social .evi-social-header {
+  text-align: center;
+  max-width: 700px;
+  margin: 0 auto 40px;
+}
+.evi-social .evi-social-header h2 {
+  font-size: clamp(1.4rem, 3.5vw, 1.8rem);
+  font-weight: 700;
+  color: #111827;
+  margin: 0;
+}
+.evi-social .evi-social-header p {
+  font-size: 1rem;
+  color: #6b7280;
+  margin-top: 8px;
+}
+.evi-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  max-width: 800px;
+  margin: 0 auto 40px;
+}
+@media (max-width: 640px) {
+  .evi-stats-grid { grid-template-columns: repeat(2, 1fr); }
+}
+.evi-stat-card {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 16px;
+  padding: 24px 16px;
+  text-align: center;
+}
+.evi-stat-card .evi-stat-num {
+  font-size: 1.8rem;
+  font-weight: 800;
+  color: #2563eb;
+}
+.evi-stat-card .evi-stat-label {
+  font-size: 0.85rem;
+  color: #6b7280;
+  margin-top: 4px;
+}
+.evi-testimonial {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 16px;
+  padding: 32px;
+  max-width: 640px;
+  margin: 0 auto;
+  text-align: center;
+}
+.evi-testimonial p {
+  font-size: 1.05rem;
+  color: #374151;
+  font-style: italic;
+  line-height: 1.7;
+  margin: 0;
+}
+.evi-testimonial footer {
+  font-size: 0.85rem;
+  color: #9ca3af;
+  margin-top: 16px;
+}
+</style>
+
+<div class="evi-social">
+  <div class="evi-social-header">
+    <h2>Built for Professionals Who Can't Afford to Guess</h2>
+    <p>Trusted by teams who need answers they can stand behind.</p>
+  </div>
+
+  <div class="evi-stats-grid">
+    <div class="evi-stat-card">
+      <div class="evi-stat-num">15+</div>
+      <div class="evi-stat-label">Document formats supported</div>
+    </div>
+    <div class="evi-stat-card">
+      <div class="evi-stat-num">13</div>
+      <div class="evi-stat-label">Languages + voice input</div>
+    </div>
+    <div class="evi-stat-card">
+      <div class="evi-stat-num">100%</div>
+      <div class="evi-stat-label">Cited &amp; verifiable answers</div>
+    </div>
+    <div class="evi-stat-card">
+      <div class="evi-stat-num">0</div>
+      <div class="evi-stat-label">Unverifiable hallucinations</div>
+    </div>
+  </div>
+
+  <div class="evi-testimonial">
+    <p>"We used to spend 3 days cross-referencing contracts. Now we ask one question and get every relevant clause — cited to the exact sentence."</p>
+    <footer>— Early Access User, Legal Operations</footer>
+  </div>
+</div>
