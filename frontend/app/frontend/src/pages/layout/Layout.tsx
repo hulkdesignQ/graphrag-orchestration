@@ -92,6 +92,14 @@ const Layout = () => {
                             <span className={styles.navIcon}>📊</span>
                             <span className={styles.navLabel}>{t("nav.dashboard")}</span>
                         </NavLink>
+                        <NavLink
+                            to="/dashboard"
+                            className={`${styles.navItem} ${styles.navUpgrade}`}
+                            onClick={closeSidebar}
+                        >
+                            <span className={styles.navIcon}>⬆</span>
+                            <span className={styles.navLabel}>{t("nav.upgrade", "Upgrade Plan")}</span>
+                        </NavLink>
 
                         {/* Bottom spacer pushes version to bottom */}
                         <div className={styles.navSpacer} />

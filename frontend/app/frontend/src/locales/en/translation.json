@@ -254,7 +254,8 @@
         "files": "Files",
         "dashboard": "Dashboard",
         "toggleNavigation": "Toggle navigation",
-        "gettingStarted": "Getting Started"
+        "gettingStarted": "Getting Started",
+        "upgrade": "Upgrade Plan"
     },
     "viewer": {
         "loadingFile": "Loading file",

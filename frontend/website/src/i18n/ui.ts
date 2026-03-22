@@ -106,6 +106,7 @@ export const ui = {
     // Pricing
     "pricing.headline": "Simple, transparent pricing.",
     "pricing.subheadline": "Start free. Upgrade when you need more.",
+    "pricing.note": "All plans start with a free account. Upgrade anytime from your Dashboard — no sales call needed.",
     "pricing.tabIndividual": "Individual",
     "pricing.tabBusiness": "Business",
     "pricing.free.name": "Free",
