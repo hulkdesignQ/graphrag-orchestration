@@ -116,14 +116,14 @@
 |---|---|---|---|
 | Product Core | 9 | 0 | 0 |
 | Infrastructure | 11 | 0 | 0 |
-| Pricing & Billing | 5 | 2 | 0 |
+| Pricing & Billing | 7 | 0 | 0 |
 | Marketing Materials | 7 | 0 | 0 |
 | Public Website | 0 | 5 | 2 |
 | User Experience | 3 | 2 | 0 |
 | Analytics & Monitoring | 4 | 0 | 0 |
-| Legal & Compliance | 0 | 0 | 2 |
+| Legal & Compliance | 0 | 3 | 2 |
 | Technical Debt | 1 | 2 | 0 |
-| **Total** | **40** | **11** | **4** |
+| **Total** | **42** | **12** | **4** |
 
 ---
 
