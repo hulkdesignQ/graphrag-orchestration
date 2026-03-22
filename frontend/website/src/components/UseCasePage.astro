@@ -1,0 +1,119 @@
+---
+import type { UseCase } from "@/content/use-cases";
+import type { Lang } from "@/i18n/languages";
+import { useTranslations } from "@/i18n/utils";
+
+interface Props {
+  useCase: UseCase;
+  lang: Lang;
+}
+
+const { useCase, lang } = Astro.props;
+const t = useTranslations(lang);
+---
+
+<!-- Hero -->
+<section class="pt-28 pb-16 md:pt-40 md:pb-24 bg-white">
+  <div class="container mx-auto px-6 text-center max-w-3xl">
+    <span class="text-xs font-medium text-apple-blue border border-apple-blue/30 px-4 py-1.5 rounded-full">
+      {useCase.badge}
+    </span>
+    <h1 class="mt-8 text-4xl md:text-6xl text-apple-text leading-[1.08] tracking-tight" set:html={useCase.heroTitle} />
+    <p class="mt-6 text-xl text-apple-secondary max-w-2xl mx-auto leading-relaxed">
+      {useCase.heroSubtitle}
+    </p>
+    <div class="mt-10">
+      <a href="https://evidoc.hulkdesign.com" class="inline-flex items-center px-7 py-3 bg-apple-blue text-white font-medium rounded-full hover:bg-apple-bluehover transition-colors text-lg">
+        {useCase.ctaText}
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- Pain Points -->
+<section class="py-20 md:py-28 bg-apple-bg">
+  <div class="container mx-auto px-6">
+    <div class="text-center max-w-3xl mx-auto">
+      <h2 class="text-3xl md:text-4xl text-apple-text tracking-tight">The problem.</h2>
+    </div>
+    <div class="mt-16 grid grid-cols-1 md:grid-cols-2 gap-6 max-w-4xl mx-auto">
+      {useCase.painPoints.map((point) => (
+        <div class="p-8 rounded-2xl bg-white">
+          <div class="flex items-start gap-3">
+            <span class="text-red-500/70 text-sm mt-1 shrink-0">✕</span>
+            <div>
+              <h3 class="text-lg font-semibold text-apple-text">{point.title}</h3>
+              <p class="mt-2 text-[15px] text-apple-secondary leading-relaxed">{point.desc}</p>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>
+</section>
+
+<!-- How Evidoc Helps -->
+<section class="py-20 md:py-28 bg-white">
+  <div class="container mx-auto px-6">
+    <div class="text-center max-w-3xl mx-auto">
+      <h2 class="text-3xl md:text-4xl text-apple-text tracking-tight">How Evidoc helps.</h2>
+    </div>
+    <div class="mt-16 grid grid-cols-1 md:grid-cols-2 gap-6 max-w-4xl mx-auto">
+      {useCase.howEvidocHelps.map((item) => (
+        <div class="p-8 rounded-2xl bg-apple-bg">
+          <div class="flex items-start gap-3">
+            <span class="text-apple-green text-sm mt-1 shrink-0">✓</span>
+            <div>
+              <h3 class="text-lg font-semibold text-apple-text">{item.title}</h3>
+              <p class="mt-2 text-[15px] text-apple-secondary leading-relaxed">{item.desc}</p>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>
+</section>
+
+<!-- Example Queries -->
+<section class="py-20 md:py-28 bg-apple-bg">
+  <div class="container mx-auto px-6">
+    <div class="text-center max-w-3xl mx-auto">
+      <h2 class="text-3xl md:text-4xl text-apple-text tracking-tight">Questions you can ask.</h2>
+      <p class="mt-4 text-lg text-apple-secondary">Real queries. Real answers. Every one cited.</p>
+    </div>
+    <div class="mt-16 max-w-3xl mx-auto space-y-4">
+      {useCase.exampleQueries.map((eq) => (
+        <div class="p-6 rounded-2xl bg-white">
+          <p class="font-semibold text-apple-text text-[17px]">"{eq.question}"</p>
+          <p class="mt-2 text-sm text-apple-secondary">{eq.context}</p>
+        </div>
+      ))}
+    </div>
+  </div>
+</section>
+
+<!-- Testimonial (if exists) -->
+{useCase.testimonial && (
+  <section class="py-16 md:py-24 bg-[#1d1d1f]">
+    <div class="container mx-auto px-6">
+      <div class="max-w-2xl mx-auto text-center">
+        <p class="text-xl text-white/60 italic leading-relaxed">"{useCase.testimonial.quote}"</p>
+        <p class="mt-4 text-sm text-white/25">— {useCase.testimonial.author}</p>
+      </div>
+    </div>
+  </section>
+)}
+
+<!-- CTA -->
+<section class="py-24 md:py-36 bg-white">
+  <div class="container mx-auto px-6 text-center max-w-3xl">
+    <h2 class="text-3xl md:text-5xl text-apple-text tracking-tight" set:html={`${t("cta.headline")}`} />
+    <p class="mt-5 text-lg text-apple-secondary">{t("cta.subheadline")}</p>
+    <div class="mt-10">
+      <a href="https://evidoc.hulkdesign.com" class="inline-flex items-center px-8 py-3.5 bg-apple-blue text-white font-medium rounded-full hover:bg-apple-bluehover transition-colors text-lg">
+        {useCase.ctaText}
+      </a>
+    </div>
+    <p class="mt-5 text-sm text-apple-tertiary">{t("cta.note")}</p>
+  </div>
+</section>

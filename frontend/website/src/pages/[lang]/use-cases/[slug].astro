@@ -1,0 +1,31 @@
+---
+import Layout from "@/layouts/Layout.astro";
+import Nav from "@/components/Nav.astro";
+import Footer from "@/components/Footer.astro";
+import UseCasePage from "@/components/UseCasePage.astro";
+import { useCases, useCaseOrder } from "@/content/use-cases";
+import { languages, type Lang } from "@/i18n/languages";
+
+export function getStaticPaths() {
+  const langs = Object.keys(languages).filter((l) => l !== "en");
+  const paths: { params: { lang: string; slug: string }; props: { useCase: (typeof useCases)[string]; lang: string } }[] = [];
+
+  for (const lang of langs) {
+    for (const key of useCaseOrder) {
+      paths.push({
+        params: { lang, slug: useCases[key].slug },
+        props: { useCase: useCases[key], lang },
+      });
+    }
+  }
+  return paths;
+}
+
+const { useCase, lang } = Astro.props;
+---
+
+<Layout title={`${useCase.badge} — Evidoc`} lang={lang as string}>
+  <Nav lang={lang as Lang} />
+  <UseCasePage useCase={useCase} lang={lang as Lang} />
+  <Footer lang={lang as Lang} />
+</Layout>
