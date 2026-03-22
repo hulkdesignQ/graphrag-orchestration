@@ -42,9 +42,9 @@
 | 22 | Credit schedule (LLM, embedding, rerank, OCR) | ✅ Done | `credit_schedule.py` |
 | 23 | B2C/B2B plan filtering in dashboard | ✅ Done | B2C sees Free/Pro/Pro+, B2B sees Business/Enterprise |
 | 24 | Rate limit UX (429 → upgrade prompt) | ✅ Done | Chat shows plan + link to dashboard |
-| 25 | Payment integration (Stripe/Paddle) | 🔴 Pending | No checkout, no subscription management |
+| 25 | Payment integration (Stripe/Paddle) | ✅ Done | Stripe Checkout + webhooks integrated |
 | 26 | Plan upgrade/downgrade API | ✅ Done | `POST /billing/change-plan` with Stripe proration |
-| 27 | Billing portal | 🔴 Pending | Stripe Customer Portal or equivalent |
+| 27 | Billing portal | ✅ Done | Stripe Customer Portal linked from Dashboard |
 
 ## Marketing Materials
 
