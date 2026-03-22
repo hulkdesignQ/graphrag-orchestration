@@ -65,7 +65,7 @@
 | 35 | Astro site scaffolding | 🔴 Pending | Stack decided, not yet created |
 | 36 | Homepage (from HTML prototype) | 🔴 Pending | Prototype ready, needs Astro conversion |
 | 37 | Pricing page | 🔴 Pending | Tier data defined in code |
-| 38 | How It Works page | 🔴 Pending | 3-step flow designed in prototype |
+| 38 | How It Works page | ✅ Done | Embedded in homepage as #how-it-works section |
 | 39 | Use-case landing pages | 🟡 Later | Legal, manufacturing, procurement (Phase 2) |
 | 40 | Blog infrastructure | 🟡 Later | Astro content collections (Phase 2) |
 | 41 | Custom domain deployment | 🔴 Pending | DNS + managed cert in Bicep ready |
@@ -118,12 +118,12 @@
 | Infrastructure | 11 | 0 | 0 |
 | Pricing & Billing | 7 | 0 | 0 |
 | Marketing Materials | 7 | 0 | 0 |
-| Public Website | 0 | 5 | 2 |
+| Public Website | 1 | 4 | 2 |
 | User Experience | 3 | 2 | 0 |
 | Analytics & Monitoring | 4 | 0 | 0 |
 | Legal & Compliance | 0 | 3 | 2 |
 | Technical Debt | 1 | 2 | 0 |
-| **Total** | **42** | **12** | **4** |
+| **Total** | **43** | **11** | **4** |
 
 ---
 
