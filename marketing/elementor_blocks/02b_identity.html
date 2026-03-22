@@ -1,77 +1,58 @@
-<!-- ELEMENTOR BLOCK 2.5: USER IDENTITY ("Is this for me?") -->
+<!-- ELEMENTOR BLOCK 2.5: USER IDENTITY (compact breather) -->
 <!-- Place between Problem (02) and How It Works (04) -->
 <style>
 .evi-identity {
-  padding: 64px 24px;
-  background: #f8fafc;
+  padding: 48px 24px 56px;
+  background: linear-gradient(to bottom, #f8fafc, #ffffff);
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
 }
 .evi-identity h2 {
   text-align: center;
-  font-size: clamp(1.4rem, 3.5vw, 1.8rem);
+  font-size: clamp(1.2rem, 3vw, 1.5rem);
   font-weight: 700;
   color: #111827;
   margin: 0 auto;
-  max-width: 600px;
 }
-.evi-identity-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-  max-width: 680px;
-  margin: 36px auto 0;
-}
-@media (max-width: 640px) {
-  .evi-identity-grid { grid-template-columns: 1fr; }
-}
-.evi-identity-item {
+.evi-identity-pills {
   display: flex;
-  align-items: flex-start;
-  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  max-width: 680px;
+  margin: 24px auto 0;
+}
+.evi-identity-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   background: #ffffff;
-  padding: 16px 20px;
-  border-radius: 12px;
+  padding: 10px 16px;
+  border-radius: 100px;
   border: 1px solid #e5e7eb;
-}
-.evi-identity-item .evi-id-icon {
-  font-size: 1.2rem;
-  flex-shrink: 0;
-  margin-top: 2px;
-}
-.evi-identity-item p {
-  font-size: 0.95rem;
+  font-size: 0.9rem;
   color: #374151;
-  line-height: 1.5;
-  margin: 0;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+}
+.evi-identity-pill .evi-pill-icon {
+  font-size: 1rem;
+  flex-shrink: 0;
 }
 .evi-identity-closer {
   text-align: center;
-  font-size: 1.05rem;
+  font-size: 0.95rem;
   color: #6b7280;
-  margin-top: 32px;
+  margin-top: 24px;
 }
 </style>
 
 <div class="evi-identity">
   <h2>Sound familiar?</h2>
 
-  <div class="evi-identity-grid">
-    <div class="evi-identity-item">
-      <span class="evi-id-icon">🔍</span>
-      <p>Ctrl+F'd through a 100-page PDF hoping to find one sentence</p>
-    </div>
-    <div class="evi-identity-item">
-      <span class="evi-id-icon">😩</span>
-      <p>Read the same paragraph five times and still weren't sure what it meant</p>
-    </div>
-    <div class="evi-identity-item">
-      <span class="evi-id-icon">📤</span>
-      <p>Needed an answer you could forward to your boss, client, or auditor — with proof</p>
-    </div>
-    <div class="evi-identity-item">
-      <span class="evi-id-icon">⏰</span>
-      <p>Wished you could just ask your documents a question and get a real answer</p>
-    </div>
+  <div class="evi-identity-pills">
+    <span class="evi-identity-pill"><span class="evi-pill-icon">🔍</span> Ctrl+F through 100-page PDFs</span>
+    <span class="evi-identity-pill"><span class="evi-pill-icon">😩</span> Read the same paragraph five times</span>
+    <span class="evi-identity-pill"><span class="evi-pill-icon">📤</span> Need answers with proof for your boss</span>
+    <span class="evi-identity-pill"><span class="evi-pill-icon">⏰</span> Wish you could just ask your documents</span>
   </div>
 
   <p class="evi-identity-closer">You're not alone. Here's how Evidoc fixes this — in three steps.</p>

@@ -1,14 +1,14 @@
-<!-- ELEMENTOR BLOCK 5: USE CASES -->
+<!-- ELEMENTOR BLOCK 5: USE CASES (soft bg, expandable) -->
 <style>
 .evi-usecases {
-  padding: 80px 24px;
-  background: #ffffff;
+  padding: 64px 24px;
+  background: #f8fafc;
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
 }
 .evi-usecases .evi-section-header {
   text-align: center;
   max-width: 700px;
-  margin: 0 auto 48px;
+  margin: 0 auto 44px;
 }
 .evi-usecases .evi-section-header h2 {
   font-size: clamp(1.6rem, 4vw, 2.2rem);
@@ -24,44 +24,59 @@
 .evi-uc-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 24px;
-  max-width: 1100px;
+  gap: 20px;
+  max-width: 960px;
   margin: 0 auto;
 }
 @media (max-width: 960px) {
   .evi-uc-grid { grid-template-columns: 1fr; }
 }
 .evi-uc-card {
-  background: #f9fafb;
-  padding: 28px;
+  background: #ffffff;
+  padding: 24px;
   border-radius: 16px;
   border: 1px solid #e5e7eb;
 }
 .evi-uc-badge {
   display: inline-block;
-  padding: 4px 12px;
-  font-size: 0.8rem;
+  padding: 3px 10px;
+  font-size: 0.75rem;
   font-weight: 600;
   border-radius: 100px;
 }
 .evi-uc-badge.evi-legal { background: #dbeafe; color: #1e40af; }
 .evi-uc-badge.evi-finance { background: #dcfce7; color: #166534; }
 .evi-uc-badge.evi-compliance { background: #f3e8ff; color: #6b21a8; }
-.evi-uc-badge.evi-manufacturing { background: #fef3c7; color: #92400e; }
+.evi-uc-badge.evi-research { background: #fef3c7; color: #92400e; }
 .evi-uc-badge.evi-realestate { background: #fce7f3; color: #9d174d; }
-.evi-uc-badge.evi-ip { background: #e0e7ff; color: #3730a3; }
+.evi-uc-badge.evi-personal { background: #e0e7ff; color: #3730a3; }
 .evi-uc-card h3 {
-  font-size: 1.1rem;
+  font-size: 1.05rem;
   font-weight: 600;
   color: #111827;
-  margin: 14px 0 10px;
+  margin: 10px 0 8px;
 }
 .evi-uc-card p {
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   color: #4b5563;
   line-height: 1.6;
-  margin: 0 0 10px;
+  margin: 0;
 }
+.evi-uc-more {
+  display: none;
+}
+.evi-uc-toggle {
+  display: block;
+  margin: 24px auto 0;
+  background: none;
+  border: none;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: #2563eb;
+  cursor: pointer;
+  font-family: inherit;
+}
+.evi-uc-toggle:hover { color: #1d4ed8; }
 </style>
 
 <div class="evi-usecases">
@@ -74,43 +89,37 @@
     <div class="evi-uc-card">
       <span class="evi-uc-badge evi-legal">Legal</span>
       <h3>"Which contracts have a change-of-control clause?"</h3>
-      <p>Before: 12 paralegals, 6 weeks, 2,000 contracts.</p>
-      <p>With Evidoc: one question, every relevant clause cited to the exact sentence.</p>
+      <p>Before: 12 paralegals, 6 weeks. With Evidoc: one question, every clause cited.</p>
     </div>
-
     <div class="evi-uc-card">
       <span class="evi-uc-badge evi-finance">Finance</span>
       <h3>"Do these invoices match the contract terms?"</h3>
-      <p>Before: 500 invoices/month, last audit found $230K in overpayments.</p>
-      <p>With Evidoc: every discrepancy cited to the exact line in both documents.</p>
+      <p>Before: 500 invoices/month, $230K in overpayments found. With Evidoc: every discrepancy cited.</p>
     </div>
-
     <div class="evi-uc-card">
       <span class="evi-uc-badge evi-compliance">Compliance</span>
       <h3>"Where do our policies address data retention?"</h3>
-      <p>Before: 40 policy docs, 3 days to find the right paragraphs.</p>
-      <p>With Evidoc: exact policy language highlighted. Seconds, not days.</p>
+      <p>Before: 40 docs, 3 days. With Evidoc: exact policy language highlighted. Seconds.</p>
     </div>
+  </div>
 
+  <div class="evi-uc-more evi-uc-grid" id="evi-uc-more" style="margin-top:20px;">
     <div class="evi-uc-card">
-      <span class="evi-uc-badge evi-manufacturing">Research</span>
+      <span class="evi-uc-badge evi-research">Research</span>
       <h3>"What do these 50 papers say about treatment X?"</h3>
-      <p>Before: weeks of reading, notes scattered across tabs.</p>
-      <p>With Evidoc: consolidated findings across all papers, each cited to the source.</p>
+      <p>Before: weeks of reading. With Evidoc: consolidated findings, each cited to the source.</p>
     </div>
-
     <div class="evi-uc-card">
       <span class="evi-uc-badge evi-realestate">Real Estate</span>
       <h3>"What changed in the counter-offer?"</h3>
-      <p>Before: comparing PDFs side by side, hoping you don't miss a clause.</p>
-      <p>With Evidoc: every difference highlighted, cross-referenced against HOA docs.</p>
+      <p>Before: comparing PDFs side by side. With Evidoc: every difference cross-referenced.</p>
     </div>
-
     <div class="evi-uc-card">
-      <span class="evi-uc-badge evi-ip">Personal</span>
+      <span class="evi-uc-badge evi-personal">Personal</span>
       <h3>"What does my insurance actually cover?"</h3>
-      <p>Before: 80 pages of legalese, no idea where to look.</p>
-      <p>With Evidoc: plain-language answer with the exact policy clause highlighted.</p>
+      <p>Before: 80 pages of legalese. With Evidoc: plain-language answer, exact clause highlighted.</p>
     </div>
   </div>
+
+  <button class="evi-uc-toggle" onclick="var el=document.getElementById('evi-uc-more');var v=el.style.display==='grid';el.style.display=v?'none':'grid';this.textContent=v?'↓ More Use Cases':'↑ Show Less'">↓ More Use Cases</button>
 </div>
