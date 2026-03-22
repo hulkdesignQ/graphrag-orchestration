@@ -351,6 +351,28 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
         rerank_all_enabled = _ov("rerank_all", "ROUTE7_RERANK_ALL", "0").strip().lower() in {"1", "true", "yes"}
         rerank_all_top_k = int(_ov("rerank_all_top_k", "ROUTE7_RERANK_ALL_TOP_K", "50"))
 
+        # Reranker gate: compute cross-encoder scores for ALL passages BEFORE PPR
+        # and use them inside PPR as gate (block irrelevant) and/or teleportation
+        # (boost relevant). Per APPNP: "Predict (reranker) then Propagate (PPR)".
+        # More efficient than separate post-PPR reranking — scores serve dual purpose.
+        reranker_gate_enabled = _ov(
+            "reranker_gate", "ROUTE8_RERANKER_GATE",
+            "1" if preset.get("reranker_gate", False) else "0"
+        ).strip().lower() in {"1", "true", "yes"}
+        reranker_gate_threshold = float(_ov(
+            "reranker_gate_threshold", "ROUTE8_RERANKER_GATE_THRESHOLD",
+            str(preset.get("reranker_gate_threshold", 0.1))))
+        reranker_teleport_weight = float(_ov(
+            "reranker_teleport_weight", "ROUTE8_RERANKER_TELEPORT_WEIGHT",
+            str(preset.get("reranker_teleport_weight", 0.0))))
+
+        # Reranker instruction: prepended to query for rerank-2.5+ models.
+        # Suppresses boilerplate noise and focuses on substantive content.
+        rerank_instruction = _ov(
+            "rerank_instruction", "ROUTE8_RERANK_INSTRUCTION",
+            preset.get("rerank_instruction", "")
+        ).strip()
+
         # Preset can override prompt_variant (only if caller didn't explicitly set one)
         if prompt_variant is None and preset.get("prompt_variant"):
             prompt_variant = preset["prompt_variant"]
@@ -448,6 +470,19 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
         # 0.0 = disabled (structural seeds only). >0 = blend ratio.
         neural_weight = float(_ov("neural_weight", "ROUTE7_NEURAL_WEIGHT",
                                     str(preset.get("neural_weight", 0.0))))
+        neural_cosine_threshold = float(_ov(
+            "neural_cosine_threshold", "ROUTE7_NEURAL_COSINE_THRESHOLD",
+            str(preset.get("neural_cosine_threshold", 0.0))))
+        neural_cosine_power = float(_ov(
+            "neural_cosine_power", "ROUTE7_NEURAL_COSINE_POWER",
+            str(preset.get("neural_cosine_power", 1.0))))
+
+        # Neural gate: block passages below cosine threshold from PPR walk.
+        # Unlike teleportation (additive), gating is subtractive — removes
+        # noise passages entirely so mass redistributes to relevant ones.
+        neural_gate_threshold = float(_ov(
+            "neural_gate_threshold", "ROUTE8_NEURAL_GATE_THRESHOLD",
+            str(preset.get("neural_gate_threshold", 0.0))))
 
         # Triple reranking config (read early for logging)
         triple_rerank_enabled = _ov(
@@ -493,6 +528,38 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
         ppr_community_balance_alpha = float(_ov(
             "community_balance_alpha", "ROUTE8_COMMUNITY_BALANCE_ALPHA",
             str(preset.get("community_balance_alpha", 0.0))
+        ))
+
+        # GPR mode: per-hop weighted propagation (GPR-GNN, ICLR 2021).
+        # Alternative to standard PPR — separates propagation from aggregation.
+        propagation_mode = _ov(
+            "propagation_mode", "ROUTE8_PROPAGATION_MODE",
+            preset.get("propagation_mode", "ppr")
+        ).strip().lower()
+        gpr_hops = int(_ov("gpr_hops", "ROUTE8_GPR_HOPS",
+                           str(preset.get("gpr_hops", 10))))
+        gpr_profile = _ov(
+            "gpr_profile", "ROUTE8_GPR_PROFILE",
+            preset.get("gpr_profile", "ppr")
+        ).strip().lower()
+        gpr_weights_csv = _ov(
+            "gpr_weights", "ROUTE8_GPR_WEIGHTS",
+            preset.get("gpr_weights", "")
+        ).strip()
+
+        # APPNP mode: true "Predict then Propagate" (Gasteiger et al., ICLR 2019).
+        # Neural predictions (cosine) ARE the teleportation target, symmetric norm.
+        appnp_alpha = float(_ov(
+            "appnp_alpha", "ROUTE8_APPNP_ALPHA",
+            str(preset.get("appnp_alpha", 0.15))
+        ))
+        appnp_seed_weight = float(_ov(
+            "appnp_seed_weight", "ROUTE8_APPNP_SEED_WEIGHT",
+            str(preset.get("appnp_seed_weight", 0.0))
+        ))
+        appnp_self_loop = float(_ov(
+            "appnp_self_loop", "ROUTE8_APPNP_SELF_LOOP",
+            str(preset.get("appnp_self_loop", 1.0))
         ))
 
         # Sentence window: preset provides the default; config_overrides / env
@@ -1031,6 +1098,34 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
         )
 
         # ------------------------------------------------------------------
+        # Step 3.5: Pre-PPR reranker gate (APPNP: predict then propagate)
+        # ------------------------------------------------------------------
+        pre_ppr_reranker_scores: Optional[Dict[str, float]] = None
+        if reranker_gate_enabled:
+            t0_gate = time.perf_counter()
+            try:
+                gate_results = await self._rerank_all_passages(
+                    query, top_k=len(self._ppr_engine.get_all_passage_texts()),
+                    relevance_threshold=0.0,
+                    user_id=user_id,
+                    prefilter_top_k=0,  # no pre-filter — rerank ALL
+                    rerank_instruction=rerank_instruction,
+                )
+                pre_ppr_reranker_scores = {sid: score for sid, score in gate_results}
+                logger.info(
+                    "pre_ppr_reranker_gate_computed",
+                    passages_scored=len(pre_ppr_reranker_scores),
+                    gate_threshold=reranker_gate_threshold,
+                    teleport_weight=reranker_teleport_weight,
+                    elapsed_ms=int((time.perf_counter() - t0_gate) * 1000),
+                )
+            except Exception as e:
+                logger.warning("pre_ppr_reranker_gate_failed", error=str(e))
+            timings_ms["step_3.5_reranker_gate_ms"] = int(
+                (time.perf_counter() - t0_gate) * 1000
+            )
+
+        # ------------------------------------------------------------------
         # Step 4: PPR or DPR-only fallback
         # ------------------------------------------------------------------
         t0 = time.perf_counter()
@@ -1043,23 +1138,54 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
             # Bug 13 fix: passage seeds alone can drive PPR via MENTIONS edges
             logger.info("route7_passage_only_ppr", passage_seeds=len(passage_seeds))
 
-        # Always run PPR (entity-only, passage-only, or combined)
-        passage_scores, entity_scores = self._ppr_engine.run_ppr(
-            entity_seeds=entity_seeds,
-            passage_seeds=passage_seeds,
-            damping=ppr_damping,
-            dangling_redistribution=ppr_dangling,
-            passage_self_loops=ppr_self_loops,
-            hub_devaluation=ppr_hub_deval,
-            hub_penalty_mode=ppr_hub_penalty_mode,
-            hub_penalty_alpha=ppr_hub_penalty_alpha,
-            hub_penalty_base=ppr_hub_penalty_base,
-            symmetric_norm=ppr_symmetric_norm,
-            community_balance=ppr_community_balance,
-            community_balance_alpha=ppr_community_balance_alpha,
-            neural_teleportation=query_embedding if neural_weight > 0 else None,
-            neural_weight=neural_weight,
-        )
+        # Always run PPR or GPR (entity-only, passage-only, or combined)
+        if propagation_mode == "appnp":
+            passage_scores, entity_scores = self._ppr_engine.run_appnp(
+                query_embedding=query_embedding,
+                alpha=appnp_alpha,
+                entity_seeds=entity_seeds if appnp_seed_weight > 0 else None,
+                seed_weight=appnp_seed_weight,
+                reranker_predictions=pre_ppr_reranker_scores,
+                self_loop_weight=appnp_self_loop,
+            )
+        elif propagation_mode == "gpr":
+            passage_scores, entity_scores = self._ppr_engine.run_gpr(
+                entity_seeds=entity_seeds,
+                passage_seeds=passage_seeds,
+                num_hops=gpr_hops,
+                hop_profile=gpr_profile,
+                hop_weights_csv=gpr_weights_csv,
+                damping=ppr_damping,
+                hub_penalty_mode=ppr_hub_penalty_mode,
+                hub_penalty_alpha=ppr_hub_penalty_alpha,
+                hub_penalty_base=ppr_hub_penalty_base,
+                symmetric_norm=ppr_symmetric_norm,
+                community_balance=ppr_community_balance,
+                community_balance_alpha=ppr_community_balance_alpha,
+            )
+        else:
+            passage_scores, entity_scores = self._ppr_engine.run_ppr(
+                entity_seeds=entity_seeds,
+                passage_seeds=passage_seeds,
+                damping=ppr_damping,
+                dangling_redistribution=ppr_dangling,
+                passage_self_loops=ppr_self_loops,
+                hub_devaluation=ppr_hub_deval,
+                hub_penalty_mode=ppr_hub_penalty_mode,
+                hub_penalty_alpha=ppr_hub_penalty_alpha,
+                hub_penalty_base=ppr_hub_penalty_base,
+                symmetric_norm=ppr_symmetric_norm,
+                community_balance=ppr_community_balance,
+                community_balance_alpha=ppr_community_balance_alpha,
+                neural_teleportation=query_embedding if (neural_weight > 0 or neural_gate_threshold > 0) else None,
+                neural_weight=neural_weight,
+                neural_cosine_threshold=neural_cosine_threshold,
+                neural_cosine_power=neural_cosine_power,
+                neural_gate_threshold=neural_gate_threshold,
+                reranker_scores=pre_ppr_reranker_scores,
+                reranker_gate_threshold=reranker_gate_threshold,
+                reranker_teleport_weight=reranker_teleport_weight,
+            )
 
         # Bug 3 fix: if PPR produced no passage scores, fall back to raw DPR order
         if not passage_scores:
@@ -3340,6 +3466,7 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
         dynamic_max: int = 0,
         user_id: Optional[str] = None,
         prefilter_top_k: int = 0,
+        rerank_instruction: str = "",
     ) -> List[Tuple[str, float]]:
         """Rerank sentences using cached texts from the PPR engine.
 
@@ -3412,8 +3539,11 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
 
         vc = make_voyage_client()
 
+        # For rerank-2.5+, prepend instruction to query for better discrimination
+        effective_query = f"{rerank_instruction}{query}" if rerank_instruction else query
+
         rr_result = await rerank_with_retry(
-            vc, query=query, documents=documents,
+            vc, query=effective_query, documents=documents,
             model=rerank_model, top_k=request_k,
         )
 

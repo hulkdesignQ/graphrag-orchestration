@@ -139,7 +139,6 @@ export const ja: Record<string, string> = {
   "pricing.proplus.f3": "15,000 クレジット/月",
   "pricing.proplus.f4": "10 GB ストレージ",
   "pricing.proplus.f5": "高度なアナリティクス",
-  "pricing.proplus.f6": "API アクセス",
   "pricing.proplus.cta": "Pro+ にアップグレード",
   "pricing.business.name": "Business",
   "pricing.business.price": "$19",

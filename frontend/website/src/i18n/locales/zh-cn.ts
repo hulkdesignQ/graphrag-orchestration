@@ -139,7 +139,6 @@ export const zhCn: Record<string, string> = {
   "pricing.proplus.f3": "每月 15,000 积分",
   "pricing.proplus.f4": "10 GB 存储空间",
   "pricing.proplus.f5": "高级分析",
-  "pricing.proplus.f6": "API 访问",
   "pricing.proplus.cta": "升级到 Pro+",
   "pricing.business.name": "Business",
   "pricing.business.price": "$19",

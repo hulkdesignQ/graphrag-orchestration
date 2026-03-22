@@ -138,7 +138,6 @@ export const pl: Record<string, string> = {
   "pricing.proplus.f3": "15 000 kredytów/miesiąc",
   "pricing.proplus.f4": "10 GB przestrzeni",
   "pricing.proplus.f5": "Zaawansowana analityka",
-  "pricing.proplus.f6": "Dostęp do API",
   "pricing.proplus.cta": "Ulepsz do Pro+",
   "pricing.business.name": "Business",
   "pricing.business.price": "$19",

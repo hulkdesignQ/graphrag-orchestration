@@ -138,7 +138,6 @@ export const ko: Record<string, string> = {
   "pricing.proplus.f3": "월 15,000 크레딧",
   "pricing.proplus.f4": "10 GB 저장 공간",
   "pricing.proplus.f5": "고급 분석",
-  "pricing.proplus.f6": "API 액세스",
   "pricing.proplus.cta": "Pro+로 업그레이드",
   "pricing.business.name": "Business",
   "pricing.business.price": "$19",

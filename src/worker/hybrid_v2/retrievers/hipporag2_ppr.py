@@ -579,6 +579,12 @@ class HippoRAG2PPR:
         community_balance_alpha: float = 0.0,
         neural_teleportation: Optional[List[float]] = None,
         neural_weight: float = 0.5,
+        neural_cosine_threshold: float = 0.0,
+        neural_cosine_power: float = 1.0,
+        neural_gate_threshold: float = 0.0,
+        reranker_scores: Optional[Dict[str, float]] = None,
+        reranker_gate_threshold: float = 0.0,
+        reranker_teleport_weight: float = 0.0,
     ) -> Tuple[List[Tuple[str, float]], List[Tuple[str, float]]]:
         """Run Personalized PageRank with weighted seeds.
 
@@ -626,6 +632,24 @@ class HippoRAG2PPR:
                 0.0 = structural seeds only (original behavior).
                 1.0 = pure neural teleportation (cosine-only).
                 0.5 = equal blend (recommended starting point).
+            neural_gate_threshold: Cosine gate threshold for passage nodes.
+                If > 0 and neural_teleportation is provided, passage nodes
+                whose cosine(query, passage_emb) < threshold are BLOCKED
+                from accumulating PPR mass. Unlike teleportation (additive),
+                gating is subtractive — it removes noise passages from the
+                walk entirely, redistributing their mass to relevant ones.
+                Works independently of neural_weight (can gate with weight=0).
+            reranker_scores: Pre-computed cross-encoder scores per passage.
+                Dict[sentence_id, relevance_score]. Used for reranker gate
+                and/or reranker teleportation. Per APPNP: "predict then
+                propagate" — the reranker predicts, PPR propagates.
+            reranker_gate_threshold: Minimum reranker score to survive.
+                Passages below this are gated (zeroed each iteration).
+                Cross-encoder scores are much more discriminative than
+                cosine, so this gate is effective where cosine gate fails.
+            reranker_teleport_weight: If > 0, blend reranker scores into
+                PPR personalization vector (like neural_weight but using
+                cross-encoder scores instead of cosine).
 
         Returns:
             Tuple of:
@@ -648,10 +672,15 @@ class HippoRAG2PPR:
             if idx is not None:
                 structural_p[idx] += weight
 
-        # Neural teleportation: cosine(query, passage_emb) for all passages
+        # Neural cosine computation: used for teleportation AND/OR gating
         neural_p = [0.0] * self._node_count
         neural_active = False
-        if neural_teleportation is not None and self._passage_embeddings and neural_weight > 0:
+        gated_passages: set = set()  # passage indices blocked by neural gate
+        need_cosines = (
+            (neural_teleportation is not None and self._passage_embeddings)
+            and (neural_weight > 0 or neural_gate_threshold > 0)
+        )
+        if need_cosines:
             import numpy as np
             q = np.array(neural_teleportation, dtype=np.float32)
             q_norm = np.linalg.norm(q)
@@ -669,20 +698,87 @@ class HippoRAG2PPR:
                     norms = np.linalg.norm(mat, axis=1, keepdims=True)
                     norms = np.maximum(norms, 1e-10)
                     mat = mat / norms
-                    cosines = mat @ q  # shape: (n_passages,)
-                    # ReLU: only positive similarities contribute
-                    cosines = np.maximum(cosines, 0.0)
-                    for i, idx in enumerate(passage_indices):
-                        neural_p[idx] = float(cosines[i])
-                    neural_active = True
-                    logger.info(
-                        "neural_teleportation_computed",
-                        passages=len(passage_indices),
-                        max_cosine=float(np.max(cosines)),
-                        min_cosine=float(np.min(cosines)),
-                        mean_cosine=float(np.mean(cosines)),
-                        neural_weight=neural_weight,
-                    )
+                    raw_cosines = mat @ q  # shape: (n_passages,)
+                    raw_cosines = np.maximum(raw_cosines, 0.0)
+
+                    # Neural gate: block passages below gate threshold
+                    if neural_gate_threshold > 0:
+                        for i, idx in enumerate(passage_indices):
+                            if raw_cosines[i] < neural_gate_threshold:
+                                gated_passages.add(idx)
+                        logger.info(
+                            "neural_gate_applied",
+                            total_passages=len(passage_indices),
+                            gated=len(gated_passages),
+                            surviving=len(passage_indices) - len(gated_passages),
+                            gate_threshold=neural_gate_threshold,
+                        )
+
+                    # Neural teleportation (only if weight > 0)
+                    if neural_weight > 0:
+                        cosines = raw_cosines.copy()
+                        if neural_cosine_threshold > 0:
+                            cosines = np.where(cosines >= neural_cosine_threshold, cosines, 0.0)
+                        if neural_cosine_power != 1.0:
+                            cosines = cosines ** neural_cosine_power
+                        for i, idx in enumerate(passage_indices):
+                            neural_p[idx] = float(cosines[i])
+                        neural_active = True
+                        nonzero_count = int(np.count_nonzero(cosines))
+                        logger.info(
+                            "neural_teleportation_computed",
+                            passages=len(passage_indices),
+                            nonzero=nonzero_count,
+                            max_cosine=float(np.max(cosines)),
+                            min_cosine=float(np.min(cosines)),
+                            mean_cosine=float(np.mean(cosines)),
+                            neural_weight=neural_weight,
+                            cosine_threshold=neural_cosine_threshold,
+                            cosine_power=neural_cosine_power,
+                        )
+
+        # Reranker gate & teleportation: cross-encoder scores (more discriminative than cosine)
+        if reranker_scores:
+            # Build reranker gate set
+            for node_id, score in reranker_scores.items():
+                if reranker_gate_threshold > 0 and score < reranker_gate_threshold:
+                    idx = self._node_to_idx.get(node_id)
+                    if idx is not None:
+                        gated_passages.add(idx)
+
+            # Reranker teleportation: blend reranker scores into personalization
+            if reranker_teleport_weight > 0:
+                reranker_p = [0.0] * self._node_count
+                for node_id, score in reranker_scores.items():
+                    idx = self._node_to_idx.get(node_id)
+                    if idx is not None and score > 0:
+                        reranker_p[idx] = score
+                rr_total = sum(reranker_p)
+                if rr_total > 0:
+                    reranker_p = [p / rr_total for p in reranker_p]
+                    # Blend: structural * (1-w) + reranker * w
+                    s_total = sum(structural_p)
+                    if s_total > 0:
+                        structural_p = [p / s_total for p in structural_p]
+                    personalization = [
+                        (1.0 - reranker_teleport_weight) * structural_p[i]
+                        + reranker_teleport_weight * reranker_p[i]
+                        for i in range(self._node_count)
+                    ]
+                    neural_active = False  # skip cosine blending — reranker supersedes
+
+            surviving_count = sum(
+                1 for idx in range(self._node_count)
+                if self._node_types.get(idx) == "passage" and idx not in gated_passages
+            )
+            logger.info(
+                "reranker_gate_applied",
+                total_scored=len(reranker_scores),
+                gated=len(gated_passages),
+                surviving=surviving_count,
+                gate_threshold=reranker_gate_threshold,
+                teleport_weight=reranker_teleport_weight,
+            )
 
         # Blend structural and neural personalization
         if neural_active:
@@ -811,6 +907,13 @@ class HippoRAG2PPR:
                 for i in range(self._node_count):
                     new_rank[i] += dangling_mass * personalization[i]
 
+            # Neural gate: zero out mass at gated passage nodes.
+            # Their mass is effectively lost, causing other passages to
+            # receive proportionally more on subsequent iterations via restart.
+            if gated_passages:
+                for idx in gated_passages:
+                    new_rank[idx] = 0.0
+
             # Check convergence (L1 norm)
             diff = sum(abs(new_rank[i] - rank[i]) for i in range(self._node_count))
             rank = new_rank
@@ -854,6 +957,439 @@ class HippoRAG2PPR:
             community_balance=community_balance,
             community_balance_alpha=community_balance_alpha,
             community_count=len(self._community_sizes),
+            top_passage_score=passage_scores[0][1] if passage_scores else 0.0,
+            top_entity_score=entity_scores[0][1] if entity_scores else 0.0,
+        )
+
+        return passage_scores, entity_scores
+
+    def run_appnp(
+        self,
+        query_embedding: List[float],
+        alpha: float = 0.15,
+        max_iterations: int = 20,
+        convergence_threshold: float = 1e-6,
+        entity_seeds: Optional[Dict[str, float]] = None,
+        seed_weight: float = 0.0,
+        reranker_predictions: Optional[Dict[str, float]] = None,
+        self_loop_weight: float = 1.0,
+    ) -> Tuple[List[Tuple[str, float]], List[Tuple[str, float]]]:
+        """True APPNP: Predict then Propagate (Gasteiger et al., ICLR 2019).
+
+        Follows the paper's exact architecture:
+          1. PREDICT: neural predictor scores for ALL passages
+          2. PROPAGATE: preds = (1-α)·Â_sym·preds + α·predictions
+
+        The predictor can be:
+          - Cosine similarity (default): FREE, uses pre-loaded embeddings.
+            Weak discriminator (scores cluster in 0.08-0.18 range).
+          - Cross-encoder reranker: one API call (~380ms), highly discriminative.
+            This is the APPNP equivalent of a trained MLP predictor.
+
+        Key differences from run_ppr():
+          - Personalization = neural predictions for ALL passage nodes
+            (not sparse entity seeds)
+          - Teleportation → neural predictions (not seed entities)
+          - Symmetric normalization D^{-½}·A·D^{-½} throughout
+            (hub penalty emerges naturally: edge = 1/√(d_i·d_j))
+          - No ad-hoc hub penalty needed
+
+        Args:
+            query_embedding: Query vector for cosine prediction.
+            alpha: Teleportation probability back to neural predictions.
+                Higher α = more weight on neural predictions (less smoothing).
+                Lower α = more graph smoothing (APPNP paper uses 0.1-0.2).
+            max_iterations: Max power iteration steps.
+            convergence_threshold: L1 convergence threshold.
+            entity_seeds: Optional entity seeds to blend into predictions.
+                When provided, seed_weight controls the blend ratio.
+                This is a hybrid extension: APPNP + structural seeds.
+            seed_weight: Blend ratio for entity seeds [0, 1].
+                0.0 = pure APPNP (neural predictions only).
+                0.5 = equal blend of neural + structural.
+                Only used when entity_seeds is provided.
+            reranker_predictions: Pre-computed cross-encoder scores
+                {sentence_id: relevance_score}. When provided, these
+                replace cosine as the prediction signal. This is the
+                APPNP equivalent of a trained MLP — highly discriminative.
+
+        Returns:
+            Tuple of passage_scores and entity_scores (same as run_ppr).
+        """
+        import numpy as np
+
+        if self._node_count == 0:
+            return [], []
+
+        # ── Step 1: PREDICT ────────────────────────────────────────────
+        # Use reranker scores if available (discriminative predictor),
+        # otherwise fall back to cosine similarity (weak but free).
+        predictions = np.zeros(self._node_count, dtype=np.float64)
+        passage_count = 0
+        predictor_type = "cosine"
+
+        if reranker_predictions:
+            predictor_type = "reranker"
+            for node_id, score in reranker_predictions.items():
+                idx = self._node_to_idx.get(node_id)
+                if idx is not None:
+                    predictions[idx] = max(score, 0.0)
+                    passage_count += 1
+        else:
+            # Cosine prediction: FREE, uses pre-loaded embeddings
+            q = np.array(query_embedding, dtype=np.float32)
+            q_norm = np.linalg.norm(q)
+            if q_norm == 0:
+                logger.warning("appnp_zero_query_embedding")
+                return [], []
+            q = q / q_norm
+
+            for node_id, emb in self._passage_embeddings.items():
+                idx = self._node_to_idx.get(node_id)
+                if idx is None:
+                    continue
+                e = np.array(emb, dtype=np.float32)
+                e_norm = np.linalg.norm(e)
+                if e_norm > 0:
+                    cos = float(np.dot(q, e / e_norm))
+                    predictions[idx] = max(cos, 0.0)  # ReLU: no negative mass
+                    passage_count += 1
+
+        # Optionally blend entity seeds into predictions
+        if entity_seeds and seed_weight > 0:
+            structural = np.zeros(self._node_count, dtype=np.float64)
+            for node_id, weight in entity_seeds.items():
+                idx = self._node_to_idx.get(node_id)
+                if idx is not None:
+                    structural[idx] = weight
+            s_sum = structural.sum()
+            p_sum = predictions.sum()
+            if s_sum > 0:
+                structural /= s_sum
+            if p_sum > 0:
+                predictions /= p_sum
+            predictions = (1.0 - seed_weight) * predictions + seed_weight * structural
+
+        # Normalize predictions to form a probability distribution
+        pred_sum = predictions.sum()
+        if pred_sum > 0:
+            predictions /= pred_sum
+        else:
+            logger.warning("appnp_zero_predictions", passage_count=passage_count)
+            return [], []
+
+        logger.info(
+            "appnp_predict",
+            predictor=predictor_type,
+            passages=passage_count,
+            nonzero=int(np.count_nonzero(predictions)),
+            max_pred=float(np.max(predictions)),
+            min_nonzero=float(np.min(predictions[predictions > 0])) if np.any(predictions > 0) else 0.0,
+            seed_weight=seed_weight,
+            has_entity_seeds=bool(entity_seeds),
+        )
+
+        # ── Step 2: PROPAGATE ──────────────────────────────────────────
+        # APPNP power iteration with SYMMETRIC normalization:
+        #   preds = (1-α) · Â_sym · preds + α · predictions
+        #
+        # Following the paper's calc_A_hat() exactly:
+        #   Â = D^{-½} · (A + I) · D^{-½}
+        # The "+I" adds self-loops (renormalization trick, Kipf & Welling 2017).
+        # Self-loops let nodes retain their own predictions during propagation
+        # instead of having them overwritten by neighbors.
+
+        # Precompute degree WITH self-loops: d_i = Σ_j A_ij + 1 (self-loop)
+        # Paper: A = adj_matrix + sp.eye(nnodes); D_vec = np.sum(A, axis=1)
+        sqrt_degree = np.zeros(self._node_count, dtype=np.float64)
+        self_loop_weight = 1.0  # Paper uses identity matrix (weight=1)
+        for idx in range(self._node_count):
+            d = self._out_weight_sum.get(idx, 0.0) + self_loop_weight
+            sqrt_degree[idx] = math.sqrt(d)
+
+        preds = predictions.copy()
+
+        for iteration in range(max_iterations):
+            # Teleportation component: α · predictions
+            new_preds = alpha * predictions
+
+            # Propagation component: (1-α) · Â_sym · preds
+            for src in range(self._node_count):
+                if preds[src] == 0.0:
+                    continue
+                sqrt_src = sqrt_degree[src]
+
+                # Self-loop: node retains some of its own value
+                # Paper: A+I means node src has an edge to itself with weight 1
+                self_share = (1.0 - alpha) * preds[src] * self_loop_weight / (sqrt_src * sqrt_src)
+                new_preds[src] += self_share
+
+                for tgt, edge_weight in self._adj.get(src, []):
+                    sqrt_tgt = sqrt_degree[tgt]
+                    # D^{-½} · (A+I) · D^{-½}
+                    share = (1.0 - alpha) * preds[src] * edge_weight / (sqrt_src * sqrt_tgt)
+                    new_preds[tgt] += share
+
+            # Check convergence
+            diff = float(np.sum(np.abs(new_preds - preds)))
+            preds = new_preds
+
+            if diff < convergence_threshold:
+                logger.debug("appnp_converged", iteration=iteration, diff=diff)
+                break
+
+        # ── Extract results ────────────────────────────────────────────
+        passage_scores: List[Tuple[str, float]] = []
+        entity_scores: List[Tuple[str, float]] = []
+
+        for idx in range(self._node_count):
+            node_id = self._idx_to_node[idx]
+            node_type = self._node_types[idx]
+            score = float(preds[idx])
+
+            if node_type == "passage":
+                passage_scores.append((node_id, score))
+            elif node_type == "entity":
+                name = self._node_names[idx]
+                entity_scores.append((name, score))
+
+        passage_scores.sort(key=lambda x: x[1], reverse=True)
+        entity_scores.sort(key=lambda x: x[1], reverse=True)
+
+        logger.info(
+            "appnp_complete",
+            predictor=predictor_type,
+            alpha=alpha,
+            iterations=min(iteration + 1, max_iterations) if self._node_count > 0 else 0,
+            passages=passage_count,
+            seed_weight=seed_weight,
+            top_passage_score=passage_scores[0][1] if passage_scores else 0.0,
+            top_entity_score=entity_scores[0][1] if entity_scores else 0.0,
+        )
+
+        return passage_scores, entity_scores
+
+    def run_gpr(
+        self,
+        entity_seeds: Dict[str, float],
+        passage_seeds: Dict[str, float],
+        num_hops: int = 10,
+        hop_profile: str = "ppr",
+        hop_weights_csv: str = "",
+        damping: float = 0.5,
+        hub_penalty_mode: str = "none",
+        hub_penalty_alpha: float = 1.0,
+        hub_penalty_base: float = 2.0,
+        symmetric_norm: str = "off",
+        community_balance: bool = False,
+        community_balance_alpha: float = 0.0,
+    ) -> Tuple[List[Tuple[str, float]], List[Tuple[str, float]]]:
+        """GPR-GNN style per-hop weighted propagation (ICLR 2021).
+
+        Instead of standard PPR's coupled teleportation+walk loop, this
+        separates propagation from aggregation:
+
+        1. H^0 = personalization vector (seed scores)
+        2. H^k = A_norm @ H^(k-1) for k = 1..K  (pure graph walk, no restart)
+        3. final = Σ γ_k * H^k  (weighted combination of all hops)
+
+        This allows independent control of each hop's contribution.
+        Key insight from GPR-GNN: for heterophilic graphs (cross-topic
+        passages behind hubs), the optimal per-hop weights differ from
+        PPR's exponential decay.
+
+        Args:
+            entity_seeds: {entity_id: weight} — same as run_ppr.
+            passage_seeds: {sentence_id: weight} — same as run_ppr.
+            num_hops: Number of propagation hops K (default 10).
+            hop_profile: Weight profile for per-hop combination.
+                "ppr": (1-α)*α^k — mimics standard PPR decay.
+                "uniform": 1/(K+1) — equal weight for all hops.
+                "linear_decay": (K+1-k)/sum — linearly decreasing.
+                "far_boost": k+1/sum — linearly increasing (far hops).
+                "mid_boost": gaussian centered at K//2.
+                "custom": use hop_weights_csv.
+            hop_weights_csv: Comma-separated weights for "custom" profile.
+                E.g. "1.0,0.8,1.2,1.5,1.0" for 5 hops.
+            damping: Used only for "ppr" profile to compute α^k decay.
+            hub_penalty_mode: Same as run_ppr.
+            hub_penalty_alpha: Same as run_ppr.
+            hub_penalty_base: Same as run_ppr.
+            symmetric_norm: Same as run_ppr.
+            community_balance: Same as run_ppr.
+            community_balance_alpha: Same as run_ppr.
+
+        Returns:
+            Same as run_ppr: (passage_scores, entity_scores) sorted desc.
+        """
+        if self._node_count == 0:
+            return [], []
+
+        # Build personalization vector (same as run_ppr structural seeds)
+        personalization = [0.0] * self._node_count
+
+        for node_id, weight in entity_seeds.items():
+            idx = self._node_to_idx.get(node_id)
+            if idx is not None:
+                personalization[idx] += weight
+
+        for node_id, weight in passage_seeds.items():
+            idx = self._node_to_idx.get(node_id)
+            if idx is not None:
+                personalization[idx] += weight
+
+        # Community-balanced personalization (same logic as run_ppr)
+        if community_balance and self._community_sizes:
+            for idx in range(self._node_count):
+                if personalization[idx] > 0 and idx in self._community_id:
+                    cid = self._community_id[idx]
+                    c_size = self._community_sizes.get(cid, 1)
+                    if community_balance_alpha > 0:
+                        personalization[idx] /= c_size ** community_balance_alpha
+                    else:
+                        personalization[idx] /= math.log(2 + c_size)
+
+        # Normalize personalization to sum to 1
+        total_p = sum(personalization)
+        if total_p <= 0:
+            logger.warning("gpr_no_valid_seeds")
+            return [], []
+        personalization = [p / total_p for p in personalization]
+
+        # Precompute effective out-weight sums
+        effective_out_sum = dict(self._out_weight_sum)
+
+        # Precompute hub penalty factors (entity nodes only)
+        hub_factor: Dict[int, float] = {}
+        if hub_penalty_mode != "none":
+            for idx in range(self._node_count):
+                if self._node_types.get(idx) == "entity":
+                    degree = max(len(self._adj.get(idx, [])), 1)
+                    if hub_penalty_mode == "log":
+                        hub_factor[idx] = 1.0 / math.log(hub_penalty_base + degree) ** hub_penalty_alpha
+
+        # Precompute sqrt for symmetric normalization
+        sqrt_out: Dict[int, float] = {}
+        use_symmetric = symmetric_norm in ("all", "entity_only")
+        if use_symmetric:
+            for idx in range(self._node_count):
+                s = effective_out_sum.get(idx, 0.0)
+                sqrt_out[idx] = math.sqrt(s) if s > 0 else 0.0
+
+        # ---- Per-hop propagation (no teleportation restart) ----
+        # H^0 = personalization, H^k = A_norm @ H^(k-1)
+        hop_results: List[List[float]] = [list(personalization)]  # H^0
+        current = list(personalization)
+
+        for hop in range(num_hops):
+            next_hop = [0.0] * self._node_count
+            for src in range(self._node_count):
+                if current[src] == 0.0:
+                    continue
+                out_sum = effective_out_sum.get(src, 0.0)
+                if out_sum == 0.0:
+                    continue
+
+                for tgt, edge_weight in self._adj[src]:
+                    apply_sym = False
+                    if use_symmetric:
+                        if symmetric_norm == "all":
+                            apply_sym = True
+                        elif symmetric_norm == "entity_only":
+                            apply_sym = (
+                                self._node_types.get(src) == "entity"
+                                and self._node_types.get(tgt) == "entity"
+                            )
+
+                    if apply_sym:
+                        sqrt_src = sqrt_out.get(src, 0.0)
+                        sqrt_tgt = sqrt_out.get(tgt, 0.0)
+                        if sqrt_src > 0 and sqrt_tgt > 0:
+                            share = current[src] * edge_weight / (sqrt_src * sqrt_tgt)
+                        else:
+                            continue
+                    else:
+                        share = current[src] * edge_weight / out_sum
+
+                    # Hub penalty
+                    if src in hub_factor:
+                        share *= hub_factor[src]
+
+                    next_hop[tgt] += share
+
+            # Normalize each hop to sum to 1 to prevent mass explosion/collapse
+            hop_total = sum(next_hop)
+            if hop_total > 0:
+                next_hop = [v / hop_total for v in next_hop]
+
+            hop_results.append(next_hop)
+            current = next_hop
+
+        # ---- Compute per-hop weights (γ_k) ----
+        K = num_hops
+        if hop_profile == "custom" and hop_weights_csv:
+            raw = [float(w) for w in hop_weights_csv.split(",")]
+            # Pad or truncate to K+1
+            gamma = (raw + [0.0] * (K + 1))[:K + 1]
+        elif hop_profile == "uniform":
+            gamma = [1.0 / (K + 1)] * (K + 1)
+        elif hop_profile == "linear_decay":
+            raw = [float(K + 1 - k) for k in range(K + 1)]
+            s = sum(raw)
+            gamma = [w / s for w in raw]
+        elif hop_profile == "far_boost":
+            raw = [float(k + 1) for k in range(K + 1)]
+            s = sum(raw)
+            gamma = [w / s for w in raw]
+        elif hop_profile == "mid_boost":
+            center = K / 2.0
+            sigma = max(K / 4.0, 1.0)
+            raw = [math.exp(-0.5 * ((k - center) / sigma) ** 2) for k in range(K + 1)]
+            s = sum(raw)
+            gamma = [w / s for w in raw]
+        else:
+            # "ppr" profile: mimics standard PPR decay
+            alpha = damping
+            raw = [(1.0 - alpha) * (alpha ** k) for k in range(K + 1)]
+            s = sum(raw)
+            gamma = [w / s for w in raw]
+
+        # ---- Weighted combination: final = Σ γ_k * H^k ----
+        final = [0.0] * self._node_count
+        for k in range(K + 1):
+            weight_k = gamma[k]
+            if weight_k == 0.0:
+                continue
+            for i in range(self._node_count):
+                final[i] += weight_k * hop_results[k][i]
+
+        # Extract passage scores and entity scores
+        passage_scores: List[Tuple[str, float]] = []
+        entity_scores: List[Tuple[str, float]] = []
+
+        for idx in range(self._node_count):
+            node_id = self._idx_to_node[idx]
+            node_type = self._node_types[idx]
+            score = final[idx]
+
+            if node_type == "passage":
+                passage_scores.append((node_id, score))
+            elif node_type == "entity":
+                name = self._node_names[idx]
+                entity_scores.append((name, score))
+
+        passage_scores.sort(key=lambda x: x[1], reverse=True)
+        entity_scores.sort(key=lambda x: x[1], reverse=True)
+
+        logger.info(
+            "hipporag2_gpr_complete",
+            num_hops=num_hops,
+            hop_profile=hop_profile,
+            gamma_first3=gamma[:3],
+            gamma_last3=gamma[-3:] if len(gamma) >= 3 else gamma,
+            hub_penalty=hub_penalty_mode,
+            hub_penalty_alpha=hub_penalty_alpha,
+            symmetric_norm=symmetric_norm,
             top_passage_score=passage_scores[0][1] if passage_scores else 0.0,
             top_entity_score=entity_scores[0][1] if entity_scores else 0.0,
         )

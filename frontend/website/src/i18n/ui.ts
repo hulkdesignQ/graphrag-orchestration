@@ -153,7 +153,6 @@ export const ui = {
     "pricing.proplus.f3": "15,000 credits/month",
     "pricing.proplus.f4": "10 GB storage",
     "pricing.proplus.f5": "Advanced Analytics",
-    "pricing.proplus.f6": "API Access",
     "pricing.proplus.cta": "Upgrade to Pro+",
     "pricing.business.name": "Business",
     "pricing.business.price": "$19",

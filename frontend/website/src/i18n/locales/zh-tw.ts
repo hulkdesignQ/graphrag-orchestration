@@ -139,7 +139,6 @@ export const zhTw: Record<string, string> = {
   "pricing.proplus.f3": "每月 15,000 點數",
   "pricing.proplus.f4": "10 GB 儲存空間",
   "pricing.proplus.f5": "進階分析",
-  "pricing.proplus.f6": "API 存取",
   "pricing.proplus.cta": "升級至 Pro+",
   "pricing.business.name": "Business",
   "pricing.business.price": "$19",

@@ -138,7 +138,6 @@ export const nl: Record<string, string> = {
   "pricing.proplus.f3": "15.000 credits/maand",
   "pricing.proplus.f4": "10 GB opslag",
   "pricing.proplus.f5": "Geavanceerde analytics",
-  "pricing.proplus.f6": "API-toegang",
   "pricing.proplus.cta": "Upgraden naar Pro+",
   "pricing.business.name": "Business",
   "pricing.business.price": "$19",

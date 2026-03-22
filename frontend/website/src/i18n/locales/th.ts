@@ -139,7 +139,6 @@ export const th: Record<string, string> = {
   "pricing.proplus.f3": "15,000 เครดิต/เดือน",
   "pricing.proplus.f4": "10 GB พื้นที่จัดเก็บ",
   "pricing.proplus.f5": "การวิเคราะห์ขั้นสูง",
-  "pricing.proplus.f6": "การเข้าถึง API",
   "pricing.proplus.cta": "อัปเกรดเป็น Pro+",
   "pricing.business.name": "Business",
   "pricing.business.price": "$19",
