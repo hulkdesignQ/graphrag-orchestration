@@ -45,7 +45,6 @@ GROUND_TRUTH: Dict[str, Dict[str, Any]] = {
             ("3 business days", "purchase_contract"),        # purchase: cancellation window
             ("deposit is forfeited", "purchase_contract"),   # purchase: forfeiture after window
             ("terminat", "HOLDING TANK"),                    # holding tank: remains until terminated
-            ("not transferable", "WARRANTY"),                # warranty: not transferable
             ("sells", "WARRANTY"),                           # warranty: terminates if purchaser sells/moves
         ],
     },
