@@ -29,17 +29,14 @@ const t = useTranslations(lang);
         <h3 class="text-xl font-semibold text-apple-text">{t("pricing.free.name")}</h3>
         <div class="mt-4 text-5xl font-bold text-apple-text">{t("pricing.free.price")}</div>
         <p class="text-sm text-apple-secondary mt-2">{t("pricing.free.desc")}</p>
-        <ul class="mt-8 text-sm text-apple-secondary text-left space-y-3">
+        <ul class="mt-8 text-sm text-apple-secondary text-left space-y-3 flex-grow">
           <li>{t("pricing.free.f1")}</li>
           <li>{t("pricing.free.f2")}</li>
           <li>{t("pricing.free.f3")}</li>
           <li>{t("pricing.free.f4")}</li>
-          <li class="invisible">&nbsp;</li>
+          <li class="text-apple-tertiary">{t("pricing.free.note")}</li>
         </ul>
-        <div class="mt-auto">
-          <a href="https://evidoc.hulkdesign.com" class="block py-3 text-center text-apple-blue font-medium rounded-full border border-apple-blue/30 hover:bg-apple-blue/5 transition-colors">{t("pricing.free.cta")}</a>
-          <p class="text-xs text-apple-tertiary mt-2">{t("pricing.free.note")}</p>
-        </div>
+        <a href="https://evidoc.hulkdesign.com" class="mt-8 block py-3 text-apple-blue font-medium rounded-full border border-apple-blue/30 hover:bg-apple-blue/5 transition-colors">{t("pricing.free.cta")}</a>
       </div>
 
       <!-- Pro -->
@@ -56,7 +53,6 @@ const t = useTranslations(lang);
         </ul>
         <a href="https://evidoc.hulkdesign.com/#/dashboard" class="mt-8 block py-3 bg-apple-blue text-white font-medium rounded-full hover:bg-apple-bluehover transition-colors">{t("pricing.pro.cta")}</a>
       </div>
-
       <!-- Pro+ -->
       <div class="bg-white p-8 rounded-2xl text-center flex flex-col relative shadow-lg ring-1 ring-apple-blue/20">
         <span class="absolute -top-3 left-1/2 -translate-x-1/2 bg-apple-blue text-white text-xs font-medium px-4 py-1 rounded-full">{t("pricing.proplus.badge")}</span>
