@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Folder24Regular } from "@fluentui/react-icons";
 import type { Folder } from "../../api/folders";
 import styles from "../../pages/files/Files.module.css";
 
@@ -58,7 +59,7 @@ export const MoveToFolderDialog = ({ filename, folders, currentFolderId, onMove,
                                 }}
                                 onClick={() => folder.id !== currentFolderId && setSelectedFolderId(folder.id)}
                             >
-                                📁 {folder.name}
+                                <Folder24Regular /> {folder.name}
                             </div>
                             {childrenOf(folder.id).map(child => (
                                 <div
@@ -77,7 +78,7 @@ export const MoveToFolderDialog = ({ filename, folders, currentFolderId, onMove,
                                     }}
                                     onClick={() => child.id !== currentFolderId && setSelectedFolderId(child.id)}
                                 >
-                                    📁 {child.name}
+                                    <Folder24Regular /> {child.name}
                                 </div>
                             ))}
                         </div>

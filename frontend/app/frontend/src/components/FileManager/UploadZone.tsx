@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState, DragEvent, ChangeEvent } from "react";
 import { useTranslation } from "react-i18next";
+import { Clock24Regular, Folder24Regular, ArrowUpload24Regular } from "@fluentui/react-icons";
 import styles from "../../pages/files/Files.module.css";
 
 interface UploadZoneProps {
@@ -72,7 +73,7 @@ export const UploadZone = ({ onUpload, uploading, progress, acceptedTypes, uploa
             aria-disabled={disabled}
             title={disabled ? disabledMessage : undefined}
         >
-            <span className={styles.uploadIcon}>{uploading ? "⏳" : disabled ? "📁" : "📤"}</span>
+            <span className={styles.uploadIcon}>{uploading ? <Clock24Regular /> : disabled ? <Folder24Regular /> : <ArrowUpload24Regular />}</span>
             {uploading ? (
                 <>
                     <p className={styles.uploadText}>

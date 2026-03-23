@@ -124,6 +124,10 @@
     flex-shrink: 0;
     width: 1.5rem;
     text-align: center;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .navLabel {
@@ -135,6 +139,63 @@
 .sidebar:hover .navLabel,
 .sidebarOpen .navLabel {
     opacity: 1;
+}
+
+/* Onboarding numbered badge on nav icon */
+.onboardingBadge {
+    position: absolute;
+    top: -6px;
+    right: -8px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #0071e3;
+    color: #fff;
+    font-size: 0.6rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+    animation: onboardingPulse 2s ease-in-out infinite;
+}
+
+@keyframes onboardingPulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.15); }
+}
+
+/* Hint text shown next to nav item when onboarding */
+.onboardingHint {
+    font-size: 0.7rem;
+    color: #a0c4ff;
+    font-weight: 400;
+    white-space: nowrap;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+}
+
+.sidebar:hover .onboardingHint,
+.sidebarOpen .onboardingHint {
+    opacity: 1;
+}
+
+/* Dismiss button at sidebar bottom */
+.onboardingDismiss {
+    margin: 0.5rem 0.75rem;
+    padding: 0.4rem 0.75rem;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: #a0c4ff;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.onboardingDismiss:hover {
+    background: rgba(255, 255, 255, 0.15);
 }
 
 .navBadge {
@@ -151,12 +212,6 @@
 .sidebar:hover .navBadge,
 .sidebarOpen .navBadge {
     opacity: 1;
-}
-
-.navDivider {
-    height: 1px;
-    background: rgba(255, 255, 255, 0.1);
-    margin: 0.5rem 0.75rem;
 }
 
 .navSpacer {

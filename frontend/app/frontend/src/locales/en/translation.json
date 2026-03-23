@@ -415,27 +415,9 @@
         "noUserActivity": "No user activity data yet. Data will appear once analytics are connected."
     },
     "onboarding": {
-        "pageTitle": "Getting Started",
-        "headline": "Three steps. That's it.",
-        "subheadline": "From \"I have 200 PDFs\" to \"here's the exact answer, with proof.\"",
-        "step1Title": "Drop Your Files",
-        "step1Desc": "PDFs, Word docs, spreadsheets, scanned images — 15+ formats. Drag, drop, done.",
-        "step2Title": "Evidoc Connects the Dots",
-        "step2Desc": "Every name, date, clause, and concept is linked across all your documents.",
-        "step3Title": "Ask. Verify. Done.",
-        "step3Desc": "Ask in plain English (or 12 other languages). Click any citation to see the highlighted source.",
-        "connectNote": "This happens automatically after you upload — no setup needed.",
-        "uploadCta": "Go to Files",
-        "startChatting": "Start chatting",
-        "back": "Back",
-        "next": "Next",
-        "skip": "Skip",
-        "sampleHint": "No documents yet?",
-        "loadSamples": "Load samples",
-        "loadingSamples": "Loading...",
-        "samplesReady": "Loaded!",
-        "retryLoad": "Retry",
-        "welcomeBanner": "New to Evidoc? Check out our Getting Started guide to learn the basics.",
-        "welcomeBannerAction": "Show me →"
+        "step1": "Upload your documents",
+        "step2": "Ask your first question",
+        "step3": "Check usage & plans",
+        "dismiss": "Got it"
     }
 }

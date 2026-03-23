@@ -44,13 +44,6 @@ const router = createHashRouter([
                 element: <Dashboard />
             },
             {
-                path: "getting-started",
-                lazy: async () => {
-                    const { default: Component } = await import("./pages/getting-started/GettingStarted");
-                    return { Component };
-                }
-            },
-            {
                 path: "admin",
                 lazy: async () => {
                     const { default: Component } = await import("./pages/admin/AdminDashboard");

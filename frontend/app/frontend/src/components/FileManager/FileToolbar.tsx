@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import { Delete24Regular, Clock24Regular } from "@fluentui/react-icons";
 
 import type { AnalysisStatus } from "../../api/folders";
 import styles from "../../pages/files/Files.module.css";
@@ -78,7 +79,7 @@ export const FileToolbar = ({
                         {t("fileToolbar.deselect")}
                     </button>
                     <button className={styles.toolbarBtnDanger} onClick={onDeleteSelected}>
-                        🗑️ {t("fileToolbar.delete", { count: selectedCount })}
+                        <Delete24Regular /> {t("fileToolbar.delete", { count: selectedCount })}
                     </button>
                 </>
             ) : (
@@ -95,7 +96,7 @@ export const FileToolbar = ({
             {activeFolderId && isUserFolder && onAnalyzeFolder && (
                 analysisStatus === "analyzing" ? (
                     <button className={styles.toolbarBtnAnalyzing} disabled>
-                        ⏳ {t("files.analyzing", "Analyzing…")}
+                        <Clock24Regular /> {t("files.analyzing", "Analyzing…")}
                     </button>
                 ) : analysisStatus === "stale" ? (
                     <button className={styles.toolbarBtnAnalyze} onClick={onAnalyzeFolder}>

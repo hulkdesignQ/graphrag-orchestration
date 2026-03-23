@@ -4,6 +4,7 @@ import { Dropdown, Option, Spinner } from "@fluentui/react-components";
 import type { OptionOnSelectData, SelectionEvents } from "@fluentui/react-components";
 import { useMsal } from "@azure/msal-react";
 
+import { Warning24Regular } from "@fluentui/react-icons";
 import { useLogin, getToken } from "../../authConfig";
 import { listFoldersApi } from "../../api/folders";
 import type { Folder } from "../../api/folders";
@@ -79,7 +80,7 @@ export const FolderSelector = ({ selectedFolderId, onFolderChange }: FolderSelec
         return (
             <div className={styles.container}>
                 <label className={styles.label}>{t("folderSelector.label")}</label>
-                <span className={styles.errorText}>⚠ {t("folderSelector.loadError")}</span>
+                <span className={styles.errorText}><Warning24Regular /> {t("folderSelector.loadError")}</span>
             </div>
         );
     }
@@ -119,10 +120,10 @@ export const FolderSelector = ({ selectedFolderId, onFolderChange }: FolderSelec
                     🎯 {t("folderSelector.demo")}
                 </Option>
                 {analyzedFolders.map(folder => {
-                    const label = `📁 ${folder.name}${folder.analysis_status === "stale" ? " ⚠" : ""}`;
+                    const textLabel = `📁 ${folder.name}${folder.analysis_status === "stale" ? " ⚠" : ""}`;
                     return (
-                        <Option key={folder.id} value={folder.analysis_group_id || folder.id} text={label}>
-                            {label}
+                        <Option key={folder.id} value={folder.analysis_group_id || folder.id} text={textLabel}>
+                            📁 {folder.name}{folder.analysis_status === "stale" && <> <Warning24Regular /></>}
                         </Option>
                     );
                 })}

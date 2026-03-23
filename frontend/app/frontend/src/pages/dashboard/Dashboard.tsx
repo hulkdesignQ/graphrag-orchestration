@@ -2,6 +2,18 @@ import { useEffect, useCallback, useState, useContext } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useMsal } from "@azure/msal-react";
 import { useTranslation } from "react-i18next";
+import {
+    LockClosed24Regular,
+    Key24Regular,
+    Warning24Regular,
+    Settings24Regular,
+    CheckmarkCircle24Regular,
+    Info24Regular,
+    Mic24Regular,
+    Globe24Regular,
+    CreditCardPerson24Regular,
+    ChartMultiple24Regular,
+} from "@fluentui/react-icons";
 import styles from "./Dashboard.module.css";
 import { useLogin, getToken, isUsingAppServicesLogin } from "../../authConfig";
 import { LoginContext } from "../../loginContext";
@@ -87,7 +99,7 @@ const Dashboard = () => {
             const token = client ? await getToken(client) : undefined;
             const [data, billing] = await Promise.all([
                 fetchDashboardAll(token),
-                fetchBillingConfig(),
+                fetchBillingConfig(token),
             ]);
             setProfile(data.profile);
             setUsage(data.usage);
@@ -134,7 +146,7 @@ const Dashboard = () => {
     if (!loggedIn) {
         return (
             <div className={styles.loginRequired}>
-                <span>🔒</span>
+                <LockClosed24Regular />
                 <h2>{t("dashboard.signInRequired")}</h2>
                 <p>{t("dashboard.signInToView")}</p>
             </div>
@@ -154,7 +166,7 @@ const Dashboard = () => {
     if (sessionExpired) {
         return (
             <div className={styles.loginRequired}>
-                <span>🔑</span>
+                <Key24Regular />
                 <h2>{t("dashboard.sessionExpired")}</h2>
                 <p>{t("dashboard.sessionExpiredMessage")}</p>
                 <button className={styles.upgradeButton} onClick={handleReLogin}>
@@ -168,7 +180,7 @@ const Dashboard = () => {
     if (error) {
         return (
             <div className={styles.errorContainer}>
-                <span>⚠️</span>
+                <Warning24Regular />
                 <p>{error}</p>
             </div>
         );
@@ -198,7 +210,7 @@ const Dashboard = () => {
                     </span>
                     {profile.is_admin && (
                         <Link to="/admin" className={styles.adminLink}>
-                            ⚙️ {t("dashboard.adminDashboard")}
+                            <Settings24Regular /> {t("dashboard.adminDashboard")}
                         </Link>
                     )}
                 </div>
@@ -207,12 +219,12 @@ const Dashboard = () => {
             {/* Stats */}
             {usage.data_degraded && (
                 <div className={styles.degradedBanner}>
-                    ⚠️ {t("dashboard.dataDegraded")}
+                    <Warning24Regular /> {t("dashboard.dataDegraded")}
                 </div>
             )}
             {billingMessage && (
                 <div className={`${styles.billingBanner} ${styles[`billing${billingMessage.type.charAt(0).toUpperCase() + billingMessage.type.slice(1)}`]}`}>
-                    <span>{billingMessage.type === "success" ? "✅" : billingMessage.type === "error" ? "⚠️" : "ℹ️"} {billingMessage.text}</span>
+                    <span>{billingMessage.type === "success" ? <CheckmarkCircle24Regular /> : billingMessage.type === "error" ? <Warning24Regular /> : <Info24Regular />} {billingMessage.text}</span>
                     <button className={styles.billingBannerClose} onClick={() => setBillingMessage(null)}>✕</button>
                 </div>
             )}
@@ -275,7 +287,7 @@ const Dashboard = () => {
                                     <td>{q.credits_used ?? "—"}</td>
                                     <td>
                                         {q.detected_language || q.speech_detected_language
-                                            ? `${q.was_speech_input ? "🎤 " : ""}${(q.speech_detected_language || q.detected_language || "").toUpperCase()}${q.was_translated ? " 🌐" : ""}`
+                                            ? <>{q.was_speech_input && <Mic24Regular style={{ fontSize: "0.85rem", verticalAlign: "middle" }} />} {(q.speech_detected_language || q.detected_language || "").toUpperCase()}{q.was_translated && <> <Globe24Regular style={{ fontSize: "0.85rem", verticalAlign: "middle" }} /></>}</>
                                             : "—"}
                                     </td>
                                 </tr>
@@ -322,8 +334,8 @@ const Dashboard = () => {
                                             <li key={fKey}>{t(`dashboard.${fKey}`)}</li>
                                         ))}
                                     </ul>
-                                    {info.advanced_analytics && <p className={styles.planCardDetail}>✅ {t("dashboard.featureAdvancedAnalytics")}</p>}
-                                    {info.api_access && <p className={styles.planCardDetail}>✅ {t("dashboard.featureApiAccess")}</p>}
+                                    {info.advanced_analytics && <p className={styles.planCardDetail}><CheckmarkCircle24Regular /> {t("dashboard.featureAdvancedAnalytics")}</p>}
+                                    {info.api_access && <p className={styles.planCardDetail}><CheckmarkCircle24Regular /> {t("dashboard.featureApiAccess")}</p>}
                                     <button
                                         className={`${styles.upgradeButton} ${tier === "free" && !isCurrent ? styles.upgradeButtonOutline : ""}`}
                                         disabled={isCurrent || checkoutLoading === tier || (!isCurrent && !isUpgrade && tier !== "free")}
@@ -365,7 +377,7 @@ const Dashboard = () => {
                                 <>
                                     {subscription.cancel_at_period_end && (
                                         <p className={styles.cancelNotice}>
-                                            ⚠️ {t("dashboard.cancelAtPeriodEnd", {
+                                            <Warning24Regular /> {t("dashboard.cancelAtPeriodEnd", {
                                                 date: subscription.current_period_end
                                                     ? new Date(subscription.current_period_end).toLocaleDateString()
                                                     : "—"
@@ -394,7 +406,7 @@ const Dashboard = () => {
                                     }
                                 }}
                             >
-                                💳 {t("dashboard.manageBilling")}
+                                <CreditCardPerson24Regular /> {t("dashboard.manageBilling")}
                             </button>
                         </div>
                     )}

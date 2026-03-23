@@ -1,6 +1,6 @@
 import { useRef, useState, useEffect, useContext, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { useSearchParams, useNavigate } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import readNDJSONStream from "ndjson-readablestream";
 
@@ -50,7 +50,6 @@ function getUserFriendlyError(error: unknown, t: (key: string) => string): strin
 
 const Chat = () => {
     const [searchParams] = useSearchParams();
-    const navigate = useNavigate();
     const folderId = searchParams.get("folder") || sessionStorage.getItem("selectedFolderId") || undefined;
     const [selectedFolderId, setSelectedFolderId] = useState<string | undefined>(folderId);
 
@@ -118,13 +117,6 @@ const Chat = () => {
     const [useAgenticKnowledgeBase, setUseAgenticRetrieval] = useState<boolean>(false);
     const [hideMinimalRetrievalReasoningOption, setHideMinimalRetrievalReasoningOption] = useState<boolean>(false);
     const streamingDisabledByOverrides = useAgenticKnowledgeBase && webSourceEnabled;
-
-    // Auto-redirect first-time users to the getting-started wizard
-    useEffect(() => {
-        if (!hasSeenOnboarding()) {
-            navigate("/getting-started", { replace: true });
-        }
-    }, []);
 
     const audio = useRef(new Audio()).current;
     const [isPlaying, setIsPlaying] = useState(false);
@@ -568,12 +560,11 @@ const Chat = () => {
                             <h2 className={styles.chatEmptyStateSubtitle}>{t("chatEmptyStateSubtitle")}</h2>
                             {!hasSeenOnboarding() && (
                                 <div className={styles.welcomeBanner}>
-                                    <span>🚀</span>
                                     <p className={styles.welcomeBannerText}>
-                                        {t("onboarding.welcomeBanner", "New to Evidoc? Check out our Getting Started guide to learn the basics.")}
+                                        {t("onboarding.welcomeBanner", "New to Evidoc? Start by uploading your documents, then come back to ask questions.")}
                                     </p>
-                                    <button className={styles.welcomeBannerLink} onClick={() => { markOnboardingSeen(); window.location.hash = "#/getting-started"; }}>
-                                        {t("onboarding.welcomeBannerAction", "Show me →")}
+                                    <button className={styles.welcomeBannerLink} onClick={() => { markOnboardingSeen(); window.location.hash = "#/files"; }}>
+                                        {t("onboarding.welcomeBannerAction", "Upload files →")}
                                     </button>
                                     <button className={styles.welcomeBannerDismiss} onClick={(e) => { markOnboardingSeen(); (e.target as HTMLElement).closest(`.${styles.welcomeBanner}`)?.remove(); }}>
                                         ✕

@@ -48,6 +48,7 @@ import { FolderSidebar } from "../../components/FileManager/FolderSidebar";
 import { MoveToFolderDialog } from "../../components/FileManager/MoveToFolderDialog";
 import { FilePreviewPanel } from "../../components/FileManager/FilePreviewPanel";
 import { Toast } from "../../components/FileManager/Toast";
+import { LockClosed24Regular, ChartMultiple24Regular, Clock24Regular, Warning24Regular, ArrowSwap24Regular, PeopleTeam24Regular, Delete24Regular, DismissCircle24Regular, Chat24Regular } from "@fluentui/react-icons";
 import styles from "./Files.module.css";
 
 export interface ToastMessage {
@@ -488,7 +489,7 @@ const Files = () => {
         return (
             <div className={styles.container}>
                 <div className={styles.emptyState}>
-                    <span className={styles.emptyIcon}>🔒</span>
+                    <span className={styles.emptyIcon}><LockClosed24Regular /></span>
                     <h2>{t("files.signInRequired")}</h2>
                     <p>{t("files.signInToManage")}</p>
                 </div>
@@ -553,12 +554,12 @@ const Files = () => {
                         <div className={styles.analysisCta}>
                             {activeFolder.analysis_error && (
                                 <div className={styles.analysisErrorBanner}>
-                                    <span className={styles.analysisErrorIcon}>❌</span>
+                                    <span className={styles.analysisErrorIcon}><DismissCircle24Regular /></span>
                                     <span className={styles.analysisErrorText}>Previous analysis failed: {activeFolder.analysis_error}</span>
                                 </div>
                             )}
                             <div className={styles.analysisCtaContent}>
-                                <span className={styles.analysisCtaIcon}>📊</span>
+                                <span className={styles.analysisCtaIcon}><ChartMultiple24Regular /></span>
                                 <div className={styles.analysisCtaText}>
                                     <strong>{t("files.readyToAnalyze", { count: recursiveFileCount ?? filteredFiles.length, defaultValue: `Ready to analyze all documents in this folder` })}</strong>
                                     <span>{t("files.analysisExplainer", "Build a knowledge graph from your files to enable AI-powered question answering.")}</span>
@@ -570,8 +571,8 @@ const Files = () => {
                                 disabled={analyzingFolderIds.has(activeFolder.id)}
                             >
                                 {analyzingFolderIds.has(activeFolder.id)
-                                    ? "⏳ Starting…"
-                                    : `🔍 ${t("files.analyzeNow", "Analyze Now")}`}
+                                    ? <><Clock24Regular /> Starting…</>
+                                    : <>{`🔍 ${t("files.analyzeNow", "Analyze Now")}`}</>}
                             </button>
                         </div>
                     )}
@@ -581,7 +582,7 @@ const Files = () => {
                         <div className={styles.analysisSummary}>
                             <div className={styles.analysisSummaryHeader}>
                                 <span className={styles.analysisSummaryIcon}>
-                                    {activeFolder.analysis_status === "analyzing" ? "⏳" : activeFolder.analysis_status === "stale" ? "⚠️" : "📊"}
+                                    {activeFolder.analysis_status === "analyzing" ? <Clock24Regular /> : activeFolder.analysis_status === "stale" ? <Warning24Regular /> : <ChartMultiple24Regular />}
                                 </span>
                                 <span className={styles.analysisSummaryTitle}>
                                     {activeFolder.analysis_status === "analyzing"
@@ -594,7 +595,7 @@ const Files = () => {
                             {/* Analysis error banner */}
                             {activeFolder.analysis_error && (
                                 <div className={styles.analysisErrorBanner}>
-                                    <span className={styles.analysisErrorIcon}>❌</span>
+                                    <span className={styles.analysisErrorIcon}><DismissCircle24Regular /></span>
                                     <span className={styles.analysisErrorText}>{activeFolder.analysis_error}</span>
                                 </div>
                             )}
@@ -606,16 +607,16 @@ const Files = () => {
                                     <span className={styles.analysisStat}>🔗 {activeFolder.entity_count} entities</span>
                                 )}
                                 {activeFolder.relationship_count != null && (
-                                    <span className={styles.analysisStat}>↔️ {activeFolder.relationship_count} relationships</span>
+                                    <span className={styles.analysisStat}><ArrowSwap24Regular /> {activeFolder.relationship_count} relationships</span>
                                 )}
                                 {activeFolder.community_count != null && (
-                                    <span className={styles.analysisStat}>🏘️ {activeFolder.community_count} communities</span>
+                                    <span className={styles.analysisStat}><PeopleTeam24Regular /> {activeFolder.community_count} communities</span>
                                 )}
                                 {activeFolder.section_count != null && (
                                     <span className={styles.analysisStat}>📑 {activeFolder.section_count} sections</span>
                                 )}
                                 {activeFolder.sentence_count != null && (
-                                    <span className={styles.analysisStat}>💬 {activeFolder.sentence_count} sentences</span>
+                                    <span className={styles.analysisStat}><Chat24Regular /> {activeFolder.sentence_count} sentences</span>
                                 )}
                                 {activeFolder.analyzed_at && (
                                     <span className={styles.analysisStat}>🕐 {new Date(activeFolder.analyzed_at).toLocaleString()}</span>
@@ -627,13 +628,13 @@ const Files = () => {
                                         className={styles.chatWithAnalysisBtn}
                                         onClick={() => handleChatWithAnalysis(activeFolder.id)}
                                     >
-                                        💬 {t("files.chatWithAnalysis", "Chat with this analysis")}
+                                        <Chat24Regular /> {t("files.chatWithAnalysis", "Chat with this analysis")}
                                     </button>
                                     <button
                                         className={styles.deleteAnalysisBtn}
                                         onClick={() => handleDeleteAnalysis(activeFolder.id)}
                                     >
-                                        🗑️ {t("files.deleteAnalysis", "Delete Analysis Data")}
+                                        <Delete24Regular /> {t("files.deleteAnalysis", "Delete Analysis Data")}
                                     </button>
                                 </div>
                             )}

@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import { Eye24Regular, Edit24Regular, Delete24Regular, Folder24Regular, FolderOpen24Regular } from "@fluentui/react-icons";
 import { getFileIcon } from "../../api/files";
 import { SubfolderCount } from "../../api/folders";
 import styles from "../../pages/files/Files.module.css";
@@ -35,7 +36,7 @@ export const FileList = ({ files, selected, loading, onToggleSelect, onDelete, o
             const totalFiles = subfolderCounts!.reduce((sum, s) => sum + s.count, 0);
             return (
                 <div className={styles.emptyState}>
-                    <span className={styles.emptyIcon}>📂</span>
+                    <span className={styles.emptyIcon}><FolderOpen24Regular /></span>
                     <h2>{t("files.noDirectFiles", "No files in this folder")}</h2>
                     <p style={{ marginBottom: 12 }}>
                         {t("files.subfolderSummary", {
@@ -47,7 +48,7 @@ export const FileList = ({ files, selected, loading, onToggleSelect, onDelete, o
                     <div className={styles.subfolderBreakdown}>
                         {subfolderCounts!.map(s => (
                             <div key={s.name} className={styles.subfolderRow}>
-                                <span className={styles.subfolderIcon}>📁</span>
+                                <span className={styles.subfolderIcon}><Folder24Regular /></span>
                                 <span className={styles.subfolderName}>{s.name}</span>
                                 <span className={styles.subfolderCount}>
                                     {t("files.fileCount", { defaultValue: "{{count}} file(s)", count: s.count })}
@@ -61,7 +62,7 @@ export const FileList = ({ files, selected, loading, onToggleSelect, onDelete, o
 
         return (
             <div className={styles.emptyState}>
-                <span className={styles.emptyIcon}>📂</span>
+                <span className={styles.emptyIcon}><FolderOpen24Regular /></span>
                 <h2>{t("files.noFilesYet")}</h2>
                 <p>{t("files.uploadFilesHint")}</p>
             </div>
@@ -124,7 +125,7 @@ export const FileList = ({ files, selected, loading, onToggleSelect, onDelete, o
                                                 onClick={() => onPreview(f)}
                                                 title={t("files.preview")}
                                             >
-                                                👁️
+                                                <Eye24Regular />
                                             </button>
                                         )}
                                         {onMove && (
@@ -133,7 +134,7 @@ export const FileList = ({ files, selected, loading, onToggleSelect, onDelete, o
                                                 onClick={() => onMove(f)}
                                                 title={t("files.moveToFolder")}
                                             >
-                                                📁
+                                                <Folder24Regular />
                                             </button>
                                         )}
                                         <button
@@ -141,14 +142,14 @@ export const FileList = ({ files, selected, loading, onToggleSelect, onDelete, o
                                             onClick={() => onRename(f)}
                                             title={t("files.rename")}
                                         >
-                                            ✏️
+                                            <Edit24Regular />
                                         </button>
                                         <button
                                             className={`${styles.actionBtn} ${styles.actionBtnDanger}`}
                                             onClick={() => onDelete(f)}
                                             title={t("files.delete")}
                                         >
-                                            🗑️
+                                            <Delete24Regular />
                                         </button>
                                     </div>
                                 </td>

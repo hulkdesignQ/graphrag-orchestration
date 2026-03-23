@@ -38,9 +38,13 @@ export interface SubscriptionStatus {
 // ============================================================================
 
 /** Fetch billing configuration (Stripe enabled + publishable key). */
-export async function fetchBillingConfig(): Promise<BillingConfig> {
+export async function fetchBillingConfig(idToken?: string): Promise<BillingConfig> {
     try {
-        const response = await fetch("/billing/config", { method: "GET" });
+        const headers = await getHeaders(idToken);
+        const response = await fetchWithAuthRetry("/billing/config", {
+            method: "GET",
+            headers,
+        });
         if (!response.ok) {
             console.warn(`[billing] /billing/config returned ${response.status}`);
             return { stripe_enabled: false, publishable_key: null };

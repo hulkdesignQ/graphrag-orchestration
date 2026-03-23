@@ -2,6 +2,7 @@ import { useEffect, useState, useContext } from "react";
 import { Link } from "react-router-dom";
 import { useMsal } from "@azure/msal-react";
 import { useTranslation } from "react-i18next";
+import { LockClosed24Regular, Warning24Regular } from "@fluentui/react-icons";
 import styles from "./AdminDashboard.module.css";
 import { useLogin, getToken } from "../../authConfig";
 import { LoginContext } from "../../loginContext";
@@ -70,7 +71,7 @@ const AdminDashboard = () => {
     if (!loggedIn) {
         return (
             <div className={styles.forbiddenContainer}>
-                <span style={{ fontSize: "2.5rem" }}>🔒</span>
+                <span style={{ fontSize: "2.5rem" }}><LockClosed24Regular /></span>
                 <h2>{t("admin.signInRequired")}</h2>
                 <Link to="/dashboard" className={styles.backLink}>{t("admin.goToDashboard")}</Link>
             </div>
@@ -102,7 +103,7 @@ const AdminDashboard = () => {
     if (error) {
         return (
             <div className={styles.forbiddenContainer}>
-                <span style={{ fontSize: "2.5rem" }}>⚠️</span>
+                <span style={{ fontSize: "2.5rem" }}><Warning24Regular /></span>
                 <p>{error}</p>
                 <Link to="/dashboard" className={styles.backLink}>{t("admin.backToDashboard")}</Link>
             </div>
@@ -122,7 +123,7 @@ const AdminDashboard = () => {
                     <Link to="/dashboard" className={styles.backLink}>{t("admin.personalDashboard")}</Link>
                 </div>
                 <span className={`${styles.statusBadge} ${STATUS_CLASS[metrics.system_status] || styles.statusHealthy}`}>
-                    {metrics.system_status === "healthy" ? "●" : "⚠"} {metrics.system_status}
+                    {metrics.system_status === "healthy" ? "●" : <Warning24Regular />} {metrics.system_status}
                 </span>
             </div>
 

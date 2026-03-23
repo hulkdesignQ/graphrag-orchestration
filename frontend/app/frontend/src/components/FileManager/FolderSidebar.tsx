@@ -10,8 +10,9 @@
  * - Analysis status badges (analyzing / analyzed / stale)
  */
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import { Clock24Regular, Warning24Regular, ChartMultiple24Regular, CheckmarkCircle24Regular, Edit24Regular, Delete24Regular, Folder24Regular, FolderOpen24Regular, Chat24Regular } from "@fluentui/react-icons";
 import type { Folder, AnalysisStatus } from "../../api/folders";
 import styles from "./FolderSidebar.module.css";
 
@@ -122,7 +123,7 @@ export const FolderSidebar = ({
 
     const renderCreateInput = () => (
         <div className={styles.createRow}>
-            <span className={styles.folderIcon}>📁</span>
+            <span className={styles.folderIcon}><Folder24Regular /></span>
             <input
                 ref={createInputRef}
                 className={styles.inlineInput}
@@ -154,13 +155,13 @@ export const FolderSidebar = ({
     const renderAnalysisBadge = (status: AnalysisStatus | null | undefined) => {
         // Zone grouping communicates analyzed status; only show sub-status badges
         if (!status || status === "not_analyzed" || status === "analyzed") return null;
-        const badgeMap: Record<string, { emoji: string; cls: string; label: string }> = {
-            analyzing: { emoji: "⏳", cls: styles.badgeAnalyzing ?? "", label: "Analyzing…" },
-            stale: { emoji: "⚠️", cls: styles.badgeStale ?? "", label: "Stale" },
+        const badgeMap: Record<string, { icon: React.ReactNode; cls: string; label: string }> = {
+            analyzing: { icon: <Clock24Regular />, cls: styles.badgeAnalyzing ?? "", label: "Analyzing…" },
+            stale: { icon: <Warning24Regular />, cls: styles.badgeStale ?? "", label: "Stale" },
         };
         const badge = badgeMap[status];
         if (!badge) return null;
-        return <span className={`${styles.analysisBadge ?? ""} ${badge.cls}`} title={badge.label}>{badge.emoji}</span>;
+        return <span className={`${styles.analysisBadge ?? ""} ${badge.cls}`} title={badge.label}>{badge.icon}</span>;
     };
 
     const renderFolder = (folder: Folder, depth: number) => {
@@ -176,7 +177,7 @@ export const FolderSidebar = ({
                     onClick={() => onSelectFolder(folder.id)}
                     onContextMenu={e => handleContextMenu(e, folder.id)}
                 >
-                    <span className={styles.folderIcon}>{children.length > 0 ? "📂" : "📁"}</span>
+                    <span className={styles.folderIcon}>{children.length > 0 ? <FolderOpen24Regular /> : <Folder24Regular />}</span>
                     {isRenaming ? (
                         <>
                             <input
@@ -227,7 +228,7 @@ export const FolderSidebar = ({
                                             className={styles.inlineIconBtn}
                                             onClick={e => { e.stopPropagation(); onChatWithAnalysis(folder.id); }}
                                             title={t("files.chatWithAnalysis", "Chat")}
-                                        >💬</button>
+                                        ><Chat24Regular /></button>
                                     );
                                 }
                                 if (isUserFolder && folder.analysis_status === "stale" && onAnalyzeFolder) {
@@ -259,7 +260,7 @@ export const FolderSidebar = ({
         );
     };
 
-    const renderZoneHeader = (zone: string, icon: string, label: string, fileCount: number) => {
+    const renderZoneHeader = (zone: string, icon: ReactNode, label: string, fileCount: number) => {
         const isCollapsed = collapsedZones[zone];
         return (
             <div
@@ -300,7 +301,7 @@ export const FolderSidebar = ({
             {/* Zone 1: Analysis Results */}
             {analysisResultFolders.length > 0 && (
                 <div className={styles.zone}>
-                    {renderZoneHeader("results", "📊", t("files.zoneAnalysisResults", "Analysis Results"), sumFileCount(analysisResultFolders))}
+                    {renderZoneHeader("results", <ChartMultiple24Regular />, t("files.zoneAnalysisResults", "Analysis Results"), sumFileCount(analysisResultFolders))}
                     {!collapsedZones["results"] && <div className={`${styles.zoneFolders} ${styles.zoneFoldersResults}`}>{analysisResultFolders.map(f => renderFolder(f, 0))}</div>}
                 </div>
             )}
@@ -308,7 +309,7 @@ export const FolderSidebar = ({
             {/* Zone 2: Analyzed */}
             {analyzedFolders.length > 0 && (
                 <div className={styles.zone}>
-                    {renderZoneHeader("analyzed", "✅", t("files.zoneAnalyzed", "Analyzed"), sumFileCount(analyzedFolders))}
+                    {renderZoneHeader("analyzed", <CheckmarkCircle24Regular />, t("files.zoneAnalyzed", "Analyzed"), sumFileCount(analyzedFolders))}
                     {!collapsedZones["analyzed"] && <div className={`${styles.zoneFolders} ${styles.zoneFoldersAnalyzed}`}>{analyzedFolders.map(f => renderFolder(f, 0))}</div>}
                 </div>
             )}
@@ -316,7 +317,7 @@ export const FolderSidebar = ({
             {/* Zone 3: Folders (Not Analyzed) */}
             {notAnalyzedFolders.length > 0 && (
                 <div className={styles.zone}>
-                    {renderZoneHeader("folders", "📁", t("files.zoneFolders", "Folders"), sumFileCount(notAnalyzedFolders))}
+                    {renderZoneHeader("folders", <Folder24Regular />, t("files.zoneFolders", "Folders"), sumFileCount(notAnalyzedFolders))}
                     {!collapsedZones["folders"] && <div className={`${styles.zoneFolders} ${styles.zoneFoldersNotAnalyzed}`}>{notAnalyzedFolders.map(f => renderFolder(f, 0))}</div>}
                 </div>
             )}
@@ -335,12 +336,12 @@ export const FolderSidebar = ({
                         const canAnalyze = isUserFolder && folder?.analysis_status !== "analyzing";
                         return (
                             <>
-                                <button onClick={() => startRename(folder!)}>✏️ {t("files.rename")}</button>
+                                <button onClick={() => startRename(folder!)}><Edit24Regular /> {t("files.rename")}</button>
                                 <button onClick={() => {
                                     setCreating({ parentId: contextMenu.folderId });
                                     setNewFolderName("");
                                     setContextMenu(null);
-                                }}>📁 {t("files.newSubfolder")}</button>
+                                }}><Folder24Regular /> {t("files.newSubfolder")}</button>
                                 {canAnalyze && onAnalyzeFolder && (
                                     <button onClick={() => {
                                         onAnalyzeFolder(contextMenu.folderId);
@@ -351,7 +352,7 @@ export const FolderSidebar = ({
                                     <button onClick={() => {
                                         onChatWithAnalysis(contextMenu.folderId);
                                         setContextMenu(null);
-                                    }}>💬 {t("files.chatWithAnalysis", "Chat with analysis")}</button>
+                                    }}><Chat24Regular /> {t("files.chatWithAnalysis", "Chat with analysis")}</button>
                                 )}
                                 {(folder?.analysis_status === "analyzed" || folder?.analysis_status === "stale") && onDeleteAnalysis && (
                                     <button
@@ -360,13 +361,13 @@ export const FolderSidebar = ({
                                             onDeleteAnalysis(contextMenu.folderId);
                                             setContextMenu(null);
                                         }}
-                                    >🗑️ {t("files.deleteAnalysis", "Delete Analysis Data")}</button>
+                                    ><Delete24Regular /> {t("files.deleteAnalysis", "Delete Analysis Data")}</button>
                                 )}
                                 <button
                                     className={styles.contextMenuDanger}
                                     onClick={() => { onDeleteFolder(contextMenu.folderId); setContextMenu(null); }}
                                 >
-                                    🗑️ {t("files.delete")}
+                                    <Delete24Regular /> {t("files.delete")}
                                 </button>
                             </>
                         );
