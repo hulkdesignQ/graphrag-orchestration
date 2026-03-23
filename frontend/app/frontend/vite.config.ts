@@ -46,7 +46,9 @@ export default defineConfig({
             "/copy_uploaded": "http://localhost:8000",
             "/folders": "http://localhost:8000",
             "/chat_history": "http://localhost:8000",
-            "/file_metadata": "http://localhost:8000"
+            "/file_metadata": "http://localhost:8000",
+            "/billing": "http://localhost:8000",
+            "/dashboard": "http://localhost:8000"
         }
     }
 });

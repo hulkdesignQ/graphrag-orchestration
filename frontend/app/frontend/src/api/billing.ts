@@ -39,11 +39,17 @@ export interface SubscriptionStatus {
 
 /** Fetch billing configuration (Stripe enabled + publishable key). */
 export async function fetchBillingConfig(): Promise<BillingConfig> {
-    const response = await fetch("/billing/config", { method: "GET" });
-    if (!response.ok) {
+    try {
+        const response = await fetch("/billing/config", { method: "GET" });
+        if (!response.ok) {
+            console.warn(`[billing] /billing/config returned ${response.status}`);
+            return { stripe_enabled: false, publishable_key: null };
+        }
+        return response.json();
+    } catch (err) {
+        console.warn("[billing] Failed to fetch billing config:", err);
         return { stripe_enabled: false, publishable_key: null };
     }
-    return response.json();
 }
 
 /** Create a Stripe Checkout session and return the redirect URL. */

@@ -383,7 +383,9 @@
         "planFeature.enterprise.f5": "Audit Logs",
         "planFeature.enterprise.f6": "Priority Support",
         "planCta.getStarted": "Get Started Free",
-        "planCta.upgradeTo": "Upgrade to {{plan}}"
+        "planCta.upgradeTo": "Upgrade to {{plan}}",
+        "billingSuccess": "Your plan has been upgraded successfully! It may take a moment to reflect.",
+        "billingCancelled": "Checkout was cancelled. No changes have been made to your plan."
     },
     "admin": {
         "signInRequired": "Sign in Required",

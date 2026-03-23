@@ -1,5 +1,5 @@
 import { useEffect, useCallback, useState, useContext } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { useMsal } from "@azure/msal-react";
 import { useTranslation } from "react-i18next";
 import styles from "./Dashboard.module.css";
@@ -54,8 +54,24 @@ const Dashboard = () => {
     const [billingConfig, setBillingConfig] = useState<BillingConfig | null>(null);
     const [subscription, setSubscription] = useState<SubscriptionStatus | null>(null);
     const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null);
+    const [billingMessage, setBillingMessage] = useState<{ type: "success" | "cancel" | "error"; text: string } | null>(null);
 
     // All tiers support self-service Stripe checkout
+
+    // Handle ?billing=success / ?billing=cancel from Stripe redirect
+    const location = useLocation();
+    useEffect(() => {
+        const params = new URLSearchParams(location.search);
+        const billingParam = params.get("billing");
+        if (billingParam === "success") {
+            setBillingMessage({ type: "success", text: t("dashboard.billingSuccess") });
+            // Clean URL without reload
+            window.history.replaceState({}, "", location.pathname + location.hash);
+        } else if (billingParam === "cancel") {
+            setBillingMessage({ type: "cancel", text: t("dashboard.billingCancelled") });
+            window.history.replaceState({}, "", location.pathname + location.hash);
+        }
+    }, [location.search, t]);
 
     const handleReLogin = () => {
         if (isUsingAppServicesLogin) {
@@ -194,6 +210,12 @@ const Dashboard = () => {
                     ⚠️ {t("dashboard.dataDegraded")}
                 </div>
             )}
+            {billingMessage && (
+                <div className={`${styles.billingBanner} ${styles[`billing${billingMessage.type.charAt(0).toUpperCase() + billingMessage.type.slice(1)}`]}`}>
+                    <span>{billingMessage.type === "success" ? "✅" : billingMessage.type === "error" ? "⚠️" : "ℹ️"} {billingMessage.text}</span>
+                    <button className={styles.billingBannerClose} onClick={() => setBillingMessage(null)}>✕</button>
+                </div>
+            )}
             <div className={styles.statsGrid}>
                 <div className={styles.statCard}>
                     <span className={styles.statLabel}>{t("dashboard.queriesThisMonth")}</span>
@@ -304,22 +326,21 @@ const Dashboard = () => {
                                     {info.api_access && <p className={styles.planCardDetail}>✅ {t("dashboard.featureApiAccess")}</p>}
                                     <button
                                         className={`${styles.upgradeButton} ${tier === "free" && !isCurrent ? styles.upgradeButtonOutline : ""}`}
-                                        disabled={isCurrent || checkoutLoading === tier}
+                                        disabled={isCurrent || checkoutLoading === tier || (!isCurrent && !isUpgrade && tier !== "free")}
                                         onClick={async () => {
                                             if (isCurrent) return;
                                             Events.planUpgradeClicked({ currentPlan: plans.current_plan, targetPlan: tier });
                                             if (isUpgrade) {
                                                 try {
                                                     setCheckoutLoading(tier);
+                                                    setBillingMessage(null);
                                                     const token = client ? await getToken(client) : undefined;
                                                     const { checkout_url } = await createCheckoutSession(tier, token);
                                                     window.location.href = checkout_url;
                                                 } catch (err: any) {
-                                                    setError(err.message || "Failed to start checkout");
+                                                    setBillingMessage({ type: "error", text: err.message || "Failed to start checkout" });
                                                     setCheckoutLoading(null);
                                                 }
-                                            } else {
-                                                window.location.hash = "#/dashboard#plans";
                                             }
                                         }}
                                     >
@@ -327,9 +348,11 @@ const Dashboard = () => {
                                             ? t("dashboard.currentPlan")
                                             : checkoutLoading === tier
                                                 ? "..."
-                                                : tier === "free"
-                                                    ? t("dashboard.planCta.getStarted")
-                                                    : t("dashboard.planCta.upgradeTo", { plan: info.name })}
+                                                : !canCheckout && tier !== "free"
+                                                    ? t("dashboard.contactSales")
+                                                    : tier === "free"
+                                                        ? t("dashboard.planCta.getStarted")
+                                                        : t("dashboard.planCta.upgradeTo", { plan: info.name })}
                                     </button>
                                 </div>
                             );
@@ -367,7 +390,7 @@ const Dashboard = () => {
                                         const { portal_url } = await createPortalSession(token);
                                         window.location.href = portal_url;
                                     } catch (err: any) {
-                                        setError(err.message || "Failed to open billing portal");
+                                        setBillingMessage({ type: "error", text: err.message || "Failed to open billing portal" });
                                     }
                                 }}
                             >

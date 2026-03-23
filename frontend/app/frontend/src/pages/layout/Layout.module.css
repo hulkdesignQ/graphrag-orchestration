@@ -159,18 +159,6 @@
     margin: 0.5rem 0.75rem;
 }
 
-.navUpgrade {
-    color: #4cc9f0;
-    font-weight: 600;
-    border-left-color: transparent;
-    margin-top: 0.25rem;
-}
-
-.navUpgrade:hover {
-    background: rgba(76, 201, 240, 0.1);
-    color: #4cc9f0;
-}
-
 .navSpacer {
     flex: 1;
 }
