@@ -112,6 +112,9 @@
     },
     "demoGroupId": {
       "value": "${DEMO_GROUP_ID}"
+    },
+    "enableStripe": {
+      "value": "${AZURE_ENABLE_STRIPE=false}"
     }
   }
 }

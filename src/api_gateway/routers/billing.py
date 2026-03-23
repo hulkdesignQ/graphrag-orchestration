@@ -119,8 +119,8 @@ class CancelResponse(BaseModel):
 
 @router.get("/config", response_model=BillingConfigResponse)
 async def billing_config():
-    """Return Stripe publishable key (safe to expose) and enabled flag."""
-    enabled = bool(settings.STRIPE_SECRET_KEY and settings.STRIPE_PUBLISHABLE_KEY)
+    """Return Stripe enabled flag (and publishable key if set)."""
+    enabled = bool(settings.STRIPE_SECRET_KEY)
     return BillingConfigResponse(
         stripe_enabled=enabled,
         publishable_key=settings.STRIPE_PUBLISHABLE_KEY if enabled else None,

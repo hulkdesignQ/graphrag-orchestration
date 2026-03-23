@@ -135,32 +135,9 @@ param auraDsClientSecret string = ''
 param auraDsClientId string = ''
 
 // ── Stripe Billing ──────────────────────────────────────────────────────
-@secure()
-@description('Stripe secret key for payment processing')
-param stripeSecretKey string = ''
-
-@description('Stripe publishable key (safe to expose to frontend)')
-param stripePublishableKey string = ''
-
-@secure()
-@description('Stripe webhook signing secret (B2B endpoint)')
-param stripeWebhookSecretB2b string = ''
-
-@secure()
-@description('Stripe webhook signing secret (B2C endpoint)')
-param stripeWebhookSecretB2c string = ''
-
-@description('Stripe Price ID for Pro plan ($10/mo)')
-param stripePricePro string = ''
-
-@description('Stripe Price ID for Pro+ plan ($39/mo)')
-param stripePriceProPlus string = ''
-
-@description('Stripe Price ID for Business plan ($19/user/mo)')
-param stripePriceBusiness string = ''
-
-@description('Stripe Price ID for Enterprise plan ($39/user/mo)')
-param stripePriceEnterprise string = ''
+// All Stripe values are stored in Key Vault. Set enableStripe=true to wire them.
+@description('Enable Stripe billing (requires stripe-* secrets in Key Vault)')
+param enableStripe bool = false
 
 // ── Parameterized resource names (previously hardcoded) ─────────────────
 
@@ -479,15 +456,14 @@ var conditionalSecretEnvVars = concat(
       { name: 'AURA_DS_CLIENT_ID', value: auraDsClientId }
       { name: 'AURA_DS_CLIENT_SECRET', secretRef: 'aura-ds-client-secret' }
     ] : [],
-  !empty(stripeSecretKey) ? [
+  enableStripe ? [
       { name: 'STRIPE_SECRET_KEY', secretRef: 'stripe-secret-key' }
-      { name: 'STRIPE_PUBLISHABLE_KEY', value: stripePublishableKey }
       { name: 'STRIPE_WEBHOOK_SECRET', secretRef: 'stripe-webhook-secret-b2b' }
       { name: 'STRIPE_WEBHOOK_SECRET_B2C', secretRef: 'stripe-webhook-secret-b2c' }
-      { name: 'STRIPE_PRICE_PRO', value: stripePricePro }
-      { name: 'STRIPE_PRICE_PRO_PLUS', value: stripePriceProPlus }
-      { name: 'STRIPE_PRICE_BUSINESS', value: stripePriceBusiness }
-      { name: 'STRIPE_PRICE_ENTERPRISE', value: stripePriceEnterprise }
+      { name: 'STRIPE_PRICE_PRO', secretRef: 'stripe-price-pro' }
+      { name: 'STRIPE_PRICE_PRO_PLUS', secretRef: 'stripe-price-pro-plus' }
+      { name: 'STRIPE_PRICE_BUSINESS', secretRef: 'stripe-price-business' }
+      { name: 'STRIPE_PRICE_ENTERPRISE', secretRef: 'stripe-price-enterprise' }
     ] : []
 )
 
@@ -725,7 +701,7 @@ var sharedSecrets = concat([
     keyVaultUrl: '${keyVault.outputs.vaultUri}secrets/aura-ds-client-secret'
     identity: managedIdentity.outputs.id
   }
-] : [], !empty(stripeSecretKey) ? [
+] : [], enableStripe ? [
   {
     name: 'stripe-secret-key'
     keyVaultUrl: '${keyVault.outputs.vaultUri}secrets/stripe-secret-key'
@@ -739,6 +715,26 @@ var sharedSecrets = concat([
   {
     name: 'stripe-webhook-secret-b2c'
     keyVaultUrl: '${keyVault.outputs.vaultUri}secrets/stripe-webhook-secret-b2c'
+    identity: managedIdentity.outputs.id
+  }
+  {
+    name: 'stripe-price-pro'
+    keyVaultUrl: '${keyVault.outputs.vaultUri}secrets/stripe-price-pro'
+    identity: managedIdentity.outputs.id
+  }
+  {
+    name: 'stripe-price-pro-plus'
+    keyVaultUrl: '${keyVault.outputs.vaultUri}secrets/stripe-price-pro-plus'
+    identity: managedIdentity.outputs.id
+  }
+  {
+    name: 'stripe-price-business'
+    keyVaultUrl: '${keyVault.outputs.vaultUri}secrets/stripe-price-business'
+    identity: managedIdentity.outputs.id
+  }
+  {
+    name: 'stripe-price-enterprise'
+    keyVaultUrl: '${keyVault.outputs.vaultUri}secrets/stripe-price-enterprise'
     identity: managedIdentity.outputs.id
   }
 ] : [])
