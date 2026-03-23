@@ -7,6 +7,7 @@
  */
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useTranslation } from "react-i18next";
+import { ChevronLeft24Regular, ChevronRight24Regular } from "@fluentui/react-icons";
 import * as pdfjsLib from "pdfjs-dist";
 import { HighlightOverlay, SentenceHighlight } from "./HighlightOverlay";
 
@@ -143,13 +144,13 @@ export const PdfHighlightViewer = ({ src, targetPage, highlights = [], height = 
                     }}
                 >
                     <button onClick={goToPrev} disabled={pageNum <= 1} style={navBtnStyle}>
-                        ◀
+                        <ChevronLeft24Regular />
                     </button>
                     <span>
                         {t("viewer.pageInfo", { current: pageNum, total: numPages })}
                     </span>
                     <button onClick={goToNext} disabled={pageNum >= numPages} style={navBtnStyle}>
-                        ▶
+                        <ChevronRight24Regular />
                     </button>
                     {highlights.length > 0 && (
                         <span style={{ marginLeft: 12, opacity: 0.7, fontSize: 11 }}>

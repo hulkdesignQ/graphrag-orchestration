@@ -4,7 +4,7 @@ import { Dropdown, Option, Spinner } from "@fluentui/react-components";
 import type { OptionOnSelectData, SelectionEvents } from "@fluentui/react-components";
 import { useMsal } from "@azure/msal-react";
 
-import { Warning24Regular } from "@fluentui/react-icons";
+import { Warning24Regular, TargetArrow24Regular, Folder24Regular } from "@fluentui/react-icons";
 import { useLogin, getToken } from "../../authConfig";
 import { listFoldersApi } from "../../api/folders";
 import type { Folder } from "../../api/folders";
@@ -99,9 +99,9 @@ export const FolderSelector = ({ selectedFolderId, onFolderChange }: FolderSelec
         f => (f.analysis_group_id || f.id) === selectedFolderId
     );
     const displayValue = isDemo
-        ? `🎯 ${t("folderSelector.demo")}`
+        ? t("folderSelector.demo")
         : selectedFolder
-            ? `📁 ${selectedFolder.name}`
+            ? selectedFolder.name
             : t("folderSelector.placeholder");
     const selectedOption = selectedFolderId || "";
 
@@ -116,14 +116,14 @@ export const FolderSelector = ({ selectedFolderId, onFolderChange }: FolderSelec
                 onOptionSelect={handleSelect}
                 size="small"
             >
-                <Option key="__demo__" value={DEMO_VALUE} text={`🎯 ${t("folderSelector.demo")}`}>
-                    🎯 {t("folderSelector.demo")}
+                <Option key="__demo__" value={DEMO_VALUE} text={t("folderSelector.demo")}>
+                    <TargetArrow24Regular /> {t("folderSelector.demo")}
                 </Option>
                 {analyzedFolders.map(folder => {
-                    const textLabel = `📁 ${folder.name}${folder.analysis_status === "stale" ? " ⚠" : ""}`;
+                    const textLabel = `${folder.name}${folder.analysis_status === "stale" ? " (stale)" : ""}`;
                     return (
                         <Option key={folder.id} value={folder.analysis_group_id || folder.id} text={textLabel}>
-                            📁 {folder.name}{folder.analysis_status === "stale" && <> <Warning24Regular /></>}
+                            <Folder24Regular /> {folder.name}{folder.analysis_status === "stale" && <> <Warning24Regular /></>}
                         </Option>
                     );
                 })}

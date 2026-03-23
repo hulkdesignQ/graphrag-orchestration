@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Dismiss24Regular, ChevronLeft24Regular, ChevronRight24Regular, ZoomFit24Regular } from "@fluentui/react-icons";
 import { useFileBlob } from "../../hooks/useFileBlob";
 import { PdfHighlightViewer } from "../DocumentViewer/PdfHighlightViewer";
 import DOMPurify from "dompurify";
@@ -73,21 +74,21 @@ export const FilePreviewPanel = ({ filename, allFiles, folder, onDismiss, onNavi
             {/* Header */}
             <div className={styles.header}>
                 <span className={styles.filename} title={filename}>{filename}</span>
-                <button className={styles.headerBtn} onClick={onDismiss} title={t("preview.close")}>✕</button>
+                <button className={styles.headerBtn} onClick={onDismiss} title={t("preview.close")}><Dismiss24Regular /></button>
             </div>
 
             {/* Toolbar */}
             <div className={styles.toolbar}>
-                <button className={styles.toolBtn} onClick={goPrev} disabled={!hasPrev} title={t("preview.prev")}>◀</button>
+                <button className={styles.toolBtn} onClick={goPrev} disabled={!hasPrev} title={t("preview.prev")}><ChevronLeft24Regular /></button>
                 <span className={styles.navInfo}>{currentIndex + 1} / {allFiles.length}</span>
-                <button className={styles.toolBtn} onClick={goNext} disabled={!hasNext} title={t("preview.next")}>▶</button>
+                <button className={styles.toolBtn} onClick={goNext} disabled={!hasNext} title={t("preview.next")}><ChevronRight24Regular /></button>
                 <span className={styles.sep} />
                 {(category === "image" || category === "pdf") && (
                     <>
                         <button className={styles.toolBtn} onClick={() => setZoom(z => Math.max(0.25, z - 0.25))}>−</button>
                         <span className={styles.zoomLevel}>{zoomPercent}%</span>
                         <button className={styles.toolBtn} onClick={() => setZoom(z => Math.min(5, z + 0.25))}>+</button>
-                        <button className={styles.toolBtn} onClick={() => setZoom(1)} title={t("preview.fitWidth")}>⊡</button>
+                        <button className={styles.toolBtn} onClick={() => setZoom(1)} title={t("preview.fitWidth")}><ZoomFit24Regular /></button>
                         <span className={styles.sep} />
                     </>
                 )}

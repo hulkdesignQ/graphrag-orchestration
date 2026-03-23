@@ -1,38 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { getFileIcon, formatFileSize, getFileExtension, getFileContentUrl } from "../api/files";
-
-describe("getFileIcon", () => {
-    it("returns PDF icon for .pdf", () => {
-        expect(getFileIcon("report.pdf")).toBe("📄");
-    });
-
-    it("returns spreadsheet icon for .xlsx", () => {
-        expect(getFileIcon("data.xlsx")).toBe("📊");
-    });
-
-    it("returns image icon for image extensions", () => {
-        for (const ext of ["png", "jpg", "jpeg", "bmp", "svg", "tiff", "heic"]) {
-            expect(getFileIcon(`photo.${ext}`)).toBe("🖼️");
-        }
-    });
-
-    it("returns default icon for unknown extension", () => {
-        expect(getFileIcon("archive.zip")).toBe("📎");
-    });
-
-    it("handles files with multiple dots", () => {
-        expect(getFileIcon("my.report.final.pdf")).toBe("📄");
-    });
-
-    it("returns default for no extension", () => {
-        expect(getFileIcon("README")).toBe("📎");
-    });
-
-    it("is case-insensitive", () => {
-        expect(getFileIcon("REPORT.PDF")).toBe("📄");
-        expect(getFileIcon("Data.XLSX")).toBe("📊");
-    });
-});
+import { formatFileSize, getFileExtension, getFileContentUrl } from "../api/files";
 
 describe("formatFileSize", () => {
     it("returns dash for undefined", () => {

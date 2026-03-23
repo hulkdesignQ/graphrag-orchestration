@@ -12,7 +12,7 @@
 
 import { useState, useCallback, useRef, useEffect, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Clock24Regular, Warning24Regular, ChartMultiple24Regular, CheckmarkCircle24Regular, Edit24Regular, Delete24Regular, Folder24Regular, FolderOpen24Regular, Chat24Regular } from "@fluentui/react-icons";
+import { Clock24Regular, Warning24Regular, ChartMultiple24Regular, CheckmarkCircle24Regular, Edit24Regular, Delete24Regular, Folder24Regular, FolderOpen24Regular, Chat24Regular, Checkmark24Regular, Dismiss24Regular, Search24Regular, MoreHorizontal24Regular, ChevronRight12Regular, ChevronDown12Regular, Home24Regular } from "@fluentui/react-icons";
 import type { Folder, AnalysisStatus } from "../../api/folders";
 import styles from "./FolderSidebar.module.css";
 
@@ -140,14 +140,14 @@ export const FolderSidebar = ({
                 onClick={handleCreateSubmit}
                 title={t("files.confirm")}
             >
-                ✓
+                <Checkmark24Regular />
             </button>
             <button
                 className={styles.inlineCancelBtn}
                 onClick={handleCreateCancel}
                 title={t("files.cancel")}
             >
-                ✕
+                <Dismiss24Regular />
             </button>
         </div>
     );
@@ -196,14 +196,14 @@ export const FolderSidebar = ({
                                 onClick={e => { e.stopPropagation(); handleRenameSubmit(); }}
                                 title={t("files.confirm")}
                             >
-                                ✓
+                                <Checkmark24Regular />
                             </button>
                             <button
                                 className={styles.inlineCancelBtn}
                                 onClick={e => { e.stopPropagation(); setRenamingId(null); setRenameValue(""); }}
                                 title={t("files.cancel")}
                             >
-                                ✕
+                                <Dismiss24Regular />
                             </button>
                         </>
                     ) : (
@@ -219,7 +219,7 @@ export const FolderSidebar = ({
                                             className={styles.inlineIconBtn}
                                             onClick={e => { e.stopPropagation(); onAnalyzeFolder(folder.id); }}
                                             title={t("files.analyze", "Analyze")}
-                                        >🔍</button>
+                                        ><Search24Regular /></button>
                                     );
                                 }
                                 if ((folder.analysis_status === "analyzed" || folder.analysis_status === "stale") && onChatWithAnalysis) {
@@ -237,7 +237,7 @@ export const FolderSidebar = ({
                                             className={styles.inlineIconBtn}
                                             onClick={e => { e.stopPropagation(); onAnalyzeFolder(folder.id); }}
                                             title={t("files.reanalyze", "Re-analyze")}
-                                        >🔍</button>
+                                        ><Search24Regular /></button>
                                     );
                                 }
                                 return null;
@@ -250,7 +250,7 @@ export const FolderSidebar = ({
                             onClick={e => { e.stopPropagation(); handleContextMenu(e, folder.id); }}
                             title={t("files.folderActions")}
                         >
-                            ⋯
+                            <MoreHorizontal24Regular />
                         </button>
                     )}
                 </div>
@@ -268,7 +268,7 @@ export const FolderSidebar = ({
                 onClick={() => toggleZone(zone)}
                 title={isCollapsed ? t("files.expandZone", "Expand") : t("files.collapseZone", "Collapse")}
             >
-                <span className={styles.zoneChevron}>{isCollapsed ? "▸" : "▾"}</span>
+                <span className={styles.zoneChevron}>{isCollapsed ? <ChevronRight12Regular /> : <ChevronDown12Regular />}</span>
                 <span className={styles.zoneIcon}>{icon}</span>
                 <span className={styles.zoneLabel}>{label}</span>
                 <span className={styles.zoneCount}>{fileCount}</span>
@@ -294,7 +294,7 @@ export const FolderSidebar = ({
                 className={`${styles.folderRow} ${activeFolderId === null ? styles.folderRowActive : ""}`}
                 onClick={() => onSelectFolder(null)}
             >
-                <span className={styles.folderIcon}>🏠</span>
+                <span className={styles.folderIcon}><Home24Regular /></span>
                 <span className={styles.folderName} title={t("files.allFiles")}>{t("files.allFiles")}</span>
             </div>
 
@@ -346,7 +346,7 @@ export const FolderSidebar = ({
                                     <button onClick={() => {
                                         onAnalyzeFolder(contextMenu.folderId);
                                         setContextMenu(null);
-                                    }}>🔍 {t("files.analyze", "Analyze")}</button>
+                                    }}><Search24Regular /> {t("files.analyze", "Analyze")}</button>
                                 )}
                                 {(folder?.analysis_status === "analyzed" || folder?.analysis_status === "stale" || folder?.folder_type === "analysis_result") && onChatWithAnalysis && (
                                     <button onClick={() => {

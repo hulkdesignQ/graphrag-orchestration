@@ -2,7 +2,7 @@ import { useEffect, useState, useContext } from "react";
 import { Link } from "react-router-dom";
 import { useMsal } from "@azure/msal-react";
 import { useTranslation } from "react-i18next";
-import { LockClosed24Regular, Warning24Regular } from "@fluentui/react-icons";
+import { LockClosed24Regular, Warning24Regular, Prohibited24Regular } from "@fluentui/react-icons";
 import styles from "./AdminDashboard.module.css";
 import { useLogin, getToken } from "../../authConfig";
 import { LoginContext } from "../../loginContext";
@@ -91,7 +91,7 @@ const AdminDashboard = () => {
     if (forbidden) {
         return (
             <div className={styles.forbiddenContainer}>
-                <span style={{ fontSize: "2.5rem" }}>🚫</span>
+                <span style={{ fontSize: "2.5rem" }}><Prohibited24Regular /></span>
                 <h2>{t("admin.adminAccessRequired")}</h2>
                 <p>{t("admin.adminRoleNeeded")}</p>
                 <Link to="/dashboard" className={styles.backLink}>{t("admin.backToDashboard")}</Link>

@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { Eye24Regular, Edit24Regular, Delete24Regular, Folder24Regular, FolderOpen24Regular } from "@fluentui/react-icons";
-import { getFileIcon } from "../../api/files";
+import { FileIcon } from "./FileIcon";
 import { SubfolderCount } from "../../api/folders";
 import styles from "../../pages/files/Files.module.css";
 
@@ -105,7 +105,7 @@ export const FileList = ({ files, selected, loading, onToggleSelect, onDelete, o
                                     />
                                 </td>
                                 <td style={{ width: 36, textAlign: "center" }}>
-                                    <span className={styles.fileIcon}>{getFileIcon(f)}</span>
+                                    <span className={styles.fileIcon}><FileIcon filename={f} /></span>
                                 </td>
                                 <td className={styles.fileName}>
                                     <span

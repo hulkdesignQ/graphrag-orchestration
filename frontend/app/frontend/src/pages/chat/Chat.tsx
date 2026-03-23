@@ -24,6 +24,7 @@ import { useLogin, getToken, requireAccessControl } from "../../authConfig";
 import { useMsal } from "@azure/msal-react";
 import { LoginContext } from "../../loginContext";
 import { hasSeenOnboarding, markOnboardingSeen } from "../../utils/onboarding";
+import { Dismiss24Regular } from "@fluentui/react-icons";
 
 /**
  * Map raw JS errors to user-friendly messages.
@@ -567,7 +568,7 @@ const Chat = () => {
                                         {t("onboarding.welcomeBannerAction", "Upload files →")}
                                     </button>
                                     <button className={styles.welcomeBannerDismiss} onClick={(e) => { markOnboardingSeen(); (e.target as HTMLElement).closest(`.${styles.welcomeBanner}`)?.remove(); }}>
-                                        ✕
+                                        <Dismiss24Regular />
                                     </button>
                                 </div>
                             )}

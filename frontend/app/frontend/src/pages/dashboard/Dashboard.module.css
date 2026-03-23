@@ -288,8 +288,9 @@
 .upgradeButton:disabled {
     background: transparent;
     border: 1.5px solid rgba(0, 113, 227, 0.3);
-    color: #86868b;
+    color: #0071e3;
     cursor: default;
+    opacity: 0.5;
 }
 
 .upgradeButtonOutline {

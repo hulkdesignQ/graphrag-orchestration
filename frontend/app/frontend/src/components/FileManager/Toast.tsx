@@ -1,4 +1,4 @@
-import { CheckmarkCircle24Regular, DismissCircle24Regular, Info24Regular } from "@fluentui/react-icons";
+import { CheckmarkCircle24Regular, DismissCircle24Regular, Info24Regular, Dismiss24Regular } from "@fluentui/react-icons";
 import styles from "../../pages/files/Files.module.css";
 
 interface ToastProps {
@@ -24,7 +24,7 @@ export const Toast = ({ type, text, onDismiss }: ToastProps) => (
         <span>{TYPE_ICON[type]}</span>
         <span>{text}</span>
         <button className={styles.toastDismiss} onClick={onDismiss}>
-            ✕
+            <Dismiss24Regular />
         </button>
     </div>
 );

@@ -13,6 +13,7 @@ import {
     Globe24Regular,
     CreditCardPerson24Regular,
     ChartMultiple24Regular,
+    Dismiss24Regular,
 } from "@fluentui/react-icons";
 import styles from "./Dashboard.module.css";
 import { useLogin, getToken, isUsingAppServicesLogin } from "../../authConfig";
@@ -225,7 +226,7 @@ const Dashboard = () => {
             {billingMessage && (
                 <div className={`${styles.billingBanner} ${styles[`billing${billingMessage.type.charAt(0).toUpperCase() + billingMessage.type.slice(1)}`]}`}>
                     <span>{billingMessage.type === "success" ? <CheckmarkCircle24Regular /> : billingMessage.type === "error" ? <Warning24Regular /> : <Info24Regular />} {billingMessage.text}</span>
-                    <button className={styles.billingBannerClose} onClick={() => setBillingMessage(null)}>✕</button>
+                    <button className={styles.billingBannerClose} onClick={() => setBillingMessage(null)}><Dismiss24Regular /></button>
                 </div>
             )}
             <div className={styles.statsGrid}>
@@ -304,8 +305,6 @@ const Dashboard = () => {
                     <div className={styles.planGrid}>
                         {Object.entries(plans.plans).map(([tier, info]) => {
                             const isCurrent = tier === plans.current_plan;
-                            const canCheckout = billingConfig?.stripe_enabled && tier !== "free";
-                            const isUpgrade = !isCurrent && canCheckout;
                             const isHighlighted = HIGHLIGHTED_PLANS.has(tier);
                             const badgeKey = BADGE_PLANS[tier];
                             const isBusinessTier = tier === "business" || tier === "enterprise";
@@ -334,15 +333,14 @@ const Dashboard = () => {
                                             <li key={fKey}>{t(`dashboard.${fKey}`)}</li>
                                         ))}
                                     </ul>
-                                    {info.advanced_analytics && <p className={styles.planCardDetail}><CheckmarkCircle24Regular /> {t("dashboard.featureAdvancedAnalytics")}</p>}
                                     {info.api_access && <p className={styles.planCardDetail}><CheckmarkCircle24Regular /> {t("dashboard.featureApiAccess")}</p>}
                                     <button
-                                        className={`${styles.upgradeButton} ${tier === "free" && !isCurrent ? styles.upgradeButtonOutline : ""}`}
-                                        disabled={isCurrent || checkoutLoading === tier || (!isCurrent && !isUpgrade && tier !== "free")}
+                                        className={`${styles.upgradeButton} ${(tier === "free" && !isCurrent) ? styles.upgradeButtonOutline : ""}`}
+                                        disabled={isCurrent || checkoutLoading === tier}
                                         onClick={async () => {
                                             if (isCurrent) return;
                                             Events.planUpgradeClicked({ currentPlan: plans.current_plan, targetPlan: tier });
-                                            if (isUpgrade) {
+                                            if (tier !== "free") {
                                                 try {
                                                     setCheckoutLoading(tier);
                                                     setBillingMessage(null);
@@ -360,11 +358,9 @@ const Dashboard = () => {
                                             ? t("dashboard.currentPlan")
                                             : checkoutLoading === tier
                                                 ? "..."
-                                                : !canCheckout && tier !== "free"
-                                                    ? t("dashboard.contactSales")
-                                                    : tier === "free"
-                                                        ? t("dashboard.planCta.getStarted")
-                                                        : t("dashboard.planCta.upgradeTo", { plan: info.name })}
+                                                : tier === "free"
+                                                    ? t("dashboard.planCta.getStarted")
+                                                    : t("dashboard.planCta.upgradeTo", { plan: info.name })}
                                     </button>
                                 </div>
                             );

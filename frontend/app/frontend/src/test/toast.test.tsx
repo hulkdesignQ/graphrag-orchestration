@@ -8,19 +8,16 @@ describe("Toast", () => {
     it("renders success toast with text", () => {
         renderWithProviders(<Toast type="success" text="File uploaded" onDismiss={vi.fn()} />);
         expect(screen.getByText("File uploaded")).toBeInTheDocument();
-        expect(screen.getByText("✅")).toBeInTheDocument();
     });
 
     it("renders error toast with icon", () => {
         renderWithProviders(<Toast type="error" text="Upload failed" onDismiss={vi.fn()} />);
         expect(screen.getByText("Upload failed")).toBeInTheDocument();
-        expect(screen.getByText("❌")).toBeInTheDocument();
     });
 
     it("renders info toast with icon", () => {
         renderWithProviders(<Toast type="info" text="Processing..." onDismiss={vi.fn()} />);
         expect(screen.getByText("Processing...")).toBeInTheDocument();
-        expect(screen.getByText("ℹ️")).toBeInTheDocument();
     });
 
     it("calls onDismiss when dismiss button is clicked", async () => {
@@ -28,7 +25,8 @@ describe("Toast", () => {
         const onDismiss = vi.fn();
         renderWithProviders(<Toast type="success" text="Done" onDismiss={onDismiss} />);
 
-        await user.click(screen.getByText("✕"));
+        const dismissBtn = screen.getByRole("button");
+        await user.click(dismissBtn);
         expect(onDismiss).toHaveBeenCalledOnce();
     });
 });

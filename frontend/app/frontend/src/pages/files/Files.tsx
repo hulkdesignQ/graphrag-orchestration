@@ -25,7 +25,6 @@ import {
     bulkDeleteFilesApi,
     renameFileApi,
     moveFileApi,
-    getFileIcon,
     ACCEPTED_FILE_TYPES,
 } from "../../api/files";
 import {
@@ -48,7 +47,7 @@ import { FolderSidebar } from "../../components/FileManager/FolderSidebar";
 import { MoveToFolderDialog } from "../../components/FileManager/MoveToFolderDialog";
 import { FilePreviewPanel } from "../../components/FileManager/FilePreviewPanel";
 import { Toast } from "../../components/FileManager/Toast";
-import { LockClosed24Regular, ChartMultiple24Regular, Clock24Regular, Warning24Regular, ArrowSwap24Regular, PeopleTeam24Regular, Delete24Regular, DismissCircle24Regular, Chat24Regular } from "@fluentui/react-icons";
+import { LockClosed24Regular, ChartMultiple24Regular, Clock24Regular, Warning24Regular, ArrowSwap24Regular, PeopleTeam24Regular, Delete24Regular, DismissCircle24Regular, Chat24Regular, Search24Regular, Document24Regular, Link24Regular, BookOpen24Regular, Dismiss24Regular } from "@fluentui/react-icons";
 import styles from "./Files.module.css";
 
 export interface ToastMessage {
@@ -572,7 +571,7 @@ const Files = () => {
                             >
                                 {analyzingFolderIds.has(activeFolder.id)
                                     ? <><Clock24Regular /> Starting…</>
-                                    : <>{`🔍 ${t("files.analyzeNow", "Analyze Now")}`}</>}
+                                    : <><Search24Regular /> {t("files.analyzeNow", "Analyze Now")}</>}
                             </button>
                         </div>
                     )}
@@ -601,10 +600,10 @@ const Files = () => {
                             )}
                             <div className={styles.analysisSummaryStats}>
                                 {activeFolder.file_count != null && (
-                                    <span className={styles.analysisStat}>📄 {activeFolder.file_count} files</span>
+                                    <span className={styles.analysisStat}><Document24Regular /> {activeFolder.file_count} files</span>
                                 )}
                                 {activeFolder.entity_count != null && (
-                                    <span className={styles.analysisStat}>🔗 {activeFolder.entity_count} entities</span>
+                                    <span className={styles.analysisStat}><Link24Regular /> {activeFolder.entity_count} entities</span>
                                 )}
                                 {activeFolder.relationship_count != null && (
                                     <span className={styles.analysisStat}><ArrowSwap24Regular /> {activeFolder.relationship_count} relationships</span>
@@ -613,13 +612,13 @@ const Files = () => {
                                     <span className={styles.analysisStat}><PeopleTeam24Regular /> {activeFolder.community_count} communities</span>
                                 )}
                                 {activeFolder.section_count != null && (
-                                    <span className={styles.analysisStat}>📑 {activeFolder.section_count} sections</span>
+                                    <span className={styles.analysisStat}><BookOpen24Regular /> {activeFolder.section_count} sections</span>
                                 )}
                                 {activeFolder.sentence_count != null && (
                                     <span className={styles.analysisStat}><Chat24Regular /> {activeFolder.sentence_count} sentences</span>
                                 )}
                                 {activeFolder.analyzed_at && (
-                                    <span className={styles.analysisStat}>🕐 {new Date(activeFolder.analyzed_at).toLocaleString()}</span>
+                                    <span className={styles.analysisStat}><Clock24Regular /> {new Date(activeFolder.analyzed_at).toLocaleString()}</span>
                                 )}
                             </div>
                             {(activeFolder.analysis_status === "analyzed" || activeFolder.analysis_status === "stale" || activeFolder.folder_type === "analysis_result") && (
@@ -678,7 +677,7 @@ const Files = () => {
                                             className={styles.cancelAnalysisBtn}
                                             onClick={() => handleCancelAnalysis(activeFolder.id)}
                                         >
-                                            ✖ {t("files.cancelAnalysis", "Cancel Analysis")}
+                                            <Dismiss24Regular /> {t("files.cancelAnalysis", "Cancel Analysis")}
                                         </button>
                                     </div>
                                 </>

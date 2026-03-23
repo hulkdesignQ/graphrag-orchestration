@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { Delete24Regular, Clock24Regular } from "@fluentui/react-icons";
+import { Delete24Regular, Clock24Regular, ArrowClockwise24Regular, Search24Regular, ArrowUp24Regular, ArrowDown24Regular } from "@fluentui/react-icons";
 
 import type { AnalysisStatus } from "../../api/folders";
 import styles from "../../pages/files/Files.module.css";
@@ -40,7 +40,7 @@ export const FileToolbar = ({
     onAnalyzeFolder,
 }: FileToolbarProps) => {
     const { t } = useTranslation();
-    const arrow = sortAsc ? "↑" : "↓";
+    const ArrowIcon = sortAsc ? ArrowUp24Regular : ArrowDown24Regular;
 
     return (
         <div className={styles.toolbar}>
@@ -62,7 +62,7 @@ export const FileToolbar = ({
                 onClick={() => onSortChange("name")}
                 title={t("fileToolbar.sortByName")}
             >
-                {t("fileToolbar.name")} {sortBy === "name" ? arrow : ""}
+                {t("fileToolbar.name")} {sortBy === "name" && <ArrowIcon />}
             </button>
 
             <button
@@ -70,7 +70,7 @@ export const FileToolbar = ({
                 onClick={() => onSortChange("ext")}
                 title={t("fileToolbar.sortByType")}
             >
-                {t("fileToolbar.type")} {sortBy === "ext" ? arrow : ""}
+                {t("fileToolbar.type")} {sortBy === "ext" && <ArrowIcon />}
             </button>
 
             {selectedCount > 0 ? (
@@ -89,7 +89,7 @@ export const FileToolbar = ({
             )}
 
             <button className={styles.toolbarBtn} onClick={onRefresh} title={t("fileToolbar.refresh")}>
-                🔄
+                <ArrowClockwise24Regular />
             </button>
 
             {/* Analyze action — stale: re-analyze toolbar button; analyzing: disabled status */}
@@ -100,7 +100,7 @@ export const FileToolbar = ({
                     </button>
                 ) : analysisStatus === "stale" ? (
                     <button className={styles.toolbarBtnAnalyze} onClick={onAnalyzeFolder}>
-                        🔍 {t("files.reanalyze", "Re-analyze")}
+                        <Search24Regular /> {t("files.reanalyze", "Re-analyze")}
                     </button>
                 ) : null
             )}

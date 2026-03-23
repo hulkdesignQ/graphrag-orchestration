@@ -294,29 +294,6 @@ export function getFileContentUrl(path: string, folder?: string): string {
 
 // ======================== Helpers ========================
 
-const FILE_ICONS: Record<string, string> = {
-    pdf: "📄",
-    docx: "📝",
-    xlsx: "📊",
-    pptx: "📰",
-    txt: "📃",
-    md: "📃",
-    json: "🔧",
-    html: "🌐",
-    png: "🖼️",
-    jpg: "🖼️",
-    jpeg: "🖼️",
-    bmp: "🖼️",
-    svg: "🖼️",
-    tiff: "🖼️",
-    heic: "🖼️",
-};
-
-export function getFileIcon(filename: string): string {
-    const ext = filename.split(".").pop()?.toLowerCase() || "";
-    return FILE_ICONS[ext] || "📎";
-}
-
 export function formatFileSize(bytes: number | undefined): string {
     if (bytes === undefined || bytes === null) return "—";
     if (bytes === 0) return "0 B";
