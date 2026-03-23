@@ -50,6 +50,7 @@ function getUserFriendlyError(error: unknown, t: (key: string) => string): strin
 
 const Chat = () => {
     const [searchParams] = useSearchParams();
+    const navigate = useNavigate();
     const folderId = searchParams.get("folder") || sessionStorage.getItem("selectedFolderId") || undefined;
     const [selectedFolderId, setSelectedFolderId] = useState<string | undefined>(folderId);
 
@@ -117,6 +118,13 @@ const Chat = () => {
     const [useAgenticKnowledgeBase, setUseAgenticRetrieval] = useState<boolean>(false);
     const [hideMinimalRetrievalReasoningOption, setHideMinimalRetrievalReasoningOption] = useState<boolean>(false);
     const streamingDisabledByOverrides = useAgenticKnowledgeBase && webSourceEnabled;
+
+    // Auto-redirect first-time users to the getting-started wizard
+    useEffect(() => {
+        if (!hasSeenOnboarding()) {
+            navigate("/getting-started", { replace: true });
+        }
+    }, []);
 
     const audio = useRef(new Audio()).current;
     const [isPlaying, setIsPlaying] = useState(false);

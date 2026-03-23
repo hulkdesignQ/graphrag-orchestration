@@ -60,11 +60,18 @@ else
     # Get the callback URL (will be set after deployment)
     read -p "Enter your Azure region (e.g., swedencentral): " AZURE_REGION
     CALLBACK_URL="https://graphrag-api-b2c.${AZURE_REGION}.azurecontainerapps.io/.auth/login/aad/callback"
+
+    REDIRECT_URIS=("$CALLBACK_URL")
+    read -p "Custom domain for B2C app (e.g., app.evidoc.hulkdesign.com, blank to skip): " B2C_CUSTOM_DOMAIN
+    if [ -n "$B2C_CUSTOM_DOMAIN" ]; then
+        REDIRECT_URIS+=("https://${B2C_CUSTOM_DOMAIN}/.auth/login/aad/callback")
+        echo "  Including custom domain redirect: https://${B2C_CUSTOM_DOMAIN}/.auth/login/aad/callback"
+    fi
     
     APP_RESULT=$(az ad app create \
         --display-name "Evidoc" \
         --sign-in-audience "AzureADandPersonalMicrosoftAccount" \
-        --web-redirect-uris "$CALLBACK_URL" \
+        --web-redirect-uris "${REDIRECT_URIS[@]}" \
         --required-resource-accesses '[{
             "resourceAppId": "00000003-0000-0000-c000-000000000000",
             "resourceAccess": [

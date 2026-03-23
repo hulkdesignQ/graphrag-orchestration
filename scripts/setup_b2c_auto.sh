@@ -75,10 +75,23 @@ else
     
     # Add redirect URIs for Easy Auth
     echo "Adding redirect URIs..."
+    REDIRECT_URIS=(
+        "https://graphrag-api-b2c.salmonhill-df6033f3.swedencentral.azurecontainerapps.io/.auth/login/aad/callback"
+        "https://localhost:50505/.auth/login/aad/callback"
+    )
+
+    # Check for custom domain in azd env
+    B2C_CUSTOM_DOMAIN=$(azd env get-value B2C_CUSTOM_DOMAIN 2>/dev/null || echo "")
+    if [ -z "$B2C_CUSTOM_DOMAIN" ]; then
+        read -p "Custom domain for B2C app (e.g., app.evidoc.hulkdesign.com, blank to skip): " B2C_CUSTOM_DOMAIN
+    fi
+    if [ -n "$B2C_CUSTOM_DOMAIN" ]; then
+        REDIRECT_URIS+=("https://${B2C_CUSTOM_DOMAIN}/.auth/login/aad/callback")
+        echo "  Including custom domain redirect: https://${B2C_CUSTOM_DOMAIN}/.auth/login/aad/callback"
+    fi
+
     az ad app update --id "$APP_OBJECT_ID" \
-        --web-redirect-uris \
-            "https://graphrag-api-b2c.salmonhill-df6033f3.swedencentral.azurecontainerapps.io/.auth/login/aad/callback" \
-            "https://localhost:50505/.auth/login/aad/callback"
+        --web-redirect-uris "${REDIRECT_URIS[@]}"
     
     # Expose API
     echo "Exposing API scope..."
