@@ -2,7 +2,7 @@
 // Deploys a free-tier static site with global CDN and managed SSL
 
 param name string
-param location string = 'swedencentral'
+param location string = 'westeurope' // SWA not available in all regions; CDN-backed so location only affects managed API
 param tags object = {}
 param customDomainName string = ''
 

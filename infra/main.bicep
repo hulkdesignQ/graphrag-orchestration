@@ -958,7 +958,7 @@ module website './core/host/static-web-app.bicep' = {
   scope: rg
   params: {
     name: 'evidoc-website-${uniqueString(rg.id)}'
-    location: location
+    location: 'westeurope' // SWA unavailable in swedencentral; CDN-backed globally
     tags: tags
     customDomainName: websiteCustomDomain
   }
