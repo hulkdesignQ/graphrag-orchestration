@@ -6,143 +6,135 @@
     padding: 3rem 1.5rem 1.5rem;
     overflow-y: auto;
     max-height: calc(100vh - 5rem);
+    background: #f5f5f7;
 }
 
-/* ── Stepper ── */
+/* ── Heading (matches website) ── */
 
-.stepper {
-    position: relative;
-    display: flex;
-    width: 100%;
-    max-width: 400px;
-    margin-bottom: 3rem;
-    border-bottom: 2px solid var(--colorNeutralStroke1);
-}
-
-.progress {
-    position: absolute;
-    bottom: -2px;
-    left: 0;
-    height: 2px;
-    background: var(--colorBrandBackground);
-    border-radius: 1px;
-    transition: width 0.35s ease;
-}
-
-.tab {
-    flex: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    padding: 10px 0 14px;
-    border: none;
-    background: none;
-    cursor: pointer;
-    color: var(--colorNeutralForeground3);
-    font-size: 0.9rem;
-    font-weight: 500;
-    transition: color 0.2s;
-}
-
-.tab:hover { color: var(--colorNeutralForeground1); }
-.tabActive { color: var(--colorBrandForeground1); font-weight: 600; }
-.tabDone { color: var(--colorStatusSuccessForeground1); }
-
-.tabNumber {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 26px;
-    height: 26px;
-    border-radius: 50%;
-    font-size: 0.8rem;
-    font-weight: 700;
-    background: var(--colorNeutralBackground3);
-    color: var(--colorNeutralForeground2);
-    transition: background 0.2s, color 0.2s;
-    flex-shrink: 0;
-}
-
-.tabActive .tabNumber { background: var(--colorBrandBackground); color: white; }
-.tabDone .tabNumber { background: var(--colorStatusSuccessBackground1); color: var(--colorStatusSuccessForeground1); }
-
-/* ── Panel ── */
-
-.panel {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    text-align: center;
-    max-width: 440px;
-    animation: fadeIn 0.25s ease-out;
-}
-
-@keyframes fadeIn {
-    from { opacity: 0; transform: translateY(10px); }
-    to   { opacity: 1; transform: translateY(0); }
-}
-
-.illustration {
-    font-size: 3rem;
-    margin-bottom: 1rem;
-}
-
-.heading {
-    font-size: 1.5rem;
-    font-weight: 700;
+.headline {
+    font-size: 2rem;
+    font-weight: 600;
+    color: #1d1d1f;
+    letter-spacing: -0.02em;
     margin: 0 0 0.5rem;
-    color: var(--colorNeutralForeground1);
+    text-align: center;
 }
 
-.body {
-    font-size: 0.95rem;
-    line-height: 1.6;
-    color: var(--colorNeutralForeground2);
-    margin: 0 0 1.5rem;
+.subheadline {
+    font-size: 1.05rem;
+    color: #86868b;
+    margin: 0 0 2.5rem;
+    text-align: center;
+    max-width: 500px;
 }
 
-.actions {
+/* ── Steps grid (matches website HowItWorks) ── */
+
+.stepsGrid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 2rem;
+    max-width: 680px;
+    width: 100%;
+    margin-bottom: 2.5rem;
+}
+
+.stepCard {
+    text-align: center;
+    cursor: pointer;
+    padding: 1rem 0.5rem;
+    border-radius: 12px;
+    transition: background 0.2s;
+}
+
+.stepCard:hover {
+    background: rgba(0, 0, 0, 0.03);
+}
+
+.stepCardActive {
+    background: white;
+    box-shadow: 0 1px 8px rgba(0, 0, 0, 0.06);
+}
+
+.stepCircle {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    border: 1.5px solid rgba(0, 113, 227, 0.3);
+    color: #0071e3;
+    font-size: 1rem;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 0.75rem;
+}
+
+.stepTitle {
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: #1d1d1f;
+    margin: 0 0 0.4rem;
+}
+
+.stepDesc {
+    font-size: 0.85rem;
+    color: #86868b;
+    line-height: 1.5;
+    margin: 0;
+}
+
+/* ── CTA area ── */
+
+.ctaArea {
     display: flex;
     flex-direction: column;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 1.5rem;
+    animation: fadeIn 0.2s ease-out;
+}
+
+.ctaNote {
+    font-size: 0.9rem;
+    color: #86868b;
+    margin: 0;
+}
+
+.sampleRow {
+    display: flex;
     align-items: center;
     gap: 0.5rem;
-}
-
-.divider {
-    width: 60px;
-    height: 1px;
-    background: var(--colorNeutralStroke1);
-    margin: 1.5rem 0;
-}
-
-.hint {
     font-size: 0.8rem;
-    color: var(--colorNeutralForeground3);
-    margin: 0 0 0.5rem;
+}
+
+.sampleHint {
+    color: #86868b;
 }
 
 .sampleLoading {
-    display: flex;
+    display: inline-flex;
     align-items: center;
-    gap: 0.5rem;
-    font-size: 0.85rem;
-    color: var(--colorNeutralForeground2);
+    gap: 0.4rem;
+    color: #86868b;
 }
 
 .sampleDone {
-    display: flex;
+    display: inline-flex;
     align-items: center;
-    gap: 0.4rem;
-    font-size: 0.85rem;
-    color: var(--colorStatusSuccessForeground1);
+    gap: 0.3rem;
+    color: #34c759;
     font-weight: 500;
 }
 
 .sampleError {
-    font-size: 0.85rem;
-    color: var(--colorStatusDangerForeground1);
+    color: #ff3b30;
+    font-size: 0.8rem;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to   { opacity: 1; }
 }
 
 /* ── Nav ── */
@@ -152,8 +144,8 @@
     align-items: center;
     justify-content: space-between;
     width: 100%;
-    max-width: 440px;
-    padding-top: 1.5rem;
+    max-width: 680px;
+    padding-top: 1rem;
     margin-top: auto;
 }
 
@@ -189,7 +181,7 @@
 /* ── Responsive ── */
 
 @media (max-width: 768px) {
-    .heading { font-size: 1.25rem; }
-    .tabLabel { display: none; }
-    .stepper { max-width: 200px; }
+    .stepsGrid { grid-template-columns: 1fr; gap: 1rem; max-width: 360px; }
+    .headline { font-size: 1.5rem; }
+    .subheadline { font-size: 0.9rem; }
 }

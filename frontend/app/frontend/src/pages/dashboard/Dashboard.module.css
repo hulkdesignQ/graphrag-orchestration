@@ -46,12 +46,12 @@
     color: #495057;
 }
 
-.planStarter {
+.planPro {
     background: #d1ecf1;
     color: #0c5460;
 }
 
-.planProfessional {
+.planProPlus {
     background: #d4edda;
     color: #155724;
 }
@@ -171,16 +171,22 @@
 /* --- Plan comparison --- */
 .planGrid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 1rem;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 1.25rem;
+    max-width: 900px;
+    margin: 0 auto;
 }
 
 .planCard {
-    border: 2px solid #e9ecef;
-    border-radius: 12px;
-    padding: 1.25rem;
+    background: #f5f5f7;
+    border-radius: 16px;
+    padding: 2rem 1.5rem;
     text-align: center;
-    transition: border-color 0.2s, transform 0.2s;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    transition: transform 0.2s;
+    border: 2px solid transparent;
 }
 
 .planCard:hover {
@@ -188,30 +194,87 @@
 }
 
 .planCardCurrent {
-    border-color: #4cc9f0;
-    background: #f0fcff;
+    border-color: #0071e3;
+}
+
+.planCardHighlighted {
+    background: #fff;
+    box-shadow: 0 4px 24px rgba(0, 113, 227, 0.10);
+    border: 2px solid rgba(0, 113, 227, 0.2);
+}
+
+.planCardBadge {
+    position: absolute;
+    top: -12px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #0071e3;
+    color: #fff;
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 0.25rem 0.9rem;
+    border-radius: 9999px;
+    white-space: nowrap;
 }
 
 .planCardName {
-    font-size: 1.1rem;
+    font-size: 1.15rem;
     font-weight: 700;
-    margin-bottom: 0.5rem;
-    color: #1a1a2e;
+    color: #1d1d1f;
+    margin-bottom: 0.25rem;
+}
+
+.planCardNameHighlighted {
+    color: #0071e3;
+}
+
+.planCardPrice {
+    font-size: 2.75rem;
+    font-weight: 700;
+    color: #1d1d1f;
+    margin-top: 0.75rem;
+    line-height: 1;
+}
+
+.planCardPeriod {
+    font-size: 0.95rem;
+    font-weight: 400;
+    color: #86868b;
+}
+
+.planCardDesc {
+    font-size: 0.85rem;
+    color: #86868b;
+    margin-top: 0.5rem;
+}
+
+.planCardFeatures {
+    list-style: none;
+    padding: 0;
+    margin: 1.5rem 0 0;
+    text-align: left;
+    flex-grow: 1;
+}
+
+.planCardFeatures li {
+    font-size: 0.82rem;
+    color: #86868b;
+    padding: 0.35rem 0;
 }
 
 .planCardDetail {
     font-size: 0.8rem;
-    color: #6c757d;
+    color: #86868b;
     margin: 0.25rem 0;
 }
 
 .upgradeButton {
-    margin-top: 0.75rem;
-    padding: 0.5rem 1.25rem;
+    margin-top: 1.25rem;
+    padding: 0.65rem 1.25rem;
     border: none;
-    border-radius: 8px;
-    background: #4cc9f0;
-    color: #1a1a2e;
+    border-radius: 9999px;
+    background: #0071e3;
+    color: #fff;
     font-weight: 600;
     cursor: pointer;
     font-size: 0.85rem;
@@ -219,13 +282,24 @@
 }
 
 .upgradeButton:hover {
-    background: #3ab8dd;
+    background: #0077ed;
 }
 
 .upgradeButton:disabled {
-    background: #dee2e6;
+    background: transparent;
+    border: 1.5px solid rgba(0, 113, 227, 0.3);
+    color: #86868b;
     cursor: default;
-    color: #868e96;
+}
+
+.upgradeButtonOutline {
+    background: transparent;
+    border: 1.5px solid rgba(0, 113, 227, 0.3);
+    color: #0071e3;
+}
+
+.upgradeButtonOutline:hover {
+    background: rgba(0, 113, 227, 0.05);
 }
 
 /* --- Recent activity table --- */

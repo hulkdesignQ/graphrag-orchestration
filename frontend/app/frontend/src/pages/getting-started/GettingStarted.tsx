@@ -52,10 +52,22 @@ const GettingStarted = () => {
         }
     };
 
-    const tabs = [
-        t("onboarding.tabUpload", "Upload"),
-        t("onboarding.tabAsk", "Ask"),
-        t("onboarding.tabVerify", "Verify"),
+    const steps = [
+        {
+            num: "1",
+            title: t("onboarding.step1Title", "Drop Your Files"),
+            desc: t("onboarding.step1Desc", "PDFs, Word docs, spreadsheets, scanned images — 15+ formats. Drag, drop, done."),
+        },
+        {
+            num: "2",
+            title: t("onboarding.step2Title", "Evidoc Connects the Dots"),
+            desc: t("onboarding.step2Desc", "Every name, date, clause, and concept is linked across all your documents."),
+        },
+        {
+            num: "3",
+            title: t("onboarding.step3Title", "Ask. Verify. Done."),
+            desc: t("onboarding.step3Desc", "Ask in plain English (or 12 other languages). Click any citation to see the highlighted source."),
+        },
     ];
 
     return (
@@ -64,60 +76,42 @@ const GettingStarted = () => {
                 <title>{t("onboarding.pageTitle", "Getting Started")} | Evidoc</title>
             </Helmet>
 
-            {/* ── Stepper ── */}
-            <div className={styles.stepper}>
-                {tabs.map((label, i) => (
-                    <button
-                        key={i}
-                        className={`${styles.tab} ${i === activeStep ? styles.tabActive : ""} ${i < activeStep ? styles.tabDone : ""}`}
-                        onClick={() => setActiveStep(i)}
-                    >
-                        <span className={styles.tabNumber}>{i < activeStep ? "✓" : i + 1}</span>
-                        <span className={styles.tabLabel}>{label}</span>
-                    </button>
+            {/* ── Heading ── */}
+            <h1 className={styles.headline}>{t("onboarding.headline", "Three steps. That's it.")}</h1>
+            <p className={styles.subheadline}>{t("onboarding.subheadline", "From \"I have 200 PDFs\" to \"here's the exact answer, with proof.\"")}</p>
+
+            {/* ── Steps grid (matches website HowItWorks) ── */}
+            <div className={styles.stepsGrid}>
+                {steps.map((step) => (
+                    <div key={step.num} className={`${styles.stepCard} ${activeStep === Number(step.num) - 1 ? styles.stepCardActive : ""}`} onClick={() => setActiveStep(Number(step.num) - 1)}>
+                        <div className={styles.stepCircle}>{step.num}</div>
+                        <h3 className={styles.stepTitle}>{step.title}</h3>
+                        <p className={styles.stepDesc}>{step.desc}</p>
+                    </div>
                 ))}
-                <div className={styles.progress} style={{ width: `${(activeStep / (STEP_COUNT - 1)) * 100}%` }} />
             </div>
 
-            {/* ── Step content ── */}
-            <div className={styles.panel} key={activeStep}>
+            {/* ── CTA area (changes based on active step) ── */}
+            <div className={styles.ctaArea} key={activeStep}>
                 {activeStep === 0 && (
                     <>
-                        <div className={styles.illustration}>📄</div>
-                        <h1 className={styles.heading}>{t("onboarding.uploadHeading", "Upload your documents")}</h1>
-                        <p className={styles.body}>{t("onboarding.uploadBody", "Drop PDFs, Word docs, Excel, or images into a folder. We'll build a Knowledge Graph so you can search across them.")}</p>
-                        <div className={styles.actions}>
-                            <Button appearance="primary" size="large" onClick={goFiles}>{t("onboarding.uploadCta", "Go to Files")}</Button>
-                            <Button appearance="subtle" size="medium" onClick={next}>{t("onboarding.or", "or continue the tour →")}</Button>
+                        <Button appearance="primary" size="large" onClick={goFiles}>{t("onboarding.uploadCta", "Go to Files")}</Button>
+                        <div className={styles.sampleRow}>
+                            <span className={styles.sampleHint}>{t("onboarding.sampleHint", "No documents yet?")}</span>
+                            {sampleStatus === "idle" && (
+                                <Button appearance="subtle" size="small" icon={<DocumentCopy24Regular />} onClick={handleLoadSamples}>{t("onboarding.loadSamples", "Load samples")}</Button>
+                            )}
+                            {sampleStatus === "loading" && <span className={styles.sampleLoading}><Spinner size="tiny" /> {t("onboarding.loadingSamples", "Loading...")}</span>}
+                            {sampleStatus === "done" && <span className={styles.sampleDone}><CheckmarkCircle24Regular /> {t("onboarding.samplesReady", "Loaded!")}</span>}
+                            {sampleStatus === "error" && <span className={styles.sampleError}>{sampleError} <Button appearance="subtle" size="small" onClick={handleLoadSamples}>{t("onboarding.retryLoad", "Retry")}</Button></span>}
                         </div>
-                        <div className={styles.divider} />
-                        <p className={styles.hint}>{t("onboarding.sampleHint", "No documents yet? Try our samples:")}</p>
-                        {sampleStatus === "idle" && (
-                            <Button appearance="outline" size="small" icon={<DocumentCopy24Regular />} onClick={handleLoadSamples}>
-                                {t("onboarding.loadSamples", "Load sample documents")}
-                            </Button>
-                        )}
-                        {sampleStatus === "loading" && <div className={styles.sampleLoading}><Spinner size="tiny" /><span>{t("onboarding.loadingSamples", "Loading...")}</span></div>}
-                        {sampleStatus === "done" && <div className={styles.sampleDone}><CheckmarkCircle24Regular /><span>{t("onboarding.samplesReady", "Samples loaded!")}</span></div>}
-                        {sampleStatus === "error" && <div className={styles.sampleError}><span>{sampleError}</span> <Button appearance="subtle" size="small" onClick={handleLoadSamples}>{t("onboarding.retryLoad", "Retry")}</Button></div>}
                     </>
                 )}
-
                 {activeStep === 1 && (
-                    <>
-                        <div className={styles.illustration}>💬</div>
-                        <h1 className={styles.heading}>{t("onboarding.askHeading", "Ask a question")}</h1>
-                        <p className={styles.body}>{t("onboarding.askBody", "Pick a folder, type your question. Evidoc searches across all documents using a Knowledge Graph — not just keywords.")}</p>
-                    </>
+                    <p className={styles.ctaNote}>{t("onboarding.connectNote", "This happens automatically after you upload — no setup needed.")}</p>
                 )}
-
                 {activeStep === 2 && (
-                    <>
-                        <div className={styles.illustration}>✅</div>
-                        <h1 className={styles.heading}>{t("onboarding.verifyHeading", "Click to verify")}</h1>
-                        <p className={styles.body}>{t("onboarding.verifyBody", "Every answer has numbered citations. Click one to jump to the exact sentence on the original page.")}</p>
-                        <Button appearance="primary" size="large" onClick={finish}>{t("onboarding.startChatting", "Start chatting")}</Button>
-                    </>
+                    <Button appearance="primary" size="large" onClick={finish}>{t("onboarding.startChatting", "Start chatting")}</Button>
                 )}
             </div>
 

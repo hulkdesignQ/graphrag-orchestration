@@ -11,10 +11,21 @@ import { Events } from "../../analytics";
 
 const PLAN_BADGE_CLASS: Record<string, string> = {
     free: styles.planFree,
-    starter: styles.planStarter,
-    professional: styles.planProfessional,
+    pro: styles.planPro,
+    pro_plus: styles.planProPlus,
     enterprise: styles.planEnterprise
 };
+
+const PLAN_FEATURES: Record<string, string[]> = {
+    free: ["planFeature.free.f1", "planFeature.free.f2", "planFeature.free.f3", "planFeature.free.f4"],
+    pro: ["planFeature.pro.f1", "planFeature.pro.f2", "planFeature.pro.f3", "planFeature.pro.f4", "planFeature.pro.f5"],
+    pro_plus: ["planFeature.pro_plus.f1", "planFeature.pro_plus.f2", "planFeature.pro_plus.f3", "planFeature.pro_plus.f4", "planFeature.pro_plus.f5"],
+    business: ["planFeature.business.f1", "planFeature.business.f2", "planFeature.business.f3", "planFeature.business.f4", "planFeature.business.f5", "planFeature.business.f6"],
+    enterprise: ["planFeature.enterprise.f1", "planFeature.enterprise.f2", "planFeature.enterprise.f3", "planFeature.enterprise.f4", "planFeature.enterprise.f5", "planFeature.enterprise.f6"]
+};
+
+const HIGHLIGHTED_PLANS = new Set(["pro_plus", "enterprise"]);
+const BADGE_PLANS: Record<string, string> = { pro_plus: "planBadge.popular", enterprise: "planBadge.custom" };
 
 function formatStorage(gb: number): string {
     if (gb <= 0) return "0 MB";
@@ -261,24 +272,38 @@ const Dashboard = () => {
                             const isCurrent = tier === plans.current_plan;
                             const canCheckout = billingConfig?.stripe_enabled && tier !== "free";
                             const isUpgrade = !isCurrent && canCheckout;
+                            const isHighlighted = HIGHLIGHTED_PLANS.has(tier);
+                            const badgeKey = BADGE_PLANS[tier];
+                            const isBusinessTier = tier === "business" || tier === "enterprise";
+                            const periodKey = isBusinessTier ? "dashboard.planPeriod.business" : "dashboard.planPeriod.individual";
+                            const features = PLAN_FEATURES[tier] || [];
                             return (
                                 <div
                                     key={tier}
-                                    className={`${styles.planCard} ${isCurrent ? styles.planCardCurrent : ""}`}
+                                    className={`${styles.planCard} ${isCurrent ? styles.planCardCurrent : ""} ${isHighlighted ? styles.planCardHighlighted : ""}`}
                                 >
-                                    <div className={styles.planCardName}>{info.name}</div>
-                                    <p className={styles.planCardDetail}>{t("dashboard.maxStorage", { count: info.max_storage_gb })}</p>
-                                    <p className={styles.planCardDetail}>
-                                        {info.monthly_credits != null
-                                            ? t("dashboard.creditsPerMonth", { count: info.monthly_credits.toLocaleString() })
-                                            : t("dashboard.unlimitedCredits")}
-                                    </p>
+                                    {badgeKey && (
+                                        <span className={styles.planCardBadge}>{t(`dashboard.${badgeKey}`)}</span>
+                                    )}
+                                    <div className={`${styles.planCardName} ${isHighlighted ? styles.planCardNameHighlighted : ""}`}>
+                                        {info.name}
+                                    </div>
+                                    <div className={styles.planCardPrice}>
+                                        {t(`dashboard.planPrice.${tier}`)}
+                                        {tier !== "free" && (
+                                            <span className={styles.planCardPeriod}>{t(`dashboard.${periodKey.replace("dashboard.", "")}`)}</span>
+                                        )}
+                                    </div>
+                                    <p className={styles.planCardDesc}>{t(`dashboard.planDesc.${tier}`)}</p>
+                                    <ul className={styles.planCardFeatures}>
+                                        {features.map((fKey) => (
+                                            <li key={fKey}>{t(`dashboard.${fKey}`)}</li>
+                                        ))}
+                                    </ul>
                                     {info.advanced_analytics && <p className={styles.planCardDetail}>✅ {t("dashboard.featureAdvancedAnalytics")}</p>}
                                     {info.api_access && <p className={styles.planCardDetail}>✅ {t("dashboard.featureApiAccess")}</p>}
-                                    {info.centralized_billing && <p className={styles.planCardDetail}>✅ {t("dashboard.featureCentralizedBilling")}</p>}
-                                    {info.audit_logs && <p className={styles.planCardDetail}>✅ {t("dashboard.featureAuditLogs")}</p>}
                                     <button
-                                        className={styles.upgradeButton}
+                                        className={`${styles.upgradeButton} ${tier === "free" && !isCurrent ? styles.upgradeButtonOutline : ""}`}
                                         disabled={isCurrent || checkoutLoading === tier}
                                         onClick={async () => {
                                             if (isCurrent) return;
@@ -302,7 +327,9 @@ const Dashboard = () => {
                                             ? t("dashboard.currentPlan")
                                             : checkoutLoading === tier
                                                 ? "..."
-                                                : t("dashboard.upgrade")}
+                                                : tier === "free"
+                                                    ? t("dashboard.planCta.getStarted")
+                                                    : t("dashboard.planCta.upgradeTo", { plan: info.name })}
                                     </button>
                                 </div>
                             );
