@@ -84,10 +84,10 @@ param b2cClientSecret string = ''
 param authClientSecret string = ''
 
 // Custom domain parameters
-@description('Custom domain for B2B app (e.g., evidoc-enterprise.hulkdesign.com). Empty = no custom domain.')
+@description('Custom domain for B2B app (e.g., app-enterprise.app.evidoc.hulkdesign.com). Empty = no custom domain.')
 param b2bCustomDomain string = ''
 
-@description('Custom domain for B2C app (e.g., evidoc.hulkdesign.com). Empty = no custom domain.')
+@description('Custom domain for B2C app (e.g., app.evidoc.hulkdesign.com). Empty = no custom domain.')
 param b2cCustomDomain string = ''
 
 @description('Skip role assignments if they already exist')
@@ -322,7 +322,7 @@ module keyVault './core/security/key-vault.bicep' = {
 // custom domains. See DNS setup instructions in docs/.
 // ============================================================================
 
-// B2B managed certificate (e.g., evidoc-enterprise.hulkdesign.com)
+// B2B managed certificate (e.g., app-enterprise.app.evidoc.hulkdesign.com)
 module b2bManagedCert './core/host/managed-certificate.bicep' = if (!empty(b2bCustomDomain)) {
   name: 'b2b-managed-cert'
   scope: rg
@@ -335,7 +335,7 @@ module b2bManagedCert './core/host/managed-certificate.bicep' = if (!empty(b2bCu
   dependsOn: [containerAppsEnvironment]
 }
 
-// B2C managed certificate (e.g., evidoc.hulkdesign.com)
+// B2C managed certificate (e.g., app.evidoc.hulkdesign.com)
 module b2cManagedCert './core/host/managed-certificate.bicep' = if (!empty(b2cCustomDomain)) {
   name: 'b2c-managed-cert'
   scope: rg

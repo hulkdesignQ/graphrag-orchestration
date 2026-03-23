@@ -7,7 +7,7 @@
 
 ## 1. Introduction
 
-This Cookie Policy explains how **BangDesign Co. Ltd.** ("Company", "we", "us", or "our") uses cookies, local storage, and similar technologies on **Evidoc** ("Service") at [https://evidoc.hulkdesign.com](https://evidoc.hulkdesign.com).
+This Cookie Policy explains how **BangDesign Co. Ltd.** ("Company", "we", "us", or "our") uses cookies, local storage, and similar technologies on **Evidoc** ("Service") at [https://app.evidoc.hulkdesign.com](https://app.evidoc.hulkdesign.com).
 
 This policy should be read alongside our [Privacy Policy](./PRIVACY_POLICY.md) and [Terms of Service](./TERMS_OF_SERVICE.md).
 

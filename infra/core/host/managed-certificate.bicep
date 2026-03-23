@@ -4,7 +4,7 @@ param environmentName string
 @description('Location for the certificate resource')
 param location string = resourceGroup().location
 
-@description('Custom domain name for the certificate (e.g., evidoc.hulkdesign.com)')
+@description('Custom domain name for the certificate (e.g., app.evidoc.hulkdesign.com)')
 param domainName string
 
 @description('Name of an existing managed certificate to reference. When set, no new certificate is created.')

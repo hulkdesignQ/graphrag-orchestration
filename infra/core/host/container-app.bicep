@@ -13,7 +13,7 @@ param env array = []
 param secrets array = []
 
 // Custom domain parameters
-@description('Custom domain name (e.g., evidoc.hulkdesign.com). Empty = no custom domain.')
+@description('Custom domain name (e.g., app.evidoc.hulkdesign.com). Empty = no custom domain.')
 param customDomainName string = ''
 
 @description('Managed certificate ID for custom domain TLS. Required if customDomainName is set.')

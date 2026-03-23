@@ -31,7 +31,7 @@
 | 16 | Credit metering | ✅ Done | Per-operation USD→credit conversion |
 | 17 | Multi-tenant isolation | ✅ Done | Group isolation middleware + Neo4j partition |
 | 18 | Health endpoints | ✅ Done | `/health` + `/health/detailed` |
-| 19 | Custom domain guide | ✅ Done | `evidoc.hulkdesign.com` documented |
+| 19 | Custom domain guide | ✅ Done | `app.evidoc.hulkdesign.com` documented |
 | 20 | Security patching | ✅ Done | 5 CVEs fixed (2 high, 3 moderate) |
 
 ## Pricing & Billing

@@ -6,8 +6,8 @@ The GraphRAG platform supports custom domains for both B2B (enterprise) and B2C 
 
 | Endpoint | Domain | Container App |
 |----------|--------|---------------|
-| B2C (consumers) | `evidoc.hulkdesign.com` | `graphrag-api-b2c` |
-| B2B (enterprise) | `evidoc-enterprise.hulkdesign.com` | `graphrag-api` |
+| B2C (consumers) | `app.evidoc.hulkdesign.com` | `graphrag-api-b2c` |
+| B2B (enterprise) | `app-enterprise.evidoc.hulkdesign.com` | `graphrag-api` |
 
 ## Step 1: Get Container App FQDNs
 
@@ -38,14 +38,14 @@ az containerapp env show \
 
 This returns a long hex string like `A1B2C3D4E5F6...`. Use it as the TXT value below.
 
-### B2C Domain (`evidoc.hulkdesign.com`)
+### B2C Domain (`app.evidoc.hulkdesign.com`)
 
 | Type | Name | Value | Purpose |
 |------|------|-------|---------|
 | CNAME | `evidoc` | `graphrag-api-b2c.lemonriver-xxxxx.swedencentral.azurecontainerapps.io` | Routes traffic to your Container App |
 | TXT | `asuid.evidoc` | *(the hex string from the command above)* | Proves to Azure you own this domain |
 
-### B2B Domain (`evidoc-enterprise.hulkdesign.com`)
+### B2B Domain (`app-enterprise.evidoc.hulkdesign.com`)
 
 | Type | Name | Value | Purpose |
 |------|------|-------|---------|
@@ -60,12 +60,12 @@ Verify DNS is working before proceeding:
 
 ```bash
 # Check CNAME records
-nslookup evidoc.hulkdesign.com
-nslookup evidoc-enterprise.hulkdesign.com
+nslookup app.evidoc.hulkdesign.com
+nslookup app-enterprise.evidoc.hulkdesign.com
 
 # Check TXT records
-nslookup -type=TXT asuid.evidoc.hulkdesign.com
-nslookup -type=TXT asuid.evidoc-enterprise.hulkdesign.com
+nslookup -type=TXT asuid.app.evidoc.hulkdesign.com
+nslookup -type=TXT asuid.app-enterprise.evidoc.hulkdesign.com
 ```
 
 DNS propagation typically takes 5–30 minutes but can take up to 48 hours.
@@ -76,8 +76,8 @@ Set the domain parameters and provision infrastructure only (**no container rebu
 
 ```bash
 # Set the custom domain parameters
-azd env set b2bCustomDomain "evidoc-enterprise.hulkdesign.com"
-azd env set b2cCustomDomain "evidoc.hulkdesign.com"
+azd env set b2bCustomDomain "app-enterprise.evidoc.hulkdesign.com"
+azd env set b2cCustomDomain "app.evidoc.hulkdesign.com"
 
 # Provision infrastructure only (does NOT rebuild or redeploy containers)
 azd provision
@@ -95,19 +95,19 @@ This will:
 After custom domains are active, update the redirect URIs in your Entra ID app registrations:
 
 ### B2B App Registration
-- Add redirect URI: `https://evidoc-enterprise.hulkdesign.com/.auth/login/aad/callback`
+- Add redirect URI: `https://app-enterprise.evidoc.hulkdesign.com/.auth/login/aad/callback`
 
 ### B2C App Registration (External ID)
-- Add redirect URI: `https://evidoc.hulkdesign.com/.auth/login/aad/callback`
+- Add redirect URI: `https://app.evidoc.hulkdesign.com/.auth/login/aad/callback`
 
 ## Step 6: Verify
 
 ```bash
 # Test B2C endpoint
-curl -I https://evidoc.hulkdesign.com/health
+curl -I https://app.evidoc.hulkdesign.com/health
 
 # Test B2B endpoint
-curl -I https://evidoc-enterprise.hulkdesign.com/health
+curl -I https://app-enterprise.evidoc.hulkdesign.com/health
 ```
 
 ## Troubleshooting

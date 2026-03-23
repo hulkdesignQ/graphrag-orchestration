@@ -9,7 +9,7 @@
 
 Welcome to **Evidoc** ("Service"), a document intelligence platform operated by **BangDesign Co. Ltd.** ("Company", "we", "us", or "our").
 
-By accessing or using Evidoc at [https://evidoc.hulkdesign.com](https://evidoc.hulkdesign.com) or any associated applications, you ("User", "you", or "your") agree to be bound by these Terms of Service ("Terms"). If you do not agree, do not use the Service.
+By accessing or using Evidoc at [https://app.evidoc.hulkdesign.com](https://app.evidoc.hulkdesign.com) or any associated applications, you ("User", "you", or "your") agree to be bound by these Terms of Service ("Terms"). If you do not agree, do not use the Service.
 
 These Terms constitute a legally binding agreement between you and BangDesign Co. Ltd.. For enterprise or business accounts, "you" refers to the organization on whose behalf the account is created, and the individual accepting these Terms represents that they have authority to bind that organization.
 
