@@ -334,7 +334,7 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
                         )
                         return claims
                     except Exception as e:
-                        logger.warning("jwt_signature_verification_failed", error=str(e))
+                        logger.warning("jwt_signature_verification_failed: %s", str(e))
                         raise HTTPException(
                             status_code=status.HTTP_401_UNAUTHORIZED,
                             detail="Token signature verification failed",
@@ -356,7 +356,7 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
                 headers={"WWW-Authenticate": "Bearer"}
             )
         except JWTDecodeError as e:
-            logger.warning("jwt_decode_failed", error=str(e))
+            logger.warning("jwt_decode_failed: %s", str(e))
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid token",
