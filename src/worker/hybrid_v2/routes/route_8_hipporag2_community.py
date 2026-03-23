@@ -186,7 +186,7 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
             "ppr_passage_top_k": 150,  # wider net for cross-topic retrieval; reranker handles filtering
             "prompt_variant": None,
             "max_tokens": None,
-            "community_passage_seeds": False,  # Neural PPR achieves 100% recall — injection redundant
+            "community_passage_seeds": False,  # APPNP achieves 100% recall — injection redundant
             "community_guided_instruction": False,  # dynamic cutoff handles filtering; guided narrows too aggressively (-24% facts)
             "rerank_dynamic_cutoff": True,   # let reranker score decide which passages survive
             "rerank_relevance_threshold": 0.22,  # 0.22 keeps all ground truth; 0.25 drops borderline cross-topic passages
@@ -195,17 +195,18 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
             "min_chunks_per_doc": 0,  # disabled — dynamic cutoff handles passage selection
             "max_chunks_per_doc": 0,  # disabled — dynamic cutoff handles passage selection
             "entity_context_inject": False,  # disabled — PPR already retrieves entity-linked passages
-            "semantic_passage_seeds": False,  # disabled — Neural PPR (cosine teleportation) supersedes
-            "neural_weight": 0.5,  # query-conditioned teleportation — 100% recall without injection
+            "semantic_passage_seeds": False,  # disabled — APPNP uses reranker predictions directly
+            "propagation_mode": "appnp",  # Predict-then-Propagate (paper architecture) — eliminates signal interference
+            "reranker_gate": True,  # pre-PPR reranker: provides cross-encoder predictions for APPNP
+            "appnp_alpha": 0.65,  # teleportation weight: 65% reranker predictions + 35% graph walk
+            "neural_weight": 0.5,  # fallback for non-APPNP modes; APPNP ignores this
             "map_reduce_synthesis": True,  # per-document MAP extraction → cross-doc REDUCE merge
             "section_graph": True,  # load Section nodes + SHARES_ENTITY edges in PPR
-            # Unified PPR modifiers — available via config_overrides for A/B testing:
-            #   hub_penalty_mode: "log"           (1/log(B+degree)^alpha hub tax)
-            #   hub_penalty_alpha: "1.5"          (exponent — 1.0 mild, 2.0 strong)
-            #   hub_penalty_base: "2.0"           (base — lower = sharper differentiation)
-            #   symmetric_norm: "all"|"entity_only" ("all" or entity↔entity only)
-            #   community_balanced_seeds: "1"     (boost sparse communities)
-            #   community_balance_alpha: "0.3"    (0=log formula, >0=power-law 1/size^alpha)
+            # APPNP modifiers — available via config_overrides for A/B testing:
+            #   appnp_alpha: "0.65"               (teleportation weight; 0.6-0.7 = sweet spot)
+            #   appnp_seed_weight: "0.0"          (entity seed blend; 0=pure reranker predictions)
+            #   appnp_self_loop: "0.0"            (self-loop weight for A+I; 0=disabled)
+            #   appnp_hub_penalty_mode: "none"    (post-walk hub penalty)
         },
     }
 
@@ -530,6 +531,17 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
             str(preset.get("community_balance_alpha", 0.0))
         ))
 
+        # Community walk penalty: per-iteration penalty on entity outflow
+        # based on Leiden community size. Leaked mass → forced restart.
+        ppr_community_walk_penalty = _ov(
+            "community_walk_penalty", "ROUTE8_COMMUNITY_WALK_PENALTY",
+            "1" if preset.get("community_walk_penalty", False) else "0"
+        ).strip().lower() in {"1", "true", "yes"}
+        ppr_community_walk_alpha = float(_ov(
+            "community_walk_alpha", "ROUTE8_COMMUNITY_WALK_ALPHA",
+            str(preset.get("community_walk_alpha", 0.5))
+        ))
+
         # GPR mode: per-hop weighted propagation (GPR-GNN, ICLR 2021).
         # Alternative to standard PPR — separates propagation from aggregation.
         propagation_mode = _ov(
@@ -560,6 +572,23 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
         appnp_self_loop = float(_ov(
             "appnp_self_loop", "ROUTE8_APPNP_SELF_LOOP",
             str(preset.get("appnp_self_loop", 1.0))
+        ))
+
+        # APPNP hub penalty: dampen mass flow from high-degree entity nodes.
+        # Hub entities (e.g. "Owner" with 39 mentions) spread PPR mass to
+        # all their sentence neighbors, flooding a single document.
+        # Modes: "none" (default), "log" (1/log(B+degree)^α), "raw" (1/degree).
+        appnp_hub_penalty_mode = _ov(
+            "appnp_hub_penalty_mode", "ROUTE8_APPNP_HUB_PENALTY_MODE",
+            str(preset.get("appnp_hub_penalty_mode", "none"))
+        ).strip().lower()
+        appnp_hub_penalty_alpha = float(_ov(
+            "appnp_hub_penalty_alpha", "ROUTE8_APPNP_HUB_PENALTY_ALPHA",
+            str(preset.get("appnp_hub_penalty_alpha", 1.0))
+        ))
+        appnp_hub_penalty_base = float(_ov(
+            "appnp_hub_penalty_base", "ROUTE8_APPNP_HUB_PENALTY_BASE",
+            str(preset.get("appnp_hub_penalty_base", 2.0))
         ))
 
         # Sentence window: preset provides the default; config_overrides / env
@@ -1147,6 +1176,9 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
                 seed_weight=appnp_seed_weight,
                 reranker_predictions=pre_ppr_reranker_scores,
                 self_loop_weight=appnp_self_loop,
+                hub_penalty_mode=appnp_hub_penalty_mode,
+                hub_penalty_alpha=appnp_hub_penalty_alpha,
+                hub_penalty_base=appnp_hub_penalty_base,
             )
         elif propagation_mode == "gpr":
             passage_scores, entity_scores = self._ppr_engine.run_gpr(
@@ -1177,6 +1209,8 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
                 symmetric_norm=ppr_symmetric_norm,
                 community_balance=ppr_community_balance,
                 community_balance_alpha=ppr_community_balance_alpha,
+                community_walk_penalty=ppr_community_walk_penalty,
+                community_walk_alpha=ppr_community_walk_alpha,
                 neural_teleportation=query_embedding if (neural_weight > 0 or neural_gate_threshold > 0) else None,
                 neural_weight=neural_weight,
                 neural_cosine_threshold=neural_cosine_threshold,

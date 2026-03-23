@@ -482,17 +482,31 @@ class HippoRAG2PPR:
     ) -> None:
         """Load Section nodes and edges for Phase 2 augmentation."""
         # Section nodes — include section_ordinal for ordinal-weighted edges
+        # Also load section_embedding so neural teleportation can seed
+        # sections via cosine similarity (e.g. query "hold harmless" matches
+        # section title "HOLD HARMLESS", mass then flows to child sentences).
         result = session.run(
             "MATCH (s:Section) "
             "WHERE s.group_id IN $group_ids "
-            "RETURN s.id AS id, s.title AS title, s.section_ordinal AS ordinal",
+            "RETURN s.id AS id, s.title AS title, "
+            "s.section_ordinal AS ordinal, s.section_embedding AS emb",
             group_ids=group_ids,
         )
         section_ordinals: Dict[str, int] = {}
+        section_emb_count = 0
         for record in result:
             self._add_node(record["id"], "section", record["title"] or "")
             if record["ordinal"] is not None:
                 section_ordinals[record["id"]] = record["ordinal"]
+            emb = record["emb"]
+            if emb is not None:
+                self._passage_embeddings[record["id"]] = list(emb)
+                section_emb_count += 1
+        if section_emb_count > 0:
+            logger.info(
+                "section_embeddings_loaded_for_neural_teleportation",
+                section_count=section_emb_count,
+            )
 
         # Passage <-> Section via IN_SECTION
         result = session.run(
@@ -577,6 +591,8 @@ class HippoRAG2PPR:
         symmetric_norm: str = "off",
         community_balance: bool = False,
         community_balance_alpha: float = 0.0,
+        community_walk_penalty: bool = False,
+        community_walk_alpha: float = 0.5,
         neural_teleportation: Optional[List[float]] = None,
         neural_weight: float = 0.5,
         neural_cosine_threshold: float = 0.0,
@@ -845,6 +861,19 @@ class HippoRAG2PPR:
                 s = effective_out_sum.get(idx, 0.0)
                 sqrt_out[idx] = math.sqrt(s) if s > 0 else 0.0
 
+        # Precompute community walk penalty factors (entity nodes only).
+        # factor = 1/(degree × community_size)^α — combines structural
+        # hub penalty with community size penalty for maximum differentiation.
+        community_factor: Dict[int, float] = {}
+        if community_walk_penalty and self._community_sizes:
+            for idx in range(self._node_count):
+                if self._node_types.get(idx) == "entity" and idx in self._community_id:
+                    cid = self._community_id[idx]
+                    csize = self._community_sizes.get(cid, 1)
+                    degree = max(len(self._adj.get(idx, [])), 1)
+                    influence = degree * csize
+                    community_factor[idx] = 1.0 / influence ** community_walk_alpha
+
         # Initialize rank to personalization vector
         rank = list(personalization)
 
@@ -900,12 +929,33 @@ class HippoRAG2PPR:
                     if src in hub_factor:
                         share *= hub_factor[src]
 
+                    # Community walk penalty: reduce share from entities in
+                    # large communities. Leaked mass tracked for redistribution.
+                    if src in community_factor:
+                        share *= community_factor[src]
+
                     new_rank[tgt] += share
 
             # Redistribute dangling mass to personalization vector
             if dangling_redistribution and dangling_mass > 0:
                 for i in range(self._node_count):
                     new_rank[i] += dangling_mass * personalization[i]
+
+            # Community walk penalty: redistribute leaked mass via
+            # personalization (forced restart). This is mass-conserving —
+            # the total mass removed from large-community entity outflows
+            # returns to the system as additional restart mass.
+            if community_factor:
+                leaked = 0.0
+                for src in range(self._node_count):
+                    if rank[src] > 0 and src in community_factor:
+                        # Mass that would have been sent without penalty
+                        full_out = damping * rank[src]
+                        # Mass actually sent = full_out * community_factor
+                        leaked += full_out * (1.0 - community_factor[src])
+                if leaked > 0:
+                    for i in range(self._node_count):
+                        new_rank[i] += leaked * personalization[i]
 
             # Neural gate: zero out mass at gated passage nodes.
             # Their mass is effectively lost, causing other passages to
@@ -973,6 +1023,9 @@ class HippoRAG2PPR:
         seed_weight: float = 0.0,
         reranker_predictions: Optional[Dict[str, float]] = None,
         self_loop_weight: float = 1.0,
+        hub_penalty_mode: str = "none",
+        hub_penalty_alpha: float = 1.0,
+        hub_penalty_base: float = 2.0,
     ) -> Tuple[List[Tuple[str, float]], List[Tuple[str, float]]]:
         """True APPNP: Predict then Propagate (Gasteiger et al., ICLR 2019).
 
@@ -990,9 +1043,7 @@ class HippoRAG2PPR:
           - Personalization = neural predictions for ALL passage nodes
             (not sparse entity seeds)
           - Teleportation → neural predictions (not seed entities)
-          - Symmetric normalization D^{-½}·A·D^{-½} throughout
-            (hub penalty emerges naturally: edge = 1/√(d_i·d_j))
-          - No ad-hoc hub penalty needed
+          - Symmetric normalization D^{-½}·(A+I)·D^{-½} throughout
 
         Args:
             query_embedding: Query vector for cosine prediction.
@@ -1012,6 +1063,14 @@ class HippoRAG2PPR:
                 {sentence_id: relevance_score}. When provided, these
                 replace cosine as the prediction signal. This is the
                 APPNP equivalent of a trained MLP — highly discriminative.
+            hub_penalty_mode: Hub penalty strategy for entity nodes.
+                "none" = no penalty (default, backward compat).
+                "log"  = 1/log(B+degree)^alpha — tunable hub tax.
+                "raw"  = 1/degree — aggressive hub suppression.
+            hub_penalty_alpha: Exponent for log hub penalty (default 1.0).
+                Higher values (1.5, 2.0) create stronger hub suppression.
+            hub_penalty_base: Base for log hub penalty (default 2.0).
+                Lower values (1.1) create sharper differentiation.
 
         Returns:
             Tuple of passage_scores and entity_scores (same as run_ppr).
@@ -1107,6 +1166,29 @@ class HippoRAG2PPR:
             d = self._out_weight_sum.get(idx, 0.0) + self_loop_weight
             sqrt_degree[idx] = math.sqrt(d)
 
+        # Precompute hub penalty factors (entity nodes only).
+        # Symmetric normalization divides by √degree but doesn't fully
+        # prevent hub entities (e.g. "Owner" with 39 mentions) from
+        # flooding mass to all their neighbors. The hub penalty adds
+        # an additional multiplicative dampening on entity→neighbor flow.
+        hub_factor: Dict[int, float] = {}
+        if hub_penalty_mode != "none":
+            for idx in range(self._node_count):
+                if self._node_types.get(idx) == "entity":
+                    degree = max(len(self._adj.get(idx, [])), 1)
+                    if hub_penalty_mode == "log":
+                        hub_factor[idx] = 1.0 / math.log(hub_penalty_base + degree) ** hub_penalty_alpha
+                    elif hub_penalty_mode == "raw":
+                        hub_factor[idx] = 1.0 / degree
+            if hub_factor:
+                logger.info(
+                    "appnp_hub_penalty",
+                    mode=hub_penalty_mode,
+                    alpha=hub_penalty_alpha,
+                    base=hub_penalty_base,
+                    penalised_entities=len(hub_factor),
+                )
+
         preds = predictions.copy()
 
         for iteration in range(max_iterations):
@@ -1128,6 +1210,11 @@ class HippoRAG2PPR:
                     sqrt_tgt = sqrt_degree[tgt]
                     # D^{-½} · (A+I) · D^{-½}
                     share = (1.0 - alpha) * preds[src] * edge_weight / (sqrt_src * sqrt_tgt)
+
+                    # Hub penalty: reduce mass flow from high-degree entity nodes
+                    if src in hub_factor:
+                        share *= hub_factor[src]
+
                     new_preds[tgt] += share
 
             # Check convergence
@@ -1395,3 +1482,4 @@ class HippoRAG2PPR:
         )
 
         return passage_scores, entity_scores
+
