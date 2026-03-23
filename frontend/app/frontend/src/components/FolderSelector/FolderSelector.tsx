@@ -4,7 +4,7 @@ import { Dropdown, Option, Spinner } from "@fluentui/react-components";
 import type { OptionOnSelectData, SelectionEvents } from "@fluentui/react-components";
 import { useMsal } from "@azure/msal-react";
 
-import { Warning24Regular, TargetArrow24Regular, Folder24Regular } from "@fluentui/react-icons";
+import { Warning24Regular, Beaker24Regular, Folder24Regular } from "@fluentui/react-icons";
 import { useLogin, getToken } from "../../authConfig";
 import { listFoldersApi } from "../../api/folders";
 import type { Folder } from "../../api/folders";
@@ -117,7 +117,7 @@ export const FolderSelector = ({ selectedFolderId, onFolderChange }: FolderSelec
                 size="small"
             >
                 <Option key="__demo__" value={DEMO_VALUE} text={t("folderSelector.demo")}>
-                    <TargetArrow24Regular /> {t("folderSelector.demo")}
+                    <Beaker24Regular /> {t("folderSelector.demo")}
                 </Option>
                 {analyzedFolders.map(folder => {
                     const textLabel = `${folder.name}${folder.analysis_status === "stale" ? " (stale)" : ""}`;
