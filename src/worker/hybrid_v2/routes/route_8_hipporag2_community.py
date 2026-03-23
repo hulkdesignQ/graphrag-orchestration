@@ -183,7 +183,7 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
             "max_tokens": None,
         },
         "community_search": {          # Community-dominant (abstract themes, exhaustive)
-            "ppr_passage_top_k": 150,  # wider net for cross-topic retrieval; reranker handles filtering
+            "ppr_passage_top_k": 50,  # 48/48 recall proven at top_k=50; reranker handles filtering
             "prompt_variant": None,
             "max_tokens": None,
             "community_passage_seeds": False,  # APPNP achieves 100% recall — injection redundant
