@@ -958,7 +958,7 @@ module website './core/host/static-web-app.bicep' = {
   scope: rg
   params: {
     name: 'evidoc-website-${uniqueString(rg.id)}'
-    location: 'eastus2'
+    location: location
     tags: tags
     customDomainName: websiteCustomDomain
   }
