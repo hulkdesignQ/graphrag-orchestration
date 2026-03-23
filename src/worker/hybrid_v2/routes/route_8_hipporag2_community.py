@@ -202,6 +202,7 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
             "neural_weight": 0.5,  # fallback for non-APPNP modes; APPNP ignores this
             "map_reduce_synthesis": True,  # per-document MAP extraction → cross-doc REDUCE merge
             "section_graph": True,  # load Section nodes + SHARES_ENTITY edges in PPR
+            "entity_bridge_filter": False,  # post-rerank: keep only passages with direct entity overlap to query seeds (IDF-weighted)
             # APPNP modifiers — available via config_overrides for A/B testing:
             #   appnp_alpha: "0.65"               (teleportation weight; 0.6-0.7 = sweet spot)
             #   appnp_seed_weight: "0.0"          (entity seed blend; 0=pure reranker predictions)
@@ -1416,6 +1417,109 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
                 logger.warning("step_4.6_rerank_all_failed", error=str(e))
             timings_ms["step_4.6_rerank_all_ms"] = int(
                 (time.perf_counter() - t0_ra) * 1000
+            )
+
+        # ------------------------------------------------------------------
+        # Step 4.8: Entity-bridge structural filter
+        #
+        # After reranking, many passages may have similar reranker scores but
+        # differ in structural relevance. For each passage, compute how many
+        # query-seed entities it directly shares in the graph, weighted by
+        # entity IDF (1/log(1+mention_count)). Passages reached only through
+        # hub entities get near-zero bridge scores.
+        #
+        # Keep passages above a bridge score threshold OR in the reranker
+        # top tier. This cuts noise (warranty exclusions reached via "Builder"
+        # hub) while preserving edge cases with dedicated entity connections.
+        # ------------------------------------------------------------------
+        entity_bridge_enabled = _ov(
+            "entity_bridge_filter", "ROUTE8_ENTITY_BRIDGE_FILTER",
+            str(preset.get("entity_bridge_filter", False))
+        ).strip().lower() in {"1", "true", "yes"}
+        entity_bridge_removed = 0
+
+        if entity_bridge_enabled and self._ppr_engine and passage_scores and triple_entity_ids:
+            t0_eb = time.perf_counter()
+            candidate_ids = [sid for sid, _ in passage_scores[:ppr_passage_top_k]]
+            bridge_scores = self._ppr_engine.compute_entity_bridge_scores(
+                candidate_ids, triple_entity_ids,
+            )
+
+            # Passages with bridge_score > 0 have direct entity overlap with query seeds.
+            # Also keep top-N by reranker score unconditionally (they are semantically strong).
+            reranker_keep_n = int(_ov(
+                "entity_bridge_reranker_keep", "ROUTE8_ENTITY_BRIDGE_RERANKER_KEEP",
+                "5"
+            ))
+            # Per-document minimum: guarantee every document retains at least N
+            # passages so broad queries don't lose entire documents.
+            doc_min = int(_ov(
+                "entity_bridge_doc_min", "ROUTE8_ENTITY_BRIDGE_DOC_MIN",
+                "5"
+            ))
+
+            # Group candidates by document to enforce per-doc floor
+            from collections import defaultdict as _dd_bridge
+            doc_kept_count: Dict[str, int] = _dd_bridge(int)
+            doc_passage_order: Dict[str, List[Tuple[str, float, float]]] = _dd_bridge(list)
+            for sid, score in passage_scores[:ppr_passage_top_k]:
+                doc_id = sid.split("_sent_")[0] if "_sent_" in sid else "unknown"
+                bs = bridge_scores.get(sid, 0.0)
+                doc_passage_order[doc_id].append((sid, score, bs))
+
+            # Adaptive: if very few passages have entity bridges, this is
+            # a broad/summarisation query where structural filtering hurts.
+            # Skip the filter when coverage < threshold (default 30%).
+            bridge_coverage_min = float(_ov(
+                "entity_bridge_coverage_min", "ROUTE8_ENTITY_BRIDGE_COVERAGE_MIN",
+                "0.30"
+            ))
+            n_nonzero = sum(1 for s in bridge_scores.values() if s > 0)
+            coverage = n_nonzero / len(bridge_scores) if bridge_scores else 0.0
+
+            if coverage < bridge_coverage_min:
+                # Broad query — skip entity-bridge filter entirely
+                logger.info(
+                    "step_4.8_entity_bridge_skip_broad",
+                    coverage=round(coverage, 3),
+                    min_required=bridge_coverage_min,
+                    nonzero=n_nonzero,
+                    total=len(bridge_scores),
+                )
+            else:
+                bridge_kept: List[Tuple[str, float]] = []
+                bridge_dropped: List[Tuple[str, float]] = []
+                for rank, (sid, score) in enumerate(passage_scores[:ppr_passage_top_k]):
+                    doc_id = sid.split("_sent_")[0] if "_sent_" in sid else "unknown"
+                    bs = bridge_scores.get(sid, 0.0)
+                    keep = (
+                        bs > 0                              # has entity bridge to query
+                        or rank < reranker_keep_n            # top reranker passages
+                        or doc_kept_count[doc_id] < doc_min  # per-doc floor
+                    )
+                    if keep:
+                        bridge_kept.append((sid, score))
+                        doc_kept_count[doc_id] += 1
+                    else:
+                        bridge_dropped.append((sid, score))
+
+                if bridge_dropped:
+                    entity_bridge_removed = len(bridge_dropped)
+                    passage_scores = bridge_kept + passage_scores[ppr_passage_top_k:]
+                    logger.info(
+                        "step_4.8_entity_bridge_filter",
+                        before=len(candidate_ids),
+                        kept=len(bridge_kept),
+                        removed=entity_bridge_removed,
+                        bridge_scores_nonzero=n_nonzero,
+                        coverage=round(coverage, 3),
+                        top_bridge=round(max(bridge_scores.values()), 4) if bridge_scores else 0,
+                        doc_counts=dict(doc_kept_count),
+                        doc_min=doc_min,
+                    )
+
+            timings_ms["step_4.8_entity_bridge_ms"] = int(
+                (time.perf_counter() - t0_eb) * 1000
             )
 
         # Determine top passage IDs for chunk fetch.
@@ -4179,6 +4283,11 @@ Response:"""
             "text_chunks_used": len(chunks),
             "sub_questions_addressed": [],
             "llm_context": context_for_debug,
+            "raw_extractions": [
+                {"doc_title": mr["doc_title"],
+                 "facts": [f.get("fact", "") for f in mr["facts"]]}
+                for mr in map_results
+            ],
             "context_stats": {
                 "map_reduce": True,
                 "num_documents": len(doc_groups),

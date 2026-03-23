@@ -157,6 +157,41 @@ class HippoRAG2PPR:
         """entity_id -> number of passages mentioning it (IDF denominator)."""
         return self._entity_mention_counts
 
+    def compute_entity_bridge_scores(
+        self,
+        passage_ids: List[str],
+        seed_entity_ids: Set[str],
+    ) -> Dict[str, float]:
+        """Compute structural relevance for passages based on entity overlap with query seeds.
+
+        For each passage, finds its directly connected entities in the graph,
+        checks which ones overlap with the query seed entities, and weights
+        by entity IDF (1/log(1 + mention_count)) so rare/specific entities
+        contribute more than hub entities.
+
+        Returns: {passage_id: bridge_score} — higher = more structurally relevant.
+        """
+        import math
+        seed_idx_set = {self._node_to_idx[eid] for eid in seed_entity_ids
+                        if eid in self._node_to_idx}
+        if not seed_idx_set:
+            return {pid: 0.0 for pid in passage_ids}
+
+        result: Dict[str, float] = {}
+        for pid in passage_ids:
+            pidx = self._node_to_idx.get(pid)
+            if pidx is None:
+                result[pid] = 0.0
+                continue
+            score = 0.0
+            for neighbor_idx, _weight in self._adj.get(pidx, []):
+                if neighbor_idx in seed_idx_set and self._node_types.get(neighbor_idx) == "entity":
+                    eid = self._idx_to_node[neighbor_idx]
+                    mc = max(self._entity_mention_counts.get(eid, 1), 1)
+                    score += 1.0 / math.log(1.0 + mc)
+            result[pid] = score
+        return result
+
     def _add_node(self, node_id: str, node_type: str, name: str) -> int:
         """Add a node to the graph, return its index."""
         if node_id in self._node_to_idx:
