@@ -7,6 +7,7 @@ export const ja: Record<string, string> = {
   "nav.pricing": "料金",
   "nav.contact": "お問い合わせ",
   "nav.login": "ログイン",
+    "nav.enterpriseLogin": "法人",
   "nav.cta": "無料で試す",
 
   // Hero

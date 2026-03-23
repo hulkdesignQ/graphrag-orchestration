@@ -1274,6 +1274,7 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
                         dynamic_max=rerank_dynamic_max if rerank_dynamic_cutoff else 0,
                         dynamic_min=rerank_dynamic_min if rerank_dynamic_cutoff else 0,
                         user_id=user_id,
+                        rerank_instruction=rerank_instruction,
                     )
                     if reranked_scored:
                         passage_scores = reranked_scored
@@ -3229,6 +3230,7 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
         dynamic_max: int = 0,
         dynamic_min: int = 0,
         user_id: Optional[str] = None,
+        rerank_instruction: str = "",
     ) -> List[Tuple[str, float]]:
         """Rerank candidate sentence IDs using voyage-rerank-2.5.
 
@@ -3297,9 +3299,10 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
 
         # Call Voyage reranker
         vc = make_voyage_client()
+        effective_query = f"{rerank_instruction}{query}" if rerank_instruction else query
 
         rr_result = await rerank_with_retry(
-            vc, query=query, documents=documents,
+            vc, query=effective_query, documents=documents,
             model=rerank_model, top_k=request_k,
         )
 

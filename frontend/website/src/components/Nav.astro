@@ -26,6 +26,8 @@ const t = useTranslations(lang);
     <div class="hidden md:flex items-center gap-5">
       <LanguageSwitcher lang={lang} />
       <a href="https://app.evidoc.hulkdesign.com/#/login" class="text-[13px] font-medium text-white/80 hover:text-white transition-colors duration-300">{t("nav.login")}</a>
+      <span class="text-white/30">|</span>
+      <a href="https://app-enterprise.evidoc.hulkdesign.com" class="text-[11px] font-medium text-white/50 hover:text-white transition-colors duration-300">{t("nav.enterpriseLogin")}</a>
       <a href="https://app.evidoc.hulkdesign.com" class="text-[13px] font-medium text-white bg-[#0071e3] hover:bg-[#0077ED] px-4 py-1.5 rounded-full transition-colors duration-300">{t("nav.cta")}</a>
     </div>
   </div>

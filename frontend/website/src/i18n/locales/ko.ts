@@ -7,6 +7,7 @@ export const ko: Record<string, string> = {
   "nav.pricing": "요금제",
   "nav.contact": "문의하기",
   "nav.login": "로그인",
+    "nav.enterpriseLogin": "기업",
   "nav.cta": "무료 체험",
 
   // Hero

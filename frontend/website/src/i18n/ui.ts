@@ -21,6 +21,7 @@ export const ui = {
     "nav.pricing": "Pricing",
     "nav.contact": "Contact",
     "nav.login": "Log In",
+    "nav.enterpriseLogin": "Enterprise",
     "nav.cta": "Try Free",
 
     // Hero

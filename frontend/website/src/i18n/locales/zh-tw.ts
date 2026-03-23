@@ -7,6 +7,7 @@ export const zhTw: Record<string, string> = {
   "nav.pricing": "方案價格",
   "nav.contact": "聯絡我們",
   "nav.login": "登入",
+    "nav.enterpriseLogin": "企業",
   "nav.cta": "免費試用",
 
   // Hero

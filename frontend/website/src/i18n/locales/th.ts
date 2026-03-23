@@ -7,6 +7,7 @@ export const th: Record<string, string> = {
   "nav.pricing": "ราคา",
   "nav.contact": "ติดต่อเรา",
   "nav.login": "เข้าสู่ระบบ",
+    "nav.enterpriseLogin": "องค์กร",
   "nav.cta": "ทดลองฟรี",
 
   // Hero

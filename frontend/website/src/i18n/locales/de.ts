@@ -7,6 +7,7 @@ export const de: Record<string, string> = {
   "nav.pricing": "Preise",
   "nav.contact": "Kontakt",
   "nav.login": "Anmelden",
+    "nav.enterpriseLogin": "Unternehmen",
   "nav.cta": "Kostenlos testen",
 
   // Hero
