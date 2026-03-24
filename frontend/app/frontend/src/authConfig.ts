@@ -158,7 +158,7 @@ const getAppServicesToken = (): Promise<AppServicesToken | null> => {
                 }
                 // Refresh failed (e.g. CIAM doesn't support EasyAuth refresh).
                 // Redirect to fresh login instead of showing a broken error page.
-                window.location.href = ".auth/login/aad?post_login_redirect_uri=" + encodeURIComponent(window.location.pathname + window.location.search);
+                window.location.href = ".auth/login/aad?post_login_redirect_uri=" + encodeURIComponent(window.location.pathname + window.location.search + window.location.hash);
                 return null;
             });
         }

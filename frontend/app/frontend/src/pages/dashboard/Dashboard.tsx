@@ -88,7 +88,7 @@ const Dashboard = () => {
 
     const handleReLogin = () => {
         if (isUsingAppServicesLogin) {
-            window.location.href = ".auth/login/aad?post_login_redirect_uri=" + encodeURIComponent(window.location.pathname + window.location.search);
+            window.location.href = ".auth/login/aad?post_login_redirect_uri=" + encodeURIComponent(window.location.pathname + window.location.search + window.location.hash);
         } else {
             // MSAL: clear cache and reload to trigger interactive login
             client?.logoutRedirect({ postLogoutRedirectUri: window.location.pathname });

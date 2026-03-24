@@ -11,7 +11,7 @@
 
 import { useState, useRef, useCallback, useEffect } from "react";
 import { Button, Tooltip, Badge } from "@fluentui/react-components";
-import { Mic28Filled } from "@fluentui/react-icons";
+import { Mic28Regular } from "@fluentui/react-icons";
 import { useTranslation } from "react-i18next";
 
 import styles from "./QuestionInput.module.css";
@@ -209,7 +209,7 @@ export const SpeechTranslationInput = ({ updateQuestion, onSpeechResult }: Props
                     <Tooltip content={t("tooltips.askWithVoice")} relationship="label">
                         <Button
                             size="large"
-                            icon={<Mic28Filled primaryFill="#0071e3" />}
+                            icon={<Mic28Regular primaryFill="#0071e3" />}
                             onClick={startRecording}
                         />
                     </Tooltip>
@@ -224,7 +224,7 @@ export const SpeechTranslationInput = ({ updateQuestion, onSpeechResult }: Props
                     <Tooltip content={t("tooltips.stopRecording")} relationship="label">
                         <Button
                             size="large"
-                            icon={<Mic28Filled primaryFill="rgba(250, 0, 0, 0.7)" />}
+                            icon={<Mic28Regular primaryFill="rgba(250, 0, 0, 0.7)" />}
                             onClick={stopRecording}
                         />
                     </Tooltip>

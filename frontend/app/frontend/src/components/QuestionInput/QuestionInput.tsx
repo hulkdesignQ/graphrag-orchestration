@@ -1,6 +1,6 @@
 import { useState, useEffect, useContext, useCallback, useRef } from "react";
 import { Button, Textarea, Tooltip } from "@fluentui/react-components";
-import { Send28Filled } from "@fluentui/react-icons";
+import { Send28Regular } from "@fluentui/react-icons";
 import { useTranslation } from "react-i18next";
 
 import styles from "./QuestionInput.module.css";
@@ -119,7 +119,7 @@ export const QuestionInput = ({ onSend, onStop, disabled, placeholder, clearOnSe
                     <Tooltip content={t("tooltips.submitQuestion")} relationship="label">
                         <Button
                             size="large"
-                            icon={<Send28Filled primaryFill="#0071e3" />}
+                            icon={<Send28Regular primaryFill="#0071e3" />}
                             disabled={sendQuestionDisabled}
                             onClick={sendQuestion}
                         />

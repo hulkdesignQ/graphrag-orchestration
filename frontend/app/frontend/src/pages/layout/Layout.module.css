@@ -172,12 +172,6 @@
     color: #a0c4ff;
     font-weight: 400;
     white-space: nowrap;
-    opacity: 0;
-    transition: opacity 0.2s ease;
-}
-
-.sidebar:hover .onboardingHint,
-.sidebarOpen .onboardingHint {
     opacity: 1;
 }
 

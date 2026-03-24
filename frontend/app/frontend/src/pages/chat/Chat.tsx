@@ -23,8 +23,7 @@ import { FolderSelector, DEMO_VALUE } from "../../components/FolderSelector";
 import { useLogin, getToken, requireAccessControl } from "../../authConfig";
 import { useMsal } from "@azure/msal-react";
 import { LoginContext } from "../../loginContext";
-import { hasSeenOnboarding, markOnboardingSeen } from "../../utils/onboarding";
-import { Dismiss24Regular } from "@fluentui/react-icons";
+
 
 /**
  * Map raw JS errors to user-friendly messages.
@@ -559,19 +558,6 @@ const Chat = () => {
 
                             <h1 className={styles.chatEmptyStateTitle}>{t("chatEmptyStateTitle")}</h1>
                             <h2 className={styles.chatEmptyStateSubtitle}>{t("chatEmptyStateSubtitle")}</h2>
-                            {!hasSeenOnboarding() && (
-                                <div className={styles.welcomeBanner}>
-                                    <p className={styles.welcomeBannerText}>
-                                        {t("onboarding.welcomeBanner", "New to Evidoc? Start by uploading your documents, then come back to ask questions.")}
-                                    </p>
-                                    <button className={styles.welcomeBannerLink} onClick={() => { markOnboardingSeen(); window.location.hash = "#/files"; }}>
-                                        {t("onboarding.welcomeBannerAction", "Upload files →")}
-                                    </button>
-                                    <button className={styles.welcomeBannerDismiss} onClick={(e) => { markOnboardingSeen(); (e.target as HTMLElement).closest(`.${styles.welcomeBanner}`)?.remove(); }}>
-                                        <Dismiss24Regular />
-                                    </button>
-                                </div>
-                            )}
                             {selectedFolderId === DEMO_VALUE && (
                                 <ExampleList onExampleClicked={onExampleClicked} useMultimodalAnswering={showMultimodalOptions} />
                             )}

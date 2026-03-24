@@ -92,7 +92,7 @@ export async function fetchWithAuthRetry(url: string, init: RequestInit): Promis
             return fetchWithNetworkRetry(url, retryInit);
         }
         // Refresh failed — redirect to fresh login
-        window.location.href = ".auth/login/aad?post_login_redirect_uri=" + encodeURIComponent(window.location.pathname + window.location.search);
+        window.location.href = ".auth/login/aad?post_login_redirect_uri=" + encodeURIComponent(window.location.pathname + window.location.search + window.location.hash);
     }
 
     return response;
