@@ -266,6 +266,9 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
             monopartite = os.getenv(
                 "ROUTE7_MONOPARTITE", "0"
             ).strip().lower() in {"1", "true", "yes"}
+            monopartite_hub_threshold = int(os.getenv(
+                "ROUTE7_MONOPARTITE_HUB_THRESHOLD", "0"
+            ).strip())
 
             # Load triple store and PPR graph in parallel
             triple_store = TripleEmbeddingStore()
@@ -289,6 +292,7 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
                     mentions_idf_weighting=mentions_idf_weighting,
                     max_entity_degree=max_entity_degree,
                     monopartite=monopartite,
+                    monopartite_hub_threshold=monopartite_hub_threshold,
                 ),
             )
 
