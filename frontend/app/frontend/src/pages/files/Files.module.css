@@ -9,6 +9,8 @@
     scrollbar-gutter: stable;
     position: relative;
     background: #f5f5f5;
+    flex: 1;
+    min-width: 0;
 }
 
 /* Main area: sidebar + content */
