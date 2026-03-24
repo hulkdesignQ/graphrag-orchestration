@@ -327,7 +327,10 @@ class HippoRAG2PPR:
             )
 
     def _build_monopartite_projection(
-        self, hub_degree_threshold: int = 0
+        self,
+        hub_degree_threshold: int = 0,
+        edge_scaler: str = "none",
+        min_passage_degree: int = 0,
     ) -> None:
         """Replace bipartite graph with passage-passage graph.
 
@@ -343,6 +346,12 @@ class HippoRAG2PPR:
             hub_degree_threshold: Entities with degree > this value are
                 projected to passage-passage edges and removed. If 0
                 (default), ALL entities are projected (full monopartite).
+            edge_scaler: Scale shared-entity edge weights.
+                "none" = raw count. "log" = log(1+w). "sqrt" = sqrt(w).
+            min_passage_degree: Minimum edge count guarantee per passage.
+                If a passage has fewer edges after projection, cosine
+                similarity edges are added to fill the gap (Neo4j topK
+                concept). 0 = no guarantee (default).
         """
         from collections import defaultdict
 
@@ -392,7 +401,13 @@ class HippoRAG2PPR:
                     p1, p2 = min(passages[i], passages[j]), max(passages[i], passages[j])
                     pair_weights[(p1, p2)] = pair_weights.get((p1, p2), 0.0) + 1.0
 
-        # Rebuild adjacency
+        # Scale shared-entity edge weights
+        if edge_scaler == "log":
+            pair_weights = {k: math.log(1.0 + v) for k, v in pair_weights.items()}
+        elif edge_scaler == "sqrt":
+            pair_weights = {k: math.sqrt(v) for k, v in pair_weights.items()}
+
+        # Rebuild adjacency: clear all edges
         for idx in range(self._node_count):
             self._adj[idx] = []
 
@@ -417,6 +432,56 @@ class HippoRAG2PPR:
             self._adj[neighbor_idx].append((ent_idx, w))
             kept_edge_count += 1
 
+        # Guarantee minimum degree for passages (Neo4j topK concept).
+        # For sparse passages, add nearest cosine neighbors to fill the gap.
+        topk_edges_added = 0
+        if min_passage_degree > 0 and self._passage_embeddings:
+            import numpy as np
+
+            # Build list of passage indices with embeddings
+            passage_idxs = []
+            emb_matrix = []
+            for nid, emb in self._passage_embeddings.items():
+                idx = self._node_to_idx.get(nid)
+                if idx is not None and self._node_types.get(idx) == "passage":
+                    passage_idxs.append(idx)
+                    e = np.array(emb, dtype=np.float32)
+                    norm = np.linalg.norm(e)
+                    emb_matrix.append(e / norm if norm > 0 else e)
+
+            if emb_matrix:
+                emb_matrix = np.stack(emb_matrix)  # (N, D)
+
+                # For each sparse passage, find its cosine-nearest neighbors
+                for i, p_idx in enumerate(passage_idxs):
+                    current_deg = len(self._adj.get(p_idx, []))
+                    if current_deg >= min_passage_degree:
+                        continue
+
+                    # Existing neighbors
+                    existing = set(t for t, _ in self._adj.get(p_idx, []))
+                    needed = min_passage_degree - current_deg
+
+                    # Compute cosine similarities to all other passages
+                    sims = emb_matrix @ emb_matrix[i]
+                    # Sort descending, skip self
+                    ranked = np.argsort(-sims)
+                    added = 0
+                    for j_pos in ranked:
+                        if added >= needed:
+                            break
+                        other_idx = passage_idxs[j_pos]
+                        if other_idx == p_idx or other_idx in existing:
+                            continue
+                        sim_score = float(sims[j_pos])
+                        if sim_score <= 0:
+                            break
+                        self._adj[p_idx].append((other_idx, sim_score))
+                        self._adj[other_idx].append((p_idx, sim_score))
+                        existing.add(other_idx)
+                        added += 1
+                        topk_edges_added += 1
+
         self._is_monopartite = True
 
         logger.info(
@@ -427,7 +492,64 @@ class HippoRAG2PPR:
             mono_edges=mono_edge_count,
             kept_entity_edges=kept_edge_count,
             sim_edges_preserved=sim_edge_count,
-            total_edges=mono_edge_count + sim_edge_count + kept_edge_count,
+            topk_edges_added=topk_edges_added,
+            min_passage_degree=min_passage_degree,
+            total_edges=mono_edge_count + sim_edge_count + kept_edge_count + topk_edges_added,
+        )
+
+    def _add_passage_shortcuts(self, edge_scaler: str = "none") -> None:
+        """Add passage-passage shortcut edges from shared entities.
+
+        Unlike monopartite projection, entity nodes and their edges are KEPT.
+        Passage-passage edges are ADDED on top — creating hub bypass shortcuts
+        while preserving connectivity for sparse passages.
+        """
+        from collections import defaultdict
+
+        entity_to_passages: Dict[int, List[int]] = defaultdict(list)
+        for idx in range(self._node_count):
+            if self._node_types.get(idx) != "entity":
+                continue
+            for neighbor_idx, _ in self._adj.get(idx, []):
+                if self._node_types.get(neighbor_idx) == "passage":
+                    entity_to_passages[idx].append(neighbor_idx)
+
+        # Compute passage-passage weights from shared entities
+        pair_weights: Dict[tuple, float] = {}
+        for ent_idx, passages in entity_to_passages.items():
+            for i in range(len(passages)):
+                for j in range(i + 1, len(passages)):
+                    p1, p2 = min(passages[i], passages[j]), max(passages[i], passages[j])
+                    pair_weights[(p1, p2)] = pair_weights.get((p1, p2), 0.0) + 1.0
+
+        # Apply edge scaler
+        if edge_scaler == "log":
+            pair_weights = {k: math.log(1.0 + v) for k, v in pair_weights.items()}
+        elif edge_scaler == "sqrt":
+            pair_weights = {k: math.sqrt(v) for k, v in pair_weights.items()}
+
+        # Skip pairs that already have a passage-passage similarity edge
+        existing_pp = set()
+        for idx in range(self._node_count):
+            if self._node_types.get(idx) != "passage":
+                continue
+            for neighbor_idx, _ in self._adj.get(idx, []):
+                if self._node_types.get(neighbor_idx) == "passage":
+                    existing_pp.add((min(idx, neighbor_idx), max(idx, neighbor_idx)))
+
+        shortcut_count = 0
+        for (p1, p2), weight in pair_weights.items():
+            if (p1, p2) not in existing_pp:
+                self._adj[p1].append((p2, weight))
+                self._adj[p2].append((p1, weight))
+                shortcut_count += 1
+
+        logger.info(
+            "passage_shortcuts_added",
+            entity_sources=len(entity_to_passages),
+            shortcuts_added=shortcut_count,
+            existing_pp_skipped=len(existing_pp),
+            edge_scaler=edge_scaler,
         )
 
     def _finalize_graph(self) -> None:
@@ -456,6 +578,9 @@ class HippoRAG2PPR:
         max_entity_degree: int = 0,
         monopartite: bool = False,
         monopartite_hub_threshold: int = 0,
+        monopartite_edge_scaler: str = "none",
+        monopartite_min_degree: int = 0,
+        passage_shortcuts: bool = False,
     ) -> None:
         """Load Entity + Sentence nodes and edges from Neo4j.
 
@@ -506,8 +631,12 @@ class HippoRAG2PPR:
         # Monopartite projection: replace bipartite with passage-passage graph.
         if monopartite:
             self._build_monopartite_projection(
-                hub_degree_threshold=monopartite_hub_threshold
+                hub_degree_threshold=monopartite_hub_threshold,
+                edge_scaler=monopartite_edge_scaler,
+                min_passage_degree=monopartite_min_degree,
             )
+        elif passage_shortcuts:
+            self._add_passage_shortcuts(edge_scaler=monopartite_edge_scaler)
 
         self._finalize_graph()
         self._loaded = True
@@ -1475,7 +1604,10 @@ class HippoRAG2PPR:
                 total_edges = sum(len(self._adj.get(i, [])) for i in range(self._node_count))
                 avg_degree = total_edges / max(self._node_count, 1)
             for idx in range(self._node_count):
-                d = self._out_weight_sum.get(idx, 0.0) + self_loop_weight + avg_degree
+                # Article Rank: use edge COUNT + avg_degree (not weight sum)
+                # Neo4j formula: deg_out(u) + avg_deg_out
+                edge_count = float(len(self._adj.get(idx, [])))
+                d = edge_count + self_loop_weight + avg_degree
                 degree_divisor[idx] = d  # NOT sqrt — row normalization
         else:
             # Default symmetric: D = diag(weight sums + self-loop)
