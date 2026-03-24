@@ -75,6 +75,9 @@ class HippoRAG2PPR:
         self._out_weight_sum: Dict[int, float] = {}
         self._loaded = False
         self._node_count = 0
+        self._is_monopartite = False
+        # Entity→passage mapping preserved for seed translation in monopartite mode
+        self._entity_passage_map: Dict[int, List[int]] = {}
 
     @property
     def loaded(self) -> bool:
@@ -323,6 +326,77 @@ class HippoRAG2PPR:
                 edges_removed=total_removed,
             )
 
+    def _build_monopartite_projection(self) -> None:
+        """Replace bipartite graph with monopartite passage-passage graph.
+
+        Computes passage-passage edges from shared entities: for each entity,
+        all its connected passages become pairwise connected with weight = 1.0
+        per shared entity (flat weighting — shared count is the signal).
+
+        Entities are removed from the walk entirely, eliminating hub noise.
+        Existing passage-passage similarity edges are preserved.
+        Entity→passage mapping is saved for seed translation.
+        """
+        from collections import defaultdict
+
+        # Build entity → passage index (saved for seed translation)
+        entity_to_passages: Dict[int, List[int]] = defaultdict(list)
+        for idx in range(self._node_count):
+            if self._node_types.get(idx) != "entity":
+                continue
+            for neighbor_idx, _ in self._adj.get(idx, []):
+                if self._node_types.get(neighbor_idx) == "passage":
+                    entity_to_passages[idx].append(neighbor_idx)
+
+        # Save mapping for entity seed translation
+        self._entity_passage_map = dict(entity_to_passages)
+
+        # Collect existing passage-passage edges (sentence KNN)
+        existing_pp: Dict[tuple, float] = {}
+        for idx in range(self._node_count):
+            if self._node_types.get(idx) != "passage":
+                continue
+            for neighbor_idx, w in self._adj.get(idx, []):
+                if self._node_types.get(neighbor_idx) == "passage":
+                    key = (min(idx, neighbor_idx), max(idx, neighbor_idx))
+                    existing_pp[key] = max(existing_pp.get(key, 0.0), w)
+
+        # Compute passage-passage edges via shared entities (flat weight = 1.0 per shared entity)
+        pair_weights: Dict[tuple, float] = {}
+        for ent_idx, passages in entity_to_passages.items():
+            for i in range(len(passages)):
+                for j in range(i + 1, len(passages)):
+                    p1, p2 = min(passages[i], passages[j]), max(passages[i], passages[j])
+                    pair_weights[(p1, p2)] = pair_weights.get((p1, p2), 0.0) + 1.0
+
+        # Rebuild adjacency: passage-only graph
+        for idx in range(self._node_count):
+            self._adj[idx] = []
+
+        # Add shared-entity edges
+        mono_edge_count = 0
+        for (p1, p2), weight in pair_weights.items():
+            self._adj[p1].append((p2, weight))
+            self._adj[p2].append((p1, weight))
+            mono_edge_count += 1
+
+        # Re-add existing passage-passage similarity edges
+        sim_edge_count = 0
+        for (p1, p2), weight in existing_pp.items():
+            self._adj[p1].append((p2, weight))
+            self._adj[p2].append((p1, weight))
+            sim_edge_count += 1
+
+        self._is_monopartite = True
+
+        logger.info(
+            "monopartite_projection_built",
+            entity_sources=len(entity_to_passages),
+            mono_edges=mono_edge_count,
+            sim_edges_preserved=sim_edge_count,
+            total_edges=mono_edge_count + sim_edge_count,
+        )
+
     def _finalize_graph(self) -> None:
         """Precompute outgoing weight sums and community sizes."""
         for idx in range(self._node_count):
@@ -347,6 +421,7 @@ class HippoRAG2PPR:
         include_next_in_section: bool = False,
         mentions_idf_weighting: str = "none",
         max_entity_degree: int = 0,
+        monopartite: bool = False,
     ) -> None:
         """Load Entity + Sentence nodes and edges from Neo4j.
 
@@ -393,6 +468,10 @@ class HippoRAG2PPR:
         # Cap entity degree (structural hub removal).
         if max_entity_degree > 0:
             self._cap_entity_degree(max_entity_degree)
+
+        # Monopartite projection: replace bipartite with passage-passage graph.
+        if monopartite:
+            self._build_monopartite_projection()
 
         self._finalize_graph()
         self._loaded = True
@@ -1288,10 +1367,25 @@ class HippoRAG2PPR:
         # Optionally blend entity seeds into predictions
         if entity_seeds and seed_weight > 0:
             structural = np.zeros(self._node_count, dtype=np.float64)
-            for node_id, weight in entity_seeds.items():
-                idx = self._node_to_idx.get(node_id)
-                if idx is not None:
-                    structural[idx] = weight
+
+            if self._is_monopartite:
+                # Monopartite mode: entity nodes have no edges, so translate
+                # entity seeds to their connected passages (saved pre-projection).
+                for node_id, weight in entity_seeds.items():
+                    ent_idx = self._node_to_idx.get(node_id)
+                    if ent_idx is None:
+                        continue
+                    passage_indices = self._entity_passage_map.get(ent_idx, [])
+                    if passage_indices:
+                        per_passage = weight / len(passage_indices)
+                        for p_idx in passage_indices:
+                            structural[p_idx] += per_passage
+            else:
+                for node_id, weight in entity_seeds.items():
+                    idx = self._node_to_idx.get(node_id)
+                    if idx is not None:
+                        structural[idx] = weight
+
             s_sum = structural.sum()
             p_sum = predictions.sum()
             if s_sum > 0:

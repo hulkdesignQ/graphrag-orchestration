@@ -80,15 +80,10 @@
     transition: width 0.2s ease;
     z-index: 90;
     padding-top: 0.5rem;
-    position: absolute;
-    top: 0;
-    left: 0;
-    bottom: 0;
 }
 
 .sidebar:hover {
     width: 180px;
-    box-shadow: 4px 0 16px rgba(0,0,0,0.15);
 }
 
 /* --- Nav items --- */
@@ -257,7 +252,6 @@
     flex: 1;
     min-width: 0;
     overflow: hidden;
-    margin-left: 56px;
 }
 
 /* --- Hamburger button (mobile only) --- */
