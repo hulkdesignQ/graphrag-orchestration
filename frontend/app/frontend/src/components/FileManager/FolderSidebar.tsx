@@ -316,7 +316,6 @@ export const FolderSidebar = ({
             {/* Zone 3: Folders (Not Analyzed) */}
             {notAnalyzedFolders.length > 0 && (
                 <div className={styles.zone}>
-                    {renderZoneHeader("folders", <Folder24Regular />, t("files.zoneFolders", "Folders"), sumFileCount(notAnalyzedFolders))}
                     {!collapsedZones["folders"] && <div className={`${styles.zoneFolders} ${styles.zoneFoldersNotAnalyzed}`}>{notAnalyzedFolders.map(f => renderFolder(f, 0))}</div>}
                 </div>
             )}

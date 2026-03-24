@@ -696,7 +696,7 @@
     display: flex;
     gap: 8px;
     flex-wrap: wrap;
-    margin-top: 4px;
+    margin-top: 12px;
 }
 
 .deleteAnalysisBtn {
