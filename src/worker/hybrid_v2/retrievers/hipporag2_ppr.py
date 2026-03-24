@@ -263,6 +263,66 @@ class HippoRAG2PPR:
             edges_reweighted=reweighted,
         )
 
+    def _cap_entity_degree(self, max_degree: int) -> None:
+        """Cap entity nodes to at most max_degree MENTIONS edges.
+
+        For each entity with degree > max_degree, keeps only the edges
+        to sentences that have the fewest total entity connections
+        (most specific passages). This surgically removes hub influence.
+        """
+        capped_entities = 0
+        total_removed = 0
+
+        for idx in range(self._node_count):
+            if self._node_types.get(idx) != "entity":
+                continue
+            edges = self._adj.get(idx, [])
+            if len(edges) <= max_degree:
+                continue
+
+            # Sort edges: prefer passages with fewer entity neighbors (more specific)
+            scored = []
+            for tgt_idx, w in edges:
+                if self._node_types.get(tgt_idx) == "passage":
+                    passage_degree = len(self._adj.get(tgt_idx, []))
+                    scored.append((passage_degree, tgt_idx, w))
+                else:
+                    # Non-MENTIONS edge (entity-entity) — always keep
+                    scored.append((-1, tgt_idx, w))
+
+            scored.sort(key=lambda x: x[0])
+            keep_set = set()
+            kept = 0
+            for _, tgt_idx, w in scored:
+                if kept < max_degree or _ == -1:
+                    keep_set.add(tgt_idx)
+                    kept += 1
+
+            # Rebuild adjacency for this entity
+            removed = 0
+            new_edges = [(t, w) for t, w in edges if t in keep_set]
+            removed = len(edges) - len(new_edges)
+            self._adj[idx] = new_edges
+
+            # Also remove reverse edges from dropped passages
+            for tgt_idx, w in edges:
+                if tgt_idx not in keep_set:
+                    self._adj[tgt_idx] = [
+                        (t, ww) for t, ww in self._adj.get(tgt_idx, [])
+                        if t != idx
+                    ]
+
+            total_removed += removed
+            capped_entities += 1
+
+        if capped_entities > 0:
+            logger.info(
+                "entity_degree_capped",
+                max_degree=max_degree,
+                capped_entities=capped_entities,
+                edges_removed=total_removed,
+            )
+
     def _finalize_graph(self) -> None:
         """Precompute outgoing weight sums and community sizes."""
         for idx in range(self._node_count):
@@ -286,6 +346,7 @@ class HippoRAG2PPR:
         include_appears_in_section: bool = False,
         include_next_in_section: bool = False,
         mentions_idf_weighting: str = "none",
+        max_entity_degree: int = 0,
     ) -> None:
         """Load Entity + Sentence nodes and edges from Neo4j.
 
@@ -328,6 +389,10 @@ class HippoRAG2PPR:
         # Reweight MENTIONS edges by inverse entity degree (hub dampening).
         if mentions_idf_weighting != "none":
             self._apply_mentions_idf(mentions_idf_weighting)
+
+        # Cap entity degree (structural hub removal).
+        if max_entity_degree > 0:
+            self._cap_entity_degree(max_entity_degree)
 
         self._finalize_graph()
         self._loaded = True
@@ -1125,12 +1190,13 @@ class HippoRAG2PPR:
         hub_penalty_mode: str = "none",
         hub_penalty_alpha: float = 1.0,
         hub_penalty_base: float = 2.0,
+        norm_mode: str = "symmetric",
     ) -> Tuple[List[Tuple[str, float]], List[Tuple[str, float]]]:
         """True APPNP: Predict then Propagate (Gasteiger et al., ICLR 2019).
 
         Follows the paper's exact architecture:
           1. PREDICT: neural predictor scores for ALL passages
-          2. PROPAGATE: preds = (1-α)·Â_sym·preds + α·predictions
+          2. PROPAGATE: preds = (1-α)·Â·preds + α·predictions
 
         The predictor can be:
           - Cosine similarity (default): FREE, uses pre-loaded embeddings.
@@ -1142,7 +1208,7 @@ class HippoRAG2PPR:
           - Personalization = neural predictions for ALL passage nodes
             (not sparse entity seeds)
           - Teleportation → neural predictions (not seed entities)
-          - Symmetric normalization D^{-½}·(A+I)·D^{-½} throughout
+          - Normalization strategy controlled by norm_mode
 
         Args:
             query_embedding: Query vector for cosine prediction.
@@ -1170,6 +1236,12 @@ class HippoRAG2PPR:
                 Higher values (1.5, 2.0) create stronger hub suppression.
             hub_penalty_base: Base for log hub penalty (default 2.0).
                 Lower values (1.1) create sharper differentiation.
+            norm_mode: Normalization strategy for propagation.
+                "symmetric" = D^{-½}(A+I)D^{-½} (paper default).
+                "random_walk" = D^{-1}(A+I) — hub sends 1/degree per edge.
+                "article_rank" = (D+avg_d·I)^{-1}(A+I) — Neo4j Article Rank.
+                "structural_symmetric" = symmetric but degree = edge COUNT
+                    (not weight sum), so IDF edge weights are preserved.
 
         Returns:
             Tuple of passage_scores and entity_scores (same as run_ppr).
@@ -1248,28 +1320,49 @@ class HippoRAG2PPR:
         )
 
         # ── Step 2: PROPAGATE ──────────────────────────────────────────
-        # APPNP power iteration with SYMMETRIC normalization:
-        #   preds = (1-α) · Â_sym · preds + α · predictions
-        #
-        # Following the paper's calc_A_hat() exactly:
-        #   Â = D^{-½} · (A + I) · D^{-½}
+        # APPNP power iteration: preds = (1-α) · Â · preds + α · predictions
         # The "+I" adds self-loops (renormalization trick, Kipf & Welling 2017).
-        # Self-loops let nodes retain their own predictions during propagation
-        # instead of having them overwritten by neighbors.
+        #
+        # Normalization modes (controlled by norm_mode):
+        #   symmetric:            D^{-½}(A+I)D^{-½}  — paper default
+        #   random_walk:          D^{-1}(A+I)         — hub sends 1/d per edge
+        #   article_rank:         (D+avg_d·I)^{-1}(A+I) — Neo4j Article Rank
+        #   structural_symmetric: like symmetric but D = diag(edge_counts)
+        #                         not diag(weight_sums), so IDF weights survive
 
-        # Precompute degree WITH self-loops: d_i = Σ_j A_ij + 1 (self-loop)
-        # Paper: A = adj_matrix + sp.eye(nnodes); D_vec = np.sum(A, axis=1)
-        sqrt_degree = np.zeros(self._node_count, dtype=np.float64)
-        self_loop_weight = 1.0  # Paper uses identity matrix (weight=1)
-        for idx in range(self._node_count):
-            d = self._out_weight_sum.get(idx, 0.0) + self_loop_weight
-            sqrt_degree[idx] = math.sqrt(d)
+        self_loop_weight = 1.0
+
+        # Compute normalization divisors per node
+        degree_divisor = np.zeros(self._node_count, dtype=np.float64)
+        if norm_mode == "structural_symmetric":
+            # Degree = count of edges (ignoring weights) + self-loop
+            for idx in range(self._node_count):
+                d = float(len(self._adj.get(idx, []))) + self_loop_weight
+                degree_divisor[idx] = math.sqrt(d)
+        elif norm_mode in ("random_walk", "article_rank"):
+            avg_degree = 0.0
+            if norm_mode == "article_rank":
+                total_edges = sum(len(self._adj.get(i, [])) for i in range(self._node_count))
+                avg_degree = total_edges / max(self._node_count, 1)
+            for idx in range(self._node_count):
+                d = self._out_weight_sum.get(idx, 0.0) + self_loop_weight + avg_degree
+                degree_divisor[idx] = d  # NOT sqrt — row normalization
+        else:
+            # Default symmetric: D = diag(weight sums + self-loop)
+            for idx in range(self._node_count):
+                d = self._out_weight_sum.get(idx, 0.0) + self_loop_weight
+                degree_divisor[idx] = math.sqrt(d)
+
+        use_sqrt_norm = norm_mode in ("symmetric", "structural_symmetric")
+
+        logger.info(
+            "appnp_norm_mode",
+            mode=norm_mode,
+            avg_divisor=float(np.mean(degree_divisor)),
+            max_divisor=float(np.max(degree_divisor)),
+        )
 
         # Precompute hub penalty factors (entity nodes only).
-        # Symmetric normalization divides by √degree but doesn't fully
-        # prevent hub entities (e.g. "Owner" with 39 mentions) from
-        # flooding mass to all their neighbors. The hub penalty adds
-        # an additional multiplicative dampening on entity→neighbor flow.
         hub_factor: Dict[int, float] = {}
         if hub_penalty_mode != "none":
             for idx in range(self._node_count):
@@ -1291,32 +1384,33 @@ class HippoRAG2PPR:
         preds = predictions.copy()
 
         for iteration in range(max_iterations):
-            # Teleportation component: α · predictions
             new_preds = alpha * predictions
 
-            # Propagation component: (1-α) · Â_sym · preds
             for src in range(self._node_count):
                 if preds[src] == 0.0:
                     continue
-                sqrt_src = sqrt_degree[src]
+                d_src = degree_divisor[src]
 
-                # Self-loop: node retains some of its own value
-                # Paper: A+I means node src has an edge to itself with weight 1
-                self_share = (1.0 - alpha) * preds[src] * self_loop_weight / (sqrt_src * sqrt_src)
+                # Self-loop
+                if use_sqrt_norm:
+                    self_share = (1.0 - alpha) * preds[src] * self_loop_weight / (d_src * d_src)
+                else:
+                    self_share = (1.0 - alpha) * preds[src] * self_loop_weight / d_src
                 new_preds[src] += self_share
 
                 for tgt, edge_weight in self._adj.get(src, []):
-                    sqrt_tgt = sqrt_degree[tgt]
-                    # D^{-½} · (A+I) · D^{-½}
-                    share = (1.0 - alpha) * preds[src] * edge_weight / (sqrt_src * sqrt_tgt)
+                    if use_sqrt_norm:
+                        d_tgt = degree_divisor[tgt]
+                        share = (1.0 - alpha) * preds[src] * edge_weight / (d_src * d_tgt)
+                    else:
+                        # Row normalization: only divide by source degree
+                        share = (1.0 - alpha) * preds[src] * edge_weight / d_src
 
-                    # Hub penalty: reduce mass flow from high-degree entity nodes
                     if src in hub_factor:
                         share *= hub_factor[src]
 
                     new_preds[tgt] += share
 
-            # Check convergence
             diff = float(np.sum(np.abs(new_preds - preds)))
             preds = new_preds
 

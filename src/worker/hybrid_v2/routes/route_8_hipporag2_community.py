@@ -260,6 +260,9 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
             mentions_idf_weighting = os.getenv(
                 "ROUTE7_MENTIONS_IDF_WEIGHTING", "none"
             ).strip().lower()
+            max_entity_degree = int(os.getenv(
+                "ROUTE7_MAX_ENTITY_DEGREE", "0"
+            ).strip())
 
             # Load triple store and PPR graph in parallel
             triple_store = TripleEmbeddingStore()
@@ -281,6 +284,7 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
                     include_appears_in_section=include_appears_in_section,
                     include_next_in_section=include_next_in_section,
                     mentions_idf_weighting=mentions_idf_weighting,
+                    max_entity_degree=max_entity_degree,
                 ),
             )
 
@@ -598,6 +602,16 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
             "appnp_hub_penalty_base", "ROUTE8_APPNP_HUB_PENALTY_BASE",
             str(preset.get("appnp_hub_penalty_base", 2.0))
         ))
+
+        # APPNP normalization mode: controls how degree is used in propagation.
+        # "symmetric" = D^{-½}(A+I)D^{-½} (paper default)
+        # "article_rank" = (D+avg_d·I)^{-1}(A+I) — dampens hubs in non-power-law graphs
+        # "random_walk" = D^{-1}(A+I) — most aggressive hub dampening
+        # "structural_symmetric" = symmetric but D uses edge counts not weight sums
+        appnp_norm_mode = _ov(
+            "appnp_norm_mode", "ROUTE8_APPNP_NORM_MODE",
+            str(preset.get("appnp_norm_mode", "symmetric"))
+        ).strip().lower()
 
         # Sentence window: preset provides the default; config_overrides / env
         # can still override (e.g. re-enable windowing for local_search).
@@ -1187,6 +1201,7 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
                 hub_penalty_mode=appnp_hub_penalty_mode,
                 hub_penalty_alpha=appnp_hub_penalty_alpha,
                 hub_penalty_base=appnp_hub_penalty_base,
+                norm_mode=appnp_norm_mode,
             )
         elif propagation_mode == "gpr":
             passage_scores, entity_scores = self._ppr_engine.run_gpr(
