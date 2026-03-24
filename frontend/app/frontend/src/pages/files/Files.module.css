@@ -615,23 +615,26 @@
     padding: 10px 24px;
     border-radius: 8px;
     border: 2px solid #0071e3;
-    background: linear-gradient(135deg, #0071e3, #0077ed);
-    color: #fff;
+    background: transparent;
+    color: #0071e3;
     font-size: 15px;
     font-weight: 700;
     cursor: pointer;
     white-space: nowrap;
     flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
     transition: background 0.15s, box-shadow 0.15s, transform 0.1s;
 }
 .analysisCtaBtn:hover {
-    background: linear-gradient(135deg, #0077ed, #005bb5);
-    box-shadow: 0 2px 12px rgba(0, 113, 227, 0.4);
+    background: rgba(0, 113, 227, 0.06);
+    box-shadow: 0 2px 12px rgba(0, 113, 227, 0.15);
     transform: translateY(-1px);
 }
 .analysisCtaBtn:active {
     transform: translateY(0);
-    box-shadow: 0 1px 4px rgba(0, 113, 227, 0.3);
+    box-shadow: 0 1px 4px rgba(0, 113, 227, 0.1);
 }
 
 /* Analysis Summary Panel */
