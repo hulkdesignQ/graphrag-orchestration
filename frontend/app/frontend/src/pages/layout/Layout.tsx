@@ -25,7 +25,8 @@ const NAV_ICONS: Array<{ to: string; end?: boolean; icon: React.ReactNode; label
 // Onboarding tour steps: step number → description key
 const TOUR_STEPS = [
     { navStep: 1, labelKey: "onboarding.step1" },
-    { navStep: 2, labelKey: "onboarding.step2" },
+    { navStep: 0, labelKey: "onboarding.step2" },
+    { navStep: 2, labelKey: "onboarding.step3" },
 ];
 
 const Layout = () => {

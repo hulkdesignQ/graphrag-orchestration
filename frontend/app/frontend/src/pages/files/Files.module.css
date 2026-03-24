@@ -57,12 +57,16 @@
 .uploadZone {
     border: 2px dashed #c4c4c4;
     border-radius: 12px;
-    padding: 32px 24px;
+    padding: 16px;
     text-align: center;
     background: #fff;
     transition: border-color 0.2s, background 0.2s;
     cursor: pointer;
     flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
 }
 .uploadZone:hover,
 .uploadZoneDragOver {
@@ -73,6 +77,7 @@
     border-color: #0071e3;
     background: rgba(0, 113, 227, 0.06);
     pointer-events: none;
+    flex-direction: column;
 }
 .uploadZoneDisabled {
     border-color: #ccc;
@@ -81,38 +86,34 @@
     opacity: 0.7;
 }
 .uploadIcon {
-    font-size: 36px;
-    margin-bottom: 8px;
-    display: block;
+    font-size: 28px;
+    color: #0071e3;
+    display: flex;
+    align-items: center;
 }
 .uploadText {
-    font-size: 15px;
+    font-size: 14px;
     color: #555;
     margin: 0;
 }
 .uploadTextSub {
-    font-size: 13px;
+    font-size: 12px;
     color: #999;
     margin: 4px 0 0;
 }
-.uploadFormatsHint {
-    font-size: 11px;
-    color: #bbb;
-    margin: 8px 0 0;
-    letter-spacing: 0.2px;
-}
 .uploadBrowseBtn {
-    display: inline-block;
-    margin-top: 12px;
-    padding: 8px 20px;
-    border-radius: 6px;
-    border: 1px solid #0071e3;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    border: 1.5px solid #0071e3;
     background: transparent;
     color: #0071e3;
-    font-weight: 600;
     cursor: pointer;
-    font-size: 14px;
-    transition: background 0.15s, color 0.15s;
+    font-size: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s, color 0.2s;
 }
 .uploadBrowseBtn:hover {
     background: #0071e3;
@@ -629,8 +630,8 @@
 
 /* Analysis Summary Panel */
 .analysisSummary {
-    background: transparent;
-    border: 1px solid #0071e3;
+    background: rgba(0, 113, 227, 0.04);
+    border: 1px solid rgba(0, 113, 227, 0.25);
     border-radius: 10px;
     padding: 14px 18px;
     margin-bottom: 12px;

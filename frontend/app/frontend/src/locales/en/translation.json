@@ -415,8 +415,9 @@
         "noUserActivity": "No user activity data yet. Data will appear once analytics are connected."
     },
     "onboarding": {
-        "step1": "Upload your documents here",
-        "step2": "View your plan & usage",
+        "step1": "Create a folder & upload documents",
+        "step2": "Ask questions about your files",
+        "step3": "View your plan & usage",
         "next": "Next →",
         "done": "Got it ✓"
     }

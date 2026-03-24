@@ -47,7 +47,7 @@ export const UploadZone = ({ onUpload, uploading, progress, acceptedTypes, uploa
     const handleInputChange = (e: ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files.length > 0) {
             onUpload(Array.from(e.target.files));
-            e.target.value = ""; // allow re-selecting same file
+            e.target.value = "";
         }
     };
 
@@ -73,9 +73,9 @@ export const UploadZone = ({ onUpload, uploading, progress, acceptedTypes, uploa
             aria-disabled={disabled}
             title={disabled ? disabledMessage : undefined}
         >
-            <span className={styles.uploadIcon}>{uploading ? <Clock24Regular /> : disabled ? <Folder24Regular /> : <ArrowUpload24Regular />}</span>
             {uploading ? (
                 <>
+                    <span className={styles.uploadIcon}><Clock24Regular /></span>
                     <p className={styles.uploadText}>
                         {uploadTotal && uploadTotal > 1
                             ? t("files.uploadingProgress", { current: Math.min((uploadedCount ?? 0) + 1, uploadTotal), total: uploadTotal })
@@ -87,19 +87,11 @@ export const UploadZone = ({ onUpload, uploading, progress, acceptedTypes, uploa
                     <p className={styles.progressLabel}>{progress}%</p>
                 </>
             ) : disabled ? (
-                <>
-                    <p className={styles.uploadText}>{disabledMessage || t("files.selectFolderFirst")}</p>
-                    <p className={styles.uploadTextSub}>{t("files.selectFolderHint")}</p>
-                </>
+                <span className={styles.uploadIcon}><Folder24Regular /></span>
             ) : (
-                <>
-                    <p className={styles.uploadText}>{t("files.dragDropFiles")}</p>
-                    <p className={styles.uploadTextSub}>{t("files.orClickBrowse")}</p>
-                    <p className={styles.uploadFormatsHint}>{t("files.supportedFormats")}</p>
-                    <button className={styles.uploadBrowseBtn} onClick={(e) => { e.stopPropagation(); handleBrowse(); }}>
-                        {t("files.chooseFiles")}
-                    </button>
-                </>
+                <button className={styles.uploadBrowseBtn} onClick={(e) => { e.stopPropagation(); handleBrowse(); }}>
+                    <ArrowUpload24Regular />
+                </button>
             )}
             <input
                 ref={inputRef}
