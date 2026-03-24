@@ -64,7 +64,6 @@ export const FileList = ({ files, selected, loading, onToggleSelect, onDelete, o
             <div className={styles.emptyState}>
                 <span className={styles.emptyIcon}><FolderOpen24Regular /></span>
                 <h2>{t("files.noFilesYet")}</h2>
-                <p>{t("files.uploadFilesHint")}</p>
             </div>
         );
     }

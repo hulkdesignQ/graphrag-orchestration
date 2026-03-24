@@ -525,10 +525,6 @@ const Files = () => {
                     {/* Breadcrumb */}
                     {activeFolderId && (
                         <div className={styles.breadcrumb}>
-                            <button className={styles.breadcrumbLink} onClick={() => setActiveFolderId(null)}>
-                                {t("files.allFiles")}
-                            </button>
-                            <span className={styles.breadcrumbSep}>›</span>
                             {parentFolder && (
                                 <>
                                     <button

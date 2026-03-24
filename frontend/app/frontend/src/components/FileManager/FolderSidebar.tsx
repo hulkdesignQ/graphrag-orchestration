@@ -289,13 +289,12 @@ export const FolderSidebar = ({
                 </button>
             </div>
 
-            {/* All Files (root) */}
+            {/* Home (root) */}
             <div
                 className={`${styles.folderRow} ${activeFolderId === null ? styles.folderRowActive : ""}`}
                 onClick={() => onSelectFolder(null)}
             >
                 <span className={styles.folderIcon}><Home24Regular /></span>
-                <span className={styles.folderName} title={t("files.allFiles")}>{t("files.allFiles")}</span>
             </div>
 
             {/* Zone 1: Analysis Results */}
