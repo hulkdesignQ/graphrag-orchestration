@@ -1,5 +1,5 @@
 import { Outlet, NavLink } from "react-router-dom";
-import { useState, useEffect, useCallback, useContext } from "react";
+import { useState, useEffect, useCallback, useContext, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import {
     Chat24Regular,
@@ -13,13 +13,19 @@ import { LoginButton } from "../../components/LoginButton";
 import { LanguagePicker } from "../../i18n/LanguagePicker";
 import { LoginContext } from "../../loginContext";
 import { configApi } from "../../api";
-import { hasSeenOnboarding } from "../../utils/onboarding";
+import { hasSeenOnboarding, markOnboardingSeen } from "../../utils/onboarding";
 import appLogo from "../../assets/applogo.png";
 
 const NAV_ICONS: Array<{ to: string; end?: boolean; icon: React.ReactNode; labelKey: string; step: number }> = [
-    { to: "/", end: true, icon: <Chat24Regular />, labelKey: "nav.chat", step: 2 },
+    { to: "/", end: true, icon: <Chat24Regular />, labelKey: "nav.chat", step: 0 },
     { to: "/files", icon: <Folder24Regular />, labelKey: "nav.files", step: 1 },
-    { to: "/dashboard", icon: <Board24Regular />, labelKey: "nav.dashboard", step: 0 },
+    { to: "/dashboard", icon: <Board24Regular />, labelKey: "nav.dashboard", step: 2 },
+];
+
+// Onboarding tour steps: step number → description key
+const TOUR_STEPS = [
+    { navStep: 1, labelKey: "onboarding.step1" },
+    { navStep: 2, labelKey: "onboarding.step2" },
 ];
 
 const Layout = () => {
@@ -27,7 +33,8 @@ const Layout = () => {
     const { loggedIn } = useContext(LoginContext);
     const [sidebarOpen, setSidebarOpen] = useState(false);
     const [showLanguagePicker, setShowLanguagePicker] = useState(false);
-    const [showOnboarding, setShowOnboarding] = useState(false);
+    const [tourStep, setTourStep] = useState(-1); // -1 = inactive
+    const navRefs = useRef<(HTMLAnchorElement | null)[]>([]);
 
     useEffect(() => {
         configApi().then(config => setShowLanguagePicker(config.showLanguagePicker));
@@ -35,12 +42,31 @@ const Layout = () => {
 
     useEffect(() => {
         if (loggedIn && !hasSeenOnboarding()) {
-            setShowOnboarding(true);
+            setTourStep(0);
         }
     }, [loggedIn]);
 
+    const advanceTour = useCallback(() => {
+        setTourStep(prev => {
+            const next = prev + 1;
+            if (next >= TOUR_STEPS.length) {
+                markOnboardingSeen();
+                return -1;
+            }
+            return next;
+        });
+    }, []);
+
+    const dismissTour = useCallback(() => {
+        setTourStep(-1);
+        markOnboardingSeen();
+    }, []);
+
     const toggleSidebar = useCallback(() => setSidebarOpen(prev => !prev), []);
     const closeSidebar = useCallback(() => setSidebarOpen(false), []);
+
+    // Find which nav index the current tour step points to
+    const activeTourNavStep = tourStep >= 0 ? TOUR_STEPS[tourStep].navStep : -1;
 
     return (
         <div className={styles.layout}>
@@ -77,39 +103,38 @@ const Layout = () => {
                 {/* Sidebar navigation — only shown after login */}
                 {loggedIn && (
                     <nav className={`${styles.sidebar} ${sidebarOpen ? styles.sidebarOpen : ""}`} aria-label="Main navigation">
-                        {NAV_ICONS.map(({ to, end, icon, labelKey, step }) => (
+                        {NAV_ICONS.map(({ to, end, icon, labelKey, step }, idx) => (
                             <NavLink
                                 key={to}
                                 to={to}
                                 end={end}
+                                ref={el => { navRefs.current[idx] = el; }}
                                 className={({ isActive }) => `${styles.navItem} ${isActive ? styles.navItemActive : ""}`}
                                 onClick={closeSidebar}
                             >
-                                <span className={styles.navIcon}>
-                                    {icon}
-                                    {showOnboarding && step > 0 && (
-                                        <span className={styles.onboardingBadge}>{step}</span>
-                                    )}
-                                </span>
+                                <span className={styles.navIcon}>{icon}</span>
                                 <span className={styles.navLabel}>{t(labelKey)}</span>
-                                {showOnboarding && step > 0 && (
-                                    <span className={styles.onboardingHint}>
-                                        {t(`onboarding.step${step}`)}
-                                    </span>
+                                {/* Tour tooltip positioned beside the nav icon */}
+                                {step === activeTourNavStep && (
+                                    <div className={styles.tourTooltip} onClick={e => { e.preventDefault(); e.stopPropagation(); advanceTour(); }}>
+                                        <span className={styles.tourBadge}>{tourStep + 1}</span>
+                                        <span className={styles.tourText}>{t(TOUR_STEPS[tourStep].labelKey)}</span>
+                                        <span className={styles.tourAction}>
+                                            {tourStep < TOUR_STEPS.length - 1 ? t("onboarding.next", "Next →") : t("onboarding.done", "Got it ✓")}
+                                        </span>
+                                    </div>
                                 )}
                             </NavLink>
                         ))}
 
                         {/* Bottom spacer pushes version to bottom */}
                         <div className={styles.navSpacer} />
-                        {showOnboarding && (
-                            <button className={styles.onboardingDismiss} onClick={() => { setShowOnboarding(false); import("../../utils/onboarding").then(m => m.markOnboardingSeen()); }}>
-                                {t("onboarding.dismiss", "Got it")}
-                            </button>
-                        )}
                         <div className={styles.navVersion}>v2.0</div>
                     </nav>
                 )}
+
+                {/* Tour backdrop overlay */}
+                {tourStep >= 0 && <div className={styles.tourOverlay} onClick={dismissTour} />}
 
                 {/* Main content area */}
                 <main className={styles.main} id="main-content">

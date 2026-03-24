@@ -629,8 +629,8 @@
 
 /* Analysis Summary Panel */
 .analysisSummary {
-    background: linear-gradient(135deg, #f0f9ff, #e8f5e9);
-    border: 1px solid #c8e6c9;
+    background: transparent;
+    border: 1px solid #0071e3;
     border-radius: 10px;
     padding: 14px 18px;
     margin-bottom: 12px;
@@ -652,7 +652,7 @@
 .analysisSummaryTitle {
     font-size: 14px;
     font-weight: 600;
-    color: #2e7d32;
+    color: #0071e3;
 }
 
 .analysisSummaryStats {

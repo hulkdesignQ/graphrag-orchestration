@@ -119,6 +119,7 @@ export const QuestionInput = ({ onSend, onStop, disabled, placeholder, clearOnSe
                     <Tooltip content={t("tooltips.submitQuestion")} relationship="label">
                         <Button
                             size="large"
+                            appearance="transparent"
                             icon={<Send28Regular primaryFill="#0071e3" />}
                             disabled={sendQuestionDisabled}
                             onClick={sendQuestion}

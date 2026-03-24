@@ -110,7 +110,7 @@
 .navItemActive {
     color: #fff;
     background: rgba(255, 255, 255, 0.1);
-    border-left-color: #4cc9f0;
+    border-left-color: #0071e3;
 }
 
 .navItemDisabled {
@@ -141,61 +141,88 @@
     opacity: 1;
 }
 
-/* Onboarding numbered badge on nav icon */
-.onboardingBadge {
+/* ── Guided tour tooltip ── */
+.tourOverlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.35);
+    z-index: 200;
+}
+
+.tourTooltip {
     position: absolute;
-    top: -6px;
-    right: -8px;
-    width: 16px;
-    height: 16px;
+    left: calc(100% + 12px);
+    top: 50%;
+    transform: translateY(-50%);
+    background: #fff;
+    border: 1px solid #d0d5dd;
+    border-radius: 10px;
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+    white-space: nowrap;
+    z-index: 210;
+    cursor: pointer;
+    min-width: 180px;
+    animation: tourFadeIn 0.25s ease;
+}
+
+.tourTooltip::before {
+    content: "";
+    position: absolute;
+    left: -7px;
+    top: 50%;
+    transform: translateY(-50%) rotate(45deg);
+    width: 12px;
+    height: 12px;
+    background: #fff;
+    border-left: 1px solid #d0d5dd;
+    border-bottom: 1px solid #d0d5dd;
+}
+
+@keyframes tourFadeIn {
+    from { opacity: 0; transform: translateY(-50%) translateX(6px); }
+    to { opacity: 1; transform: translateY(-50%) translateX(0); }
+}
+
+.tourBadge {
+    width: 22px;
+    height: 22px;
     border-radius: 50%;
     background: #0071e3;
     color: #fff;
-    font-size: 0.6rem;
+    font-size: 0.7rem;
     font-weight: 700;
     display: flex;
     align-items: center;
     justify-content: center;
-    line-height: 1;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
-    animation: onboardingPulse 2s ease-in-out infinite;
+    flex-shrink: 0;
 }
 
-@keyframes onboardingPulse {
-    0%, 100% { transform: scale(1); }
-    50% { transform: scale(1.15); }
+.tourText {
+    font-size: 0.8rem;
+    color: #333;
+    font-weight: 500;
 }
 
-/* Hint text shown next to nav item when onboarding */
-.onboardingHint {
-    font-size: 0.7rem;
-    color: #a0c4ff;
-    font-weight: 400;
-    white-space: nowrap;
-    opacity: 1;
-}
-
-/* Dismiss button at sidebar bottom */
-.onboardingDismiss {
-    margin: 0.5rem 0.75rem;
-    padding: 0.4rem 0.75rem;
-    background: rgba(255, 255, 255, 0.1);
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    color: #a0c4ff;
-    border-radius: 6px;
+.tourAction {
     font-size: 0.75rem;
-    cursor: pointer;
-    transition: background 0.2s;
+    color: #0071e3;
+    font-weight: 600;
+    margin-left: auto;
 }
 
-.onboardingDismiss:hover {
-    background: rgba(255, 255, 255, 0.15);
+.tourTooltip:hover {
+    border-color: #0071e3;
+    box-shadow: 0 4px 20px rgba(0, 113, 227, 0.2);
 }
 
 .navBadge {
     font-size: 0.65rem;
-    background: #4cc9f0;
-    color: #1a1a2e;
+    background: #0071e3;
+    color: #fff;
     padding: 0.1rem 0.4rem;
     border-radius: 3px;
     font-weight: 600;

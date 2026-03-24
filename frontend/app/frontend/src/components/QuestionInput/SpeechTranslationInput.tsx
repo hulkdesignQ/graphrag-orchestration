@@ -209,6 +209,7 @@ export const SpeechTranslationInput = ({ updateQuestion, onSpeechResult }: Props
                     <Tooltip content={t("tooltips.askWithVoice")} relationship="label">
                         <Button
                             size="large"
+                            appearance="transparent"
                             icon={<Mic28Regular primaryFill="#0071e3" />}
                             onClick={startRecording}
                         />
@@ -224,6 +225,7 @@ export const SpeechTranslationInput = ({ updateQuestion, onSpeechResult }: Props
                     <Tooltip content={t("tooltips.stopRecording")} relationship="label">
                         <Button
                             size="large"
+                            appearance="transparent"
                             icon={<Mic28Regular primaryFill="rgba(250, 0, 0, 0.7)" />}
                             onClick={stopRecording}
                         />
