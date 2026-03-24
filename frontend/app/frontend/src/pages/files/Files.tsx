@@ -146,6 +146,7 @@ const Files = () => {
         activeFolderIdRef.current = activeFolderId;
         loadFiles();
         setSelected(new Set());
+        setPreviewFile(null);
         // Fetch recursive file count + subfolder breakdown
         setRecursiveFileCount(null);
         setSubfolderCounts([]);
@@ -521,30 +522,7 @@ const Files = () => {
                     onDeleteAnalysis={handleDeleteAnalysis}
                 />
 
-                <div className={styles.contentArea} ref={(el) => {
-                    // DEBUG: remove after fixing width issue
-                    if (!el) return;
-                    const badge = document.getElementById('__dbg_w');
-                    const update = () => {
-                        const w = el.getBoundingClientRect().width;
-                        const sw = el.scrollWidth;
-                        const kids = Array.from(el.children).map(c => {
-                            const cn = (c as HTMLElement).className?.split(' ').map((s: string) => s.replace(/.*_/, '')).join(' ') || c.tagName;
-                            return `${cn}:${c.getBoundingClientRect().width.toFixed(0)}`;
-                        }).join(' | ');
-                        const t = `W=${w.toFixed(0)} SW=${sw} [${kids}]`;
-                        if (badge) badge.textContent = t;
-                        else {
-                            const d = document.createElement('div');
-                            d.id = '__dbg_w';
-                            d.style.cssText = 'position:fixed;bottom:4px;right:4px;background:red;color:#fff;font:11px monospace;padding:4px 8px;z-index:99999;border-radius:4px;max-width:90vw;overflow:hidden;white-space:nowrap';
-                            d.textContent = t;
-                            document.body.appendChild(d);
-                        }
-                    };
-                    update();
-                    new ResizeObserver(update).observe(el);
-                }}>
+                <div className={styles.contentArea}>
                     {/* Breadcrumb */}
                     {activeFolderId && (
                         <div className={styles.breadcrumb}>

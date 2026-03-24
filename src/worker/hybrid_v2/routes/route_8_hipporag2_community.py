@@ -275,6 +275,9 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
             monopartite_min_degree = int(os.getenv(
                 "ROUTE7_MONOPARTITE_MIN_DEGREE", "0"
             ).strip())
+            monopartite_edge_weight_mode = os.getenv(
+                "ROUTE7_MONOPARTITE_EDGE_WEIGHT_MODE", "count"
+            ).strip().lower()
             passage_shortcuts = os.getenv(
                 "ROUTE7_PASSAGE_SHORTCUTS", "0"
             ).strip().lower() in {"1", "true", "yes"}
@@ -304,6 +307,7 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
                     monopartite_hub_threshold=monopartite_hub_threshold,
                     monopartite_edge_scaler=monopartite_edge_scaler,
                     monopartite_min_degree=monopartite_min_degree,
+                    monopartite_edge_weight_mode=monopartite_edge_weight_mode,
                     passage_shortcuts=passage_shortcuts,
                 ),
             )
@@ -357,6 +361,10 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
                 return val
             if env_var.startswith("ROUTE7_"):
                 r8_val = os.getenv("ROUTE8_" + env_var[7:])
+                if r8_val is not None:
+                    return r8_val
+            elif env_var.startswith("ROUTE8_"):
+                r8_val = os.getenv(env_var)
                 if r8_val is not None:
                     return r8_val
             if key in preset:

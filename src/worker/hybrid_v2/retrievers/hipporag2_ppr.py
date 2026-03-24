@@ -331,11 +331,16 @@ class HippoRAG2PPR:
         hub_degree_threshold: int = 0,
         edge_scaler: str = "none",
         min_passage_degree: int = 0,
+        edge_weight_mode: str = "count",
     ) -> None:
         """Replace bipartite graph with passage-passage graph.
 
         For each hub entity (degree > hub_degree_threshold), its connected
-        passages become pairwise connected with weight = 1.0 per shared entity.
+        passages become pairwise connected. Edge weight depends on
+        edge_weight_mode:
+          "count"   = raw shared entity count (default)
+          "jaccard"  = |shared| / |union| (Neo4j nodeSimilarity style)
+          "overlap"  = |shared| / min(|set1|, |set2|)
         The hub entity is then disconnected from the walk.
 
         Specific entities (degree ≤ hub_degree_threshold) are kept in the
@@ -395,11 +400,34 @@ class HippoRAG2PPR:
 
         # Compute passage-passage edges from HUB entities only
         pair_weights: Dict[tuple, float] = {}
-        for ent_idx, passages in hub_entities.items():
-            for i in range(len(passages)):
-                for j in range(i + 1, len(passages)):
-                    p1, p2 = min(passages[i], passages[j]), max(passages[i], passages[j])
-                    pair_weights[(p1, p2)] = pair_weights.get((p1, p2), 0.0) + 1.0
+        if edge_weight_mode in ("jaccard", "overlap"):
+            # Build passage → entity set mapping (hub entities only)
+            passage_entity_set: Dict[int, set] = defaultdict(set)
+            for ent_idx, passages in hub_entities.items():
+                for p in passages:
+                    passage_entity_set[p].add(ent_idx)
+            # Compute similarity-weighted edges
+            for ent_idx, passages in hub_entities.items():
+                for i in range(len(passages)):
+                    for j in range(i + 1, len(passages)):
+                        p1, p2 = min(passages[i], passages[j]), max(passages[i], passages[j])
+                        if (p1, p2) not in pair_weights:
+                            shared = passage_entity_set[p1] & passage_entity_set[p2]
+                            if not shared:
+                                continue
+                            if edge_weight_mode == "jaccard":
+                                union = passage_entity_set[p1] | passage_entity_set[p2]
+                                pair_weights[(p1, p2)] = len(shared) / len(union)
+                            else:  # overlap
+                                min_size = min(len(passage_entity_set[p1]), len(passage_entity_set[p2]))
+                                pair_weights[(p1, p2)] = len(shared) / min_size if min_size > 0 else 0.0
+        else:
+            # Raw count: +1.0 per shared entity
+            for ent_idx, passages in hub_entities.items():
+                for i in range(len(passages)):
+                    for j in range(i + 1, len(passages)):
+                        p1, p2 = min(passages[i], passages[j]), max(passages[i], passages[j])
+                        pair_weights[(p1, p2)] = pair_weights.get((p1, p2), 0.0) + 1.0
 
         # Scale shared-entity edge weights
         if edge_scaler == "log":
@@ -580,6 +608,7 @@ class HippoRAG2PPR:
         monopartite_hub_threshold: int = 0,
         monopartite_edge_scaler: str = "none",
         monopartite_min_degree: int = 0,
+        monopartite_edge_weight_mode: str = "count",
         passage_shortcuts: bool = False,
     ) -> None:
         """Load Entity + Sentence nodes and edges from Neo4j.
@@ -634,6 +663,7 @@ class HippoRAG2PPR:
                 hub_degree_threshold=monopartite_hub_threshold,
                 edge_scaler=monopartite_edge_scaler,
                 min_passage_degree=monopartite_min_degree,
+                edge_weight_mode=monopartite_edge_weight_mode,
             )
         elif passage_shortcuts:
             self._add_passage_shortcuts(edge_scaler=monopartite_edge_scaler)
