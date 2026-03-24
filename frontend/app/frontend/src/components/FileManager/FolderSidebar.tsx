@@ -279,7 +279,7 @@ export const FolderSidebar = ({
     return (
         <div className={styles.sidebar}>
             <div className={styles.sidebarHeader}>
-                <span className={styles.sidebarTitle}>{t("files.folders")}</span>
+                <span className={styles.sidebarTitle}></span>
                 <button
                     className={styles.newFolderBtn}
                     onClick={() => { setCreating({ parentId: null }); setNewFolderName(""); }}
