@@ -188,6 +188,7 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
             "max_tokens": None,
             "community_passage_seeds": False,  # APPNP achieves 100% recall — injection redundant
             "community_guided_instruction": False,  # dynamic cutoff handles filtering; guided narrows too aggressively (-24% facts)
+            "rerank": False,  # post-PPR rerank disabled — APPNP already blends reranker predictions with graph structure
             "rerank_dynamic_cutoff": True,   # let reranker score decide which passages survive
             "rerank_relevance_threshold": 0.22,  # 0.22 keeps all ground truth; 0.25 drops borderline cross-topic passages
             "rerank_top_k": 260,  # wide net — Voyage scores all, threshold filters
@@ -343,8 +344,10 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
             "ppr_passage_top_k", "ROUTE7_PPR_PASSAGE_TOP_K",
             str(preset.get("ppr_passage_top_k", 50))
         ))
-        # Reranker: enabled by default — cross-encoder on PPR output improves Q-D10 accuracy
-        rerank_enabled = _ov("rerank", "ROUTE7_RERANK", "1").strip().lower() in {"1", "true", "yes"}
+        # Reranker: post-PPR cross-encoder. Disabled for APPNP (predictions already baked in).
+        rerank_enabled = _ov("rerank", "ROUTE7_RERANK",
+                             "1" if preset.get("rerank", True) else "0"
+                             ).strip().lower() in {"1", "true", "yes"}
         rerank_top_k = int(_ov(
             "rerank_top_k", "ROUTE7_RERANK_TOP_K",
             str(preset.get("rerank_top_k", 30))
@@ -1451,21 +1454,10 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
                 "entity_bridge_reranker_keep", "ROUTE8_ENTITY_BRIDGE_RERANKER_KEEP",
                 "5"
             ))
-            # Per-document minimum: guarantee every document retains at least N
-            # passages so broad queries don't lose entire documents.
-            doc_min = int(_ov(
-                "entity_bridge_doc_min", "ROUTE8_ENTITY_BRIDGE_DOC_MIN",
-                "5"
-            ))
 
-            # Group candidates by document to enforce per-doc floor
+            # Group candidates by document for logging
             from collections import defaultdict as _dd_bridge
             doc_kept_count: Dict[str, int] = _dd_bridge(int)
-            doc_passage_order: Dict[str, List[Tuple[str, float, float]]] = _dd_bridge(list)
-            for sid, score in passage_scores[:ppr_passage_top_k]:
-                doc_id = sid.split("_sent_")[0] if "_sent_" in sid else "unknown"
-                bs = bridge_scores.get(sid, 0.0)
-                doc_passage_order[doc_id].append((sid, score, bs))
 
             # Adaptive: if very few passages have entity bridges, this is
             # a broad/summarisation query where structural filtering hurts.
@@ -1494,8 +1486,7 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
                     bs = bridge_scores.get(sid, 0.0)
                     keep = (
                         bs > 0                              # has entity bridge to query
-                        or rank < reranker_keep_n            # top reranker passages
-                        or doc_kept_count[doc_id] < doc_min  # per-doc floor
+                        or rank < reranker_keep_n            # top-ranked passages
                     )
                     if keep:
                         bridge_kept.append((sid, score))
@@ -1515,7 +1506,6 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
                         coverage=round(coverage, 3),
                         top_bridge=round(max(bridge_scores.values()), 4) if bridge_scores else 0,
                         doc_counts=dict(doc_kept_count),
-                        doc_min=doc_min,
                     )
 
             timings_ms["step_4.8_entity_bridge_ms"] = int(

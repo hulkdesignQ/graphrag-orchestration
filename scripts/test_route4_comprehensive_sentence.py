@@ -216,27 +216,33 @@ def main():
     parser.add_argument("--group-id", default=GROUP_ID, help="Group ID to test")
     parser.add_argument("--response-type", default="comprehensive_sentence",
                         help="Response type (default: comprehensive_sentence)")
+    parser.add_argument("--force-route", default="drift_multi_hop",
+                        help="Force route (default: drift_multi_hop)")
+    parser.add_argument("--query", default=None,
+                        help="Override query (default: built-in invoice-contract query)")
     args = parser.parse_args()
     CLOUD_URL = args.url
     GROUP_ID = args.group_id
+    force_route = args.force_route
+    query = args.query or QUERY
 
     print("=" * 80)
-    print("ROUTE 4 CHALLENGING TEST — Invoice-Contract Consistency")
+    print("COMPREHENSIVE TEST — Invoice-Contract Consistency")
     print("=" * 80)
     print(f"API:           {CLOUD_URL}")
     print(f"Group ID:      {GROUP_ID}")
     print(f"Response Type: {args.response_type}")
-    print(f"Force Route:   drift_multi_hop")
-    print(f"Query:         {QUERY[:100]}...")
+    print(f"Force Route:   {force_route}")
+    print(f"Query:         {query[:100]}...")
     print("=" * 80)
     print()
     
     print("Sending request...")
     status, data, elapsed, raw = make_request(
-        query=QUERY,
+        query=query,
         group_id=GROUP_ID,
         response_type=args.response_type,
-        force_route="drift_multi_hop",
+        force_route=force_route,
     )
     
     print(f"Status: {status}")
@@ -306,17 +312,18 @@ def main():
     
     # Save full response
     timestamp = time.strftime("%Y%m%d_%H%M%S")
-    output_file = f"bench_route4_comprehensive_sentence_{timestamp}.json"
+    route_tag = force_route.replace("_", "-")
+    output_file = f"bench_{route_tag}_comprehensive_sentence_{timestamp}.json"
     with open(output_file, "w") as f:
         json.dump({
             "metadata": {
                 "timestamp": timestamp,
                 "cloud_url": CLOUD_URL,
                 "group_id": GROUP_ID,
-                "response_type": "comprehensive_sentence",
-                "force_route": "drift_multi_hop",
+                "response_type": args.response_type,
+                "force_route": force_route,
                 "latency_seconds": elapsed,
-                "query": QUERY,
+                "query": query,
             },
             "response": data,
             "scoring": scoring,
