@@ -57,7 +57,7 @@
 .uploadZone {
     border: 2px dashed #c4c4c4;
     border-radius: 12px;
-    padding: 24px 16px;
+    padding: 28px 48px;
     text-align: center;
     background: #fff;
     transition: border-color 0.2s, background 0.2s;
@@ -630,7 +630,7 @@
 
 /* Analysis Summary Panel */
 .analysisSummary {
-    background: rgba(0, 113, 227, 0.04);
+    background: rgba(0, 113, 227, 0.06);
     border: 1px solid rgba(0, 113, 227, 0.25);
     border-radius: 10px;
     padding: 14px 18px;
