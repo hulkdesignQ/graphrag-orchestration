@@ -278,23 +278,20 @@ export const FolderSidebar = ({
 
     return (
         <div className={styles.sidebar}>
-            <div className={styles.sidebarHeader}>
-                <span className={styles.sidebarTitle}></span>
-                <button
-                    className={styles.newFolderBtn}
-                    onClick={() => { setCreating({ parentId: null }); setNewFolderName(""); }}
-                    title={t("files.newFolder")}
-                >
-                    +
-                </button>
-            </div>
-
-            {/* Home (root) */}
+            {/* Home (root) + new folder button */}
             <div
                 className={`${styles.folderRow} ${activeFolderId === null ? styles.folderRowActive : ""}`}
                 onClick={() => onSelectFolder(null)}
             >
                 <span className={styles.folderIcon}><Home24Regular /></span>
+                <span style={{ flex: 1 }} />
+                <button
+                    className={styles.newFolderBtn}
+                    onClick={(e) => { e.stopPropagation(); setCreating({ parentId: null }); setNewFolderName(""); }}
+                    title={t("files.newFolder")}
+                >
+                    +
+                </button>
             </div>
 
             {/* Zone 1: Analysis Results */}

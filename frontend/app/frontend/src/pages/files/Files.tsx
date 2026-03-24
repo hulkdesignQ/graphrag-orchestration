@@ -712,7 +712,6 @@ const Files = () => {
                         onRename={(f) => setRenameFile(f)}
                         onMove={(f) => setMoveFile(f)}
                         onPreview={(f) => setPreviewFile(f)}
-                        subfolderCounts={subfolderCounts}
                     />
                 </div>
 
