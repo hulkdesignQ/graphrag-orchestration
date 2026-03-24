@@ -138,6 +138,7 @@ const Files = () => {
         loadFolders();
     }, [loadFiles, loadFolders]);
 
+
     // Re-fetch files when folder selection changes
     useEffect(() => {
         activeFolderNameRef.current = activeFolderId
