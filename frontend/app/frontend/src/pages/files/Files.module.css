@@ -14,17 +14,15 @@
 .mainArea {
     display: flex;
     gap: 16px;
-    flex: 1 1 0%;
+    flex: 1 1 auto;
     min-height: 0;
-    overflow: hidden;
 }
 .contentArea {
-    flex: 1 1 0%;
+    flex: 1 1 0;
     display: flex;
     flex-direction: column;
     gap: 16px;
     min-width: 0;
-    overflow: hidden;
 }
 
 /* Breadcrumb */
@@ -253,17 +251,15 @@
 
 /* ── File List ───────────────────────────────────── */
 .fileListWrapper {
-    flex: 1 1 0%;
-    overflow: auto;
+    flex: 1 1 auto;
+    overflow-y: auto;
     background: #fff;
     border-radius: 12px;
     border: 1px solid #e5e5e5;
-    min-height: 0;
 }
 .fileListTable {
     width: 100%;
     border-collapse: collapse;
-    table-layout: fixed;
 }
 .fileListTable thead th {
     position: sticky;

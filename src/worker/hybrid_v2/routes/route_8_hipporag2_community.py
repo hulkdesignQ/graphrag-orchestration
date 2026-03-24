@@ -257,6 +257,9 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
             include_next_in_section = os.getenv(
                 "ROUTE7_NEXT_IN_SECTION", "0"
             ).strip().lower() in {"1", "true", "yes"}
+            mentions_idf_weighting = os.getenv(
+                "ROUTE7_MENTIONS_IDF_WEIGHTING", "none"
+            ).strip().lower()
 
             # Load triple store and PPR graph in parallel
             triple_store = TripleEmbeddingStore()
@@ -277,6 +280,7 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
                     section_sim_threshold=section_sim_threshold,
                     include_appears_in_section=include_appears_in_section,
                     include_next_in_section=include_next_in_section,
+                    mentions_idf_weighting=mentions_idf_weighting,
                 ),
             )
 

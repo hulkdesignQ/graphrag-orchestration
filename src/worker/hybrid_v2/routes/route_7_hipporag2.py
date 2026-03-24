@@ -1602,20 +1602,9 @@ class HippoRAG2Handler(BaseRouteHandler):
             top_scores=[round(s, 4) for _, s in candidates[:5]],
         )
 
-        # --- DEBUG: trace URL triple through funnel stages ----------------
-        _url_kws = ("portal", "contosolifts", "https ww")
-        def _find_url_rank(cands, stage):
-            for idx, (t, s) in enumerate(cands):
-                if any(kw in t.triple_text.lower() for kw in _url_kws):
-                    logger.info("route7_URL_TRIPLE_DEBUG", stage=stage, rank=idx+1, score=round(s, 4), text=t.triple_text[:120])
-                    return
-            logger.info("route7_URL_TRIPLE_DEBUG", stage=stage, rank="NOT_FOUND", total=len(cands))
-        _find_url_rank(candidates, "stage1_cosine_500")
-
         # Stage 2: Instruction-following reranking with Voyage rerank-2.5
         if triple_rerank and len(candidates) > top_k:
             candidates = await self._rerank_triples(query, candidates, top_k=top_k)
-            _find_url_rank(candidates, "stage2_rerank_15")
 
         # Stage 3: Diversity filter (MMR or legacy LLM recognition memory)
         recognition_mode = os.getenv("ROUTE7_RECOGNITION_MEMORY_MODE", "mmr").strip().lower()
@@ -1623,7 +1612,6 @@ class HippoRAG2Handler(BaseRouteHandler):
         if recognition_mode == "mmr":
             from ..retrievers.triple_store import mmr_diversity_filter
             surviving = mmr_diversity_filter(candidates)
-            _find_url_rank(surviving, "stage3_mmr_7")
         else:
             # Legacy LLM-based recognition memory filter
             llm_client = getattr(self.pipeline.disambiguator, "llm", None)

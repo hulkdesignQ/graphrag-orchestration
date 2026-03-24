@@ -210,6 +210,59 @@ class HippoRAG2PPR:
         self._adj[src_idx].append((tgt_idx, weight))
         self._adj[tgt_idx].append((src_idx, weight))
 
+    def _apply_mentions_idf(self, mode: str) -> None:
+        """Reweight Sentence↔Entity (MENTIONS) edges by inverse entity degree.
+
+        Hub entities like "owner" (deg=41) get their edge weights reduced
+        relative to rare entities (deg=1), dampening hub-driven noise in
+        PPR/APPNP propagation — the Article Rank principle applied to our
+        bipartite passage-entity graph.
+        """
+        import math as _math
+
+        # Compute weight factor per entity node
+        entity_factors: Dict[int, float] = {}
+        for eid, degree in self._entity_mention_counts.items():
+            idx = self._node_to_idx.get(eid)
+            if idx is None:
+                continue
+            if mode == "log":
+                entity_factors[idx] = 1.0 / _math.log(1 + degree)
+            elif mode == "sqrt":
+                entity_factors[idx] = 1.0 / _math.sqrt(degree)
+            elif mode == "inv":
+                entity_factors[idx] = 1.0 / degree
+            else:
+                entity_factors[idx] = 1.0
+
+        if not entity_factors:
+            return
+
+        # Rebuild adjacency lists with reweighted MENTIONS edges.
+        # MENTIONS edges connect passage↔entity nodes. We identify them
+        # by checking if exactly one endpoint is an entity node.
+        reweighted = 0
+        for src_idx in range(self._node_count):
+            new_edges = []
+            for tgt_idx, w in self._adj.get(src_idx, []):
+                # Check if this edge connects to an entity with a factor
+                if src_idx in entity_factors:
+                    new_edges.append((tgt_idx, w * entity_factors[src_idx]))
+                    reweighted += 1
+                elif tgt_idx in entity_factors:
+                    new_edges.append((tgt_idx, w * entity_factors[tgt_idx]))
+                    reweighted += 1
+                else:
+                    new_edges.append((tgt_idx, w))
+            self._adj[src_idx] = new_edges
+
+        logger.info(
+            "mentions_idf_reweighting",
+            mode=mode,
+            entities_reweighted=len(entity_factors),
+            edges_reweighted=reweighted,
+        )
+
     def _finalize_graph(self) -> None:
         """Precompute outgoing weight sums and community sizes."""
         for idx in range(self._node_count):
@@ -232,6 +285,7 @@ class HippoRAG2PPR:
         section_sim_threshold: float = 0.5,
         include_appears_in_section: bool = False,
         include_next_in_section: bool = False,
+        mentions_idf_weighting: str = "none",
     ) -> None:
         """Load Entity + Sentence nodes and edges from Neo4j.
 
@@ -249,6 +303,12 @@ class HippoRAG2PPR:
                 edges as shortcuts (bypasses Sentence→Section hop).
             include_next_in_section: Load Sentence→Sentence NEXT_IN_SECTION
                 edges for sequential sentence bridging.
+            mentions_idf_weighting: Reweight MENTIONS edges by inverse entity
+                degree to dampen hub entities (Article Rank principle).
+                "none" = flat weight 1.0 (default, upstream HippoRAG 2).
+                "log"  = weight = 1 / log(1 + degree).
+                "sqrt" = weight = 1 / sqrt(degree).
+                "inv"  = weight = 1 / degree (full Article Rank style).
         """
         t0 = time.perf_counter()
 
@@ -264,6 +324,10 @@ class HippoRAG2PPR:
             include_appears_in_section,
             include_next_in_section,
         )
+
+        # Reweight MENTIONS edges by inverse entity degree (hub dampening).
+        if mentions_idf_weighting != "none":
+            self._apply_mentions_idf(mentions_idf_weighting)
 
         self._finalize_graph()
         self._loaded = True
