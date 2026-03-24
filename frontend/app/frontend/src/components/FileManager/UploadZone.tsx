@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState, DragEvent, ChangeEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { Clock24Regular, Folder24Regular, ArrowUpload24Regular } from "@fluentui/react-icons";
+import { Clock24Regular, ArrowUpload24Regular } from "@fluentui/react-icons";
 import styles from "../../pages/files/Files.module.css";
 
 interface UploadZoneProps {
@@ -10,11 +10,9 @@ interface UploadZoneProps {
     acceptedTypes: string;
     uploadedCount?: number;
     uploadTotal?: number;
-    disabled?: boolean;
-    disabledMessage?: string;
 }
 
-export const UploadZone = ({ onUpload, uploading, progress, acceptedTypes, uploadedCount, uploadTotal, disabled, disabledMessage }: UploadZoneProps) => {
+export const UploadZone = ({ onUpload, uploading, progress, acceptedTypes, uploadedCount, uploadTotal }: UploadZoneProps) => {
     const { t } = useTranslation();
     const [dragOver, setDragOver] = useState(false);
     const inputRef = useRef<HTMLInputElement>(null);
@@ -55,7 +53,6 @@ export const UploadZone = ({ onUpload, uploading, progress, acceptedTypes, uploa
         styles.uploadZone,
         dragOver ? styles.uploadZoneDragOver : "",
         uploading ? styles.uploadZoneUploading : "",
-        disabled ? styles.uploadZoneDisabled : "",
     ]
         .filter(Boolean)
         .join(" ");
@@ -63,15 +60,13 @@ export const UploadZone = ({ onUpload, uploading, progress, acceptedTypes, uploa
     return (
         <div
             className={zoneClass}
-            onDragOver={disabled ? undefined : handleDragOver}
-            onDragLeave={disabled ? undefined : handleDragLeave}
-            onDrop={disabled ? undefined : handleDrop}
-            onClick={disabled ? undefined : handleBrowse}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+            onClick={handleBrowse}
             role="button"
-            tabIndex={disabled ? -1 : 0}
-            onKeyDown={disabled ? undefined : (e) => e.key === "Enter" && handleBrowse()}
-            aria-disabled={disabled}
-            title={disabled ? disabledMessage : undefined}
+            tabIndex={0}
+            onKeyDown={(e) => e.key === "Enter" && handleBrowse()}
         >
             {uploading ? (
                 <>
@@ -86,8 +81,6 @@ export const UploadZone = ({ onUpload, uploading, progress, acceptedTypes, uploa
                     </div>
                     <p className={styles.progressLabel}>{progress}%</p>
                 </>
-            ) : disabled ? (
-                <span className={styles.uploadIcon}><Folder24Regular /></span>
             ) : (
                 <button className={styles.uploadBrowseBtn} onClick={(e) => { e.stopPropagation(); handleBrowse(); }}>
                     <ArrowUpload24Regular />
