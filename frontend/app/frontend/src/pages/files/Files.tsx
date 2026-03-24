@@ -498,17 +498,15 @@ const Files = () => {
 
     return (
         <div className={styles.container}>
-            {/* Upload zone — only shown when a folder is selected */}
-            {activeFolderId && (
-                <UploadZone
-                    onUpload={handleUpload}
-                    uploading={uploading}
-                    progress={uploadProgress}
-                    acceptedTypes={ACCEPTED_FILE_TYPES}
-                    uploadedCount={uploadedCount}
-                    uploadTotal={uploadTotal}
-                />
-            )}
+            {/* Upload zone */}
+            <UploadZone
+                onUpload={handleUpload}
+                uploading={uploading}
+                progress={uploadProgress}
+                acceptedTypes={ACCEPTED_FILE_TYPES}
+                uploadedCount={uploadedCount}
+                uploadTotal={uploadTotal}
+            />
 
             <div className={styles.mainArea}>
                 <FolderSidebar
