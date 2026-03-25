@@ -137,6 +137,94 @@ GROUND_TRUTH: Dict[str, Dict[str, Any]] = {
     },
 }
 
+# ---------------------------------------------------------------------------
+# Q-D (Drift / multi-hop reasoning) retrieval ground truth
+# Same format: (substring_in_passage_text, source_document_substring)
+# ---------------------------------------------------------------------------
+GROUND_TRUTH_QD: Dict[str, Dict[str, Any]] = {
+    "Q-D1": {
+        "query": "If an emergency defect occurs under the warranty (e.g., burst pipe), what is the required notification channel and consequence of delay?",
+        "required": [
+            ("telephone", "WARRANTY"),                        # must telephone builder
+            ("emergency", "WARRANTY"),                        # emergency defect
+            ("promptly notify", "WARRANTY"),                  # failure to promptly notify
+            ("relieves", "WARRANTY"),                         # relieves builder of liability
+        ],
+    },
+    "Q-D2": {
+        "query": "In the property management agreement, what happens to confirmed reservations if the agreement is terminated or the property is sold?",
+        "required": [
+            ("confirmed reservations", "PROPERTY MANAGEMENT"),  # honor confirmed reservations
+            ("terminat", "PROPERTY MANAGEMENT"),                # if terminated
+        ],
+    },
+    "Q-D3": {
+        "query": "Compare 'time windows' across the set: list all explicit day-based timeframes.",
+        "required": [
+            ("sixty (60) day", "PROPERTY MANAGEMENT"),         # 60 days written notice
+            ("3 business days", "purchase_contract"),           # cancellation window
+            ("ten (10)", "HOLDING TANK"),                    # 10 business days to file changes
+            ("60 days", "WARRANTY"),                           # warranty repair timeline / period
+        ],
+    },
+    "Q-D4": {
+        "query": "Which documents mention insurance and what limits are specified?",
+        "required": [
+            ("300,000", "PROPERTY MANAGEMENT"),                # BI limit
+            ("25,000", "PROPERTY MANAGEMENT"),                 # PD limit
+            ("additional insured", "PROPERTY MANAGEMENT"),     # agent named additional insured
+        ],
+    },
+    "Q-D5": {
+        "query": "In the warranty, explain how the 'coverage start' is defined and what must happen before coverage ends.",
+        "required": [
+            ("final settlement", "WARRANTY"),                  # coverage start trigger
+            ("first occup", "WARRANTY"),                       # or first occupies the home
+            ("in writing", "WARRANTY"),                        # claims must be in writing
+        ],
+    },
+    "Q-D6": {
+        "query": "Do the purchase contract total price and the invoice total match? If so, what is that amount?",
+        "required": [
+            ("29,900", "purchase_contract"),                   # purchase contract total
+            ("29,900", "contoso_lifts_invoice"),               # invoice total
+        ],
+    },
+    "Q-D7": {
+        "query": "Which document has the latest explicit date, and what is it?",
+        "required": [
+            ("04/30/2025", "purchase_contract"),               # latest date
+        ],
+    },
+    "Q-D8": {
+        "query": "Across the set, which entity appears in the most different documents: Fabrikam Inc. or Contoso Ltd.?",
+        "required": [
+            ("Fabrikam", "WARRANTY"),                           # Fabrikam in warranty
+            ("Fabrikam", "HOLDING TANK"),                       # Fabrikam in holding tank
+            ("Contoso", "PROPERTY MANAGEMENT"),                 # Contoso in PMA
+            ("Contoso", "HOLDING TANK"),                        # Contoso in holding tank
+        ],
+    },
+    "Q-D9": {
+        "query": "Compare the 'fees' concepts: which doc has a percentage-based fee structure and which has fixed installment payments?",
+        "required": [
+            ("25%", "PROPERTY MANAGEMENT"),                    # PMA leasing commission
+            ("10%", "PROPERTY MANAGEMENT"),                    # PMA management commission
+            ("20,000", "purchase_contract"),                   # 1st installment (signing)
+            ("7,000", "purchase_contract"),                    # 2nd installment (delivery)
+            ("2,900", "purchase_contract"),                    # 3rd installment (completion)
+        ],
+    },
+    "Q-D10": {
+        "query": "List the three different 'risk allocation' statements across the set (risk of loss, liability limitations, non-transferability).",
+        "required": [
+            ("risk", "purchase_contract"),                     # risk of loss after delivery
+            ("negligence", "PROPERTY MANAGEMENT"),             # except gross negligence
+            ("not transferable", "WARRANTY"),                  # warranty non-transferable
+        ],
+    },
+}
+
 
 def query_api(
     url: str,
@@ -213,21 +301,23 @@ def run_evaluation(
     config_overrides: Dict[str, str],
     questions: Optional[List[str]] = None,
     repeats: int = 1,
+    ground_truth: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
-    """Run retrieval evaluation for all Q-G questions."""
+    """Run retrieval evaluation for ground truth questions."""
+    gt_dict = ground_truth or GROUND_TRUTH
     results = {}
     total_found = 0
     total_final_found = 0
     total_required = 0
 
-    qids = questions or sorted(GROUND_TRUTH.keys())
+    qids = questions or sorted(gt_dict.keys())
 
     for qid in qids:
-        if qid not in GROUND_TRUTH:
+        if qid not in gt_dict:
             print(f"  [{qid}] ⚠ Not in ground truth, skipping")
             continue
 
-        gt = GROUND_TRUTH[qid]
+        gt = gt_dict[qid]
         query = gt["query"]
         required = gt["required"]
 
@@ -346,7 +436,7 @@ def main():
     parser.add_argument("--url", default="http://localhost:8888")
     parser.add_argument("--group-id", default="test-5pdfs-v2-fix2")
     parser.add_argument("--force-route", default="hipporag2_community")
-    parser.add_argument("--query-mode", default="community_search")
+    parser.add_argument("--query-mode", default="comprehensive_search")
     parser.add_argument("--config-override", action="append", default=[],
                         help="key=value overrides (repeatable)")
     parser.add_argument("--repeats", type=int, default=1,
@@ -357,6 +447,9 @@ def main():
                         help="Run baseline first, then with overrides")
     parser.add_argument("--json", type=str, default=None,
                         help="Save results to JSON file")
+    parser.add_argument("--question-set", default="Q-G",
+                        choices=["Q-G", "Q-D", "all"],
+                        help="Which question set to evaluate (Q-G=global, Q-D=drift, all=both)")
     args = parser.parse_args()
 
     config_overrides = {}
@@ -365,6 +458,19 @@ def main():
         config_overrides[k] = v
 
     ov_str = " ".join(f"{k}={v}" for k, v in config_overrides.items()) if config_overrides else "(baseline)"
+
+    # Select ground truth based on question set
+    if args.question_set == "Q-D":
+        gt_dict = GROUND_TRUTH_QD
+        gt_label = "Q-D (drift/multi-hop)"
+    elif args.question_set == "all":
+        gt_dict = {**GROUND_TRUTH, **GROUND_TRUTH_QD}
+        gt_label = "Q-G + Q-D (all)"
+    else:
+        gt_dict = GROUND_TRUTH
+        gt_label = "Q-G (global)"
+
+    total_phrases = sum(len(v["required"]) for v in gt_dict.values())
     print(f"\n{'='*70}")
     print(f"PPR Retrieval Evaluator")
     print(f"  URL: {args.url}")
@@ -372,6 +478,7 @@ def main():
     print(f"  Route: {args.force_route} / {args.query_mode}")
     print(f"  Config: {ov_str}")
     print(f"  Repeats: {args.repeats}")
+    print(f"  Question set: {gt_label} ({total_phrases} phrases)")
     print(f"{'='*70}\n")
 
     if args.compare and config_overrides:
@@ -379,7 +486,7 @@ def main():
         print("--- BASELINE (no overrides) ---")
         baseline = run_evaluation(
             args.url, args.group_id, args.force_route, args.query_mode,
-            {}, args.questions, args.repeats,
+            {}, args.questions, args.repeats, ground_truth=gt_dict,
         )
         print(f"\n  Baseline: {baseline['total_found']}/{baseline['total_required']} "
               f"({baseline['overall_pct']:.1f}%)\n")
@@ -388,7 +495,7 @@ def main():
         print(f"--- EXPERIMENT ({ov_str}) ---")
         experiment = run_evaluation(
             args.url, args.group_id, args.force_route, args.query_mode,
-            config_overrides, args.questions, args.repeats,
+            config_overrides, args.questions, args.repeats, ground_truth=gt_dict,
         )
         print(f"\n  Experiment: {experiment['total_found']}/{experiment['total_required']} "
               f"({experiment['overall_pct']:.1f}%)\n")
@@ -397,7 +504,7 @@ def main():
         print("--- COMPARISON ---")
         print(f"  {'QID':<8} {'Baseline':>10} {'Experiment':>12} {'Delta':>8}")
         print(f"  {'-'*40}")
-        for qid in sorted(GROUND_TRUTH.keys()):
+        for qid in sorted(gt_dict.keys()):
             if args.questions and qid not in args.questions:
                 continue
             b = baseline["per_question"].get(qid, {})
@@ -423,7 +530,7 @@ def main():
     else:
         result = run_evaluation(
             args.url, args.group_id, args.force_route, args.query_mode,
-            config_overrides, args.questions, args.repeats,
+            config_overrides, args.questions, args.repeats, ground_truth=gt_dict,
         )
         print(f"\n  PPR recall:      {result['total_found']}/{result['total_required']} "
               f"({result['overall_pct']:.1f}%)")

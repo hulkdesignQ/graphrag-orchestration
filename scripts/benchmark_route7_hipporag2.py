@@ -519,13 +519,13 @@ def main():
     parser.add_argument("--no-auth", action="store_true", default=False, help="Skip authentication (for local testing)")
     parser.add_argument(
         "--force-route", type=str, default=None,
-        choices=["hipporag2_search", "hipporag2_community", "concept_search", "local_search", "global_search", "drift_multi_hop", "auto"],
-        help="Override FORCE_ROUTE (default: hipporag2_search). Use 'hipporag2_community' for Route 8, 'concept_search' for Route 6, 'auto' to use the auto-router without any force_route.",
+        choices=["hipporag2_search", "hipporag2_community", "hipporag2_experimental", "concept_search", "local_search", "global_search", "drift_multi_hop", "auto"],
+        help="Override FORCE_ROUTE (default: hipporag2_search). Use 'hipporag2_community' for Route 8, 'hipporag2_experimental' for Route 9, 'concept_search' for Route 6, 'auto' to use the auto-router without any force_route.",
     )
     parser.add_argument(
         "--query-mode", type=str, default=None,
-        choices=["local_search", "global_search", "drift_multi_hop", "community_search"],
-        help="Route 7 query_mode preset. Use 'local_search' for fast factual (top_k=5, concise), 'global_search' for broad (top_k=15), 'drift_multi_hop' for full context (top_k=20), 'community_search' for community-dominant thematic queries (top_k=20 + community passage seeds). Only applies with force_route=hipporag2_search.",
+        choices=["local_search", "global_search", "drift_multi_hop", "comprehensive_search", "community_search"],
+        help="Route 7 query_mode preset. Use 'local_search' for fast factual (top_k=5, concise), 'global_search' for broad (top_k=15), 'drift_multi_hop' for full context (top_k=20), 'comprehensive_search' for exhaustive cross-doc retrieval (APPNP + LLM dedup). 'community_search' is a backward-compat alias for comprehensive_search.",
     )
     parser.add_argument(
         "--prompt-variant", type=str, default=None,

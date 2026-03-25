@@ -54,7 +54,7 @@ from .pipeline.enhanced_graph_retriever import EnhancedGraphRetriever
 from .router.main import HybridRouter, QueryRoute, DeploymentProfile
 
 # Modular route handlers (Jan 2026 refactor)
-from .routes import LocalSearchHandler, GlobalSearchHandler, DRIFTHandler, UnifiedSearchHandler, ConceptSearchHandler, HippoRAG2Handler, HippoRAG2CommunityHandler
+from .routes import LocalSearchHandler, GlobalSearchHandler, DRIFTHandler, UnifiedSearchHandler, ConceptSearchHandler, HippoRAG2Handler, HippoRAG2CommunityHandler, HippoRAG2ExperimentalHandler
 
 # Import async Neo4j service for native async operations
 try:
@@ -303,6 +303,7 @@ class HybridPipeline:
             QueryRoute.CONCEPT_SEARCH: ConceptSearchHandler(self),
             QueryRoute.HIPPORAG2_SEARCH: HippoRAG2Handler(self),
             QueryRoute.HIPPORAG2_COMMUNITY: HippoRAG2CommunityHandler(self),
+            QueryRoute.HIPPORAG2_EXPERIMENTAL: HippoRAG2ExperimentalHandler(self),
         }
         
         logger.info("hybrid_pipeline_initialized",
@@ -530,6 +531,10 @@ class HybridPipeline:
                 if config_overrides:
                     extra_kwargs["config_overrides"] = config_overrides
             if route == QueryRoute.HIPPORAG2_COMMUNITY:
+                extra_kwargs["query_mode"] = original_route.value
+                if config_overrides:
+                    extra_kwargs["config_overrides"] = config_overrides
+            if route == QueryRoute.HIPPORAG2_EXPERIMENTAL:
                 extra_kwargs["query_mode"] = original_route.value
                 if config_overrides:
                     extra_kwargs["config_overrides"] = config_overrides
@@ -2442,6 +2447,10 @@ Sub-questions:"""
                 if config_overrides:
                     extra_kwargs["config_overrides"] = config_overrides
             if route == QueryRoute.HIPPORAG2_COMMUNITY:
+                extra_kwargs["query_mode"] = query_mode or route.value
+                if config_overrides:
+                    extra_kwargs["config_overrides"] = config_overrides
+            if route == QueryRoute.HIPPORAG2_EXPERIMENTAL:
                 extra_kwargs["query_mode"] = query_mode or route.value
                 if config_overrides:
                     extra_kwargs["config_overrides"] = config_overrides

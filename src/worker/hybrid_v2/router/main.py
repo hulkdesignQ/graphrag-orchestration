@@ -100,6 +100,7 @@ class QueryRoute(Enum):
     CONCEPT_SEARCH = "concept_search"       # Route 6: Concept search (direct community synthesis)
     HIPPORAG2_SEARCH = "hipporag2_search"  # Route 7: True HippoRAG 2 architecture
     HIPPORAG2_COMMUNITY = "hipporag2_community"  # Route 8: HippoRAG 2 + community seeding (experimental)
+    HIPPORAG2_EXPERIMENTAL = "hipporag2_experimental"  # Route 9: HippoRAG 2 experimental fork
 
 
 class DeploymentProfile(Enum):

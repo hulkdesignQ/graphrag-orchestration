@@ -500,8 +500,12 @@ def main() -> int:
     ap.add_argument("--synthesis-model", type=str, default=None, help="Override synthesis model (e.g. gpt-4.1, gpt-4.1-mini)")
     ap.add_argument("--include-context", action="store_true", default=False, help="Include full LLM context (retrieved evidence) in benchmark output for debugging")
     ap.add_argument("--force-route", default="global_search",
-                    choices=["global_search", "unified_search", "concept_search", "hipporag2_search"],
-                    help="Route to force (global_search=Route3, unified_search=Route5, concept_search=Route6, hipporag2_search=Route7)")
+                    choices=["global_search", "unified_search", "concept_search", "hipporag2_search", "hipporag2_community", "hipporag2_experimental"],
+                    help="Route to force (global_search=Route3, unified_search=Route5, concept_search=Route6, hipporag2_search=Route7, hipporag2_community=Route8, hipporag2_experimental=Route9)")
+    ap.add_argument("--query-mode", type=str, default=None,
+                    help="Query mode preset (e.g. comprehensive_search)")
+    ap.add_argument("--config-override", action="append", default=[],
+                    help="key=value config overrides (repeatable)")
     args = ap.parse_args()
 
     base_url = str(args.url).rstrip("/")
@@ -543,6 +547,12 @@ def main() -> int:
     if "concept" in force_route:
         route_label = "Route 6 (Concept)"
         scenario_name = "hybrid_concept_summary"
+    elif "hipporag2_community" in force_route:
+        route_label = "Route 8 (HippoRAG 2 Community)"
+        scenario_name = "route8_hipporag2_community_summary"
+    elif "hipporag2_experimental" in force_route:
+        route_label = "Route 9 (HippoRAG 2 Experimental)"
+        scenario_name = "route9_hipporag2_experimental_summary"
     elif "hipporag2" in force_route:
         route_label = "Route 7 (HippoRAG 2)"
         scenario_name = "route7_hipporag2_global_summary"
@@ -554,11 +564,22 @@ def main() -> int:
         scenario_name = "hybrid_global_summary"
     response_type = "summary"
 
+    # Parse config overrides
+    config_overrides = {}
+    for ov in args.config_override:
+        if "=" in ov:
+            k, v = ov.split("=", 1)
+            config_overrides[k] = v
+
     stamp = _now_utc_stamp()
     out_dir = Path(__file__).resolve().parents[1] / "benchmarks"
     out_dir.mkdir(parents=True, exist_ok=True)
     if "concept" in force_route:
         route_prefix = "route6"
+    elif "hipporag2_community" in force_route:
+        route_prefix = "route8"
+    elif "hipporag2_experimental" in force_route:
+        route_prefix = "route9"
     elif "hipporag2" in force_route:
         route_prefix = "route7"
     elif "unified" in force_route:
@@ -610,13 +631,18 @@ def main() -> int:
             )
             payload = {
                 "query": effective_query,
+                "group_id": group_id,
                 "force_route": force_route,
                 "response_type": response_type,
             }
+            if args.query_mode:
+                payload["query_mode"] = args.query_mode
             if args.synthesis_model:
                 payload["synthesis_model"] = args.synthesis_model
             if args.include_context:
                 payload["include_context"] = True
+            if config_overrides:
+                payload["config_overrides"] = config_overrides
 
             status, resp, elapsed_s, err = _http_post_json(
                 url=endpoint,
