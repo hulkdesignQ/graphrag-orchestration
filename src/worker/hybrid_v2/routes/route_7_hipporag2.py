@@ -205,7 +205,7 @@ class HippoRAG2Handler(BaseRouteHandler):
             "prompt_variant": None,
             "max_tokens": None,
         },
-        "community_search": {          # Community-dominant (abstract themes, exhaustive)
+        "comprehensive_search": {      # APPNP Neural PPR — exhaustive cross-doc retrieval
             "ppr_passage_top_k": 100,  # wider net — dynamic reranker handles filtering
             "prompt_variant": None,
             "max_tokens": None,
@@ -302,7 +302,11 @@ class HippoRAG2Handler(BaseRouteHandler):
         t_route_start = time.perf_counter()
 
         # Apply query_mode preset (router-adaptive parameters)
-        preset = self.QUERY_MODE_PRESETS.get(query_mode or "", {})
+        # Backward compat: "community_search" → "comprehensive_search"
+        _qm = query_mode or ""
+        if _qm == "community_search":
+            _qm = "comprehensive_search"
+        preset = self.QUERY_MODE_PRESETS.get(_qm, {})
         _co = config_overrides or {}
 
         # Config from env, with per-request overrides taking precedence
@@ -348,7 +352,7 @@ class HippoRAG2Handler(BaseRouteHandler):
         ).strip().lower() in {"1", "true", "yes"}
 
         # Community passage seeding: Community→Entity→Sentence IDs injected
-        # into passage_seeds for PPR.  Activated by community_search preset
+        # into passage_seeds for PPR.  Activated by comprehensive_search preset
         # or env var.  Gives community-dominant queries thematic coverage.
         community_passage_seeds_enabled = _ov(
             "community_passage_seeds", "ROUTE7_COMMUNITY_PASSAGE_SEEDS",
@@ -1986,7 +1990,7 @@ class HippoRAG2Handler(BaseRouteHandler):
         seen_texts: set[str] = set()
         deduped: list[dict] = []
         for chunk in chunks_list:
-            txt_key = chunk.get("text", "").strip()[:200]
+            txt_key = chunk.get("text", "").strip()
             if txt_key not in seen_texts:
                 seen_texts.add(txt_key)
                 deduped.append(chunk)

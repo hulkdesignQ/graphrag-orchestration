@@ -82,6 +82,7 @@ def call_route3_api(api_url: str, query: str, include_context: bool = True, time
 
     payload = {
         "query": query,
+        "group_id": GROUP_ID,
         "force_route": "global_search",  # Route 3
         "response_type": "summary",
         "include_context": include_context,

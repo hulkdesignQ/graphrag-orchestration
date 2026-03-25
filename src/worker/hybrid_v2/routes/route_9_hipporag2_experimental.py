@@ -3175,7 +3175,7 @@ class HippoRAG2ExperimentalHandler(BaseRouteHandler):
         seen_texts: set[str] = set()
         deduped: list[dict] = []
         for chunk in chunks_list:
-            txt_key = chunk.get("text", "").strip()[:200]
+            txt_key = chunk.get("text", "").strip()
             if txt_key not in seen_texts:
                 seen_texts.add(txt_key)
                 deduped.append(chunk)

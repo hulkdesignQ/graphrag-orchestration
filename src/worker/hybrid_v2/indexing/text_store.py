@@ -55,12 +55,11 @@ class HippoRAGTextUnitStore:
 
 
 class Neo4jTextUnitStore:
-    """Text-unit store backed by Neo4j TextChunk nodes.
+    """Text-unit store backed by Neo4j Sentence nodes (v2/v3) with TextChunk fallback.
 
-    This store preserves Document Intelligence metadata that is persisted on
-    TextChunk.metadata (e.g., section_path, di_section_path, page_number).
-
-    It is intentionally read-only and returns dicts shaped for `EvidenceSynthesizer`.
+    Supports both the current Sentence-based architecture and the legacy
+    TextChunk-based architecture.  Read-only; returns dicts shaped for
+    ``EvidenceSynthesizer``.
     """
 
     def __init__(self, neo4j_driver: Any, *, group_id: str, limit_per_entity: int = 12, folder_id: Optional[str] = None):
@@ -1182,22 +1181,18 @@ class Neo4jTextUnitStore:
         top_k_docs: int,
         max_sentences_per_doc: int,
     ) -> List[Dict[str, Any]]:
-        """Sync implementation: get all documents with sentence spans."""
-        import json
-        
-        # Get all documents with language_spans
+        """Sync implementation: get all documents with Sentence nodes."""
+
         doc_query = """
         MATCH (d:Document {group_id: $group_id})
-        WHERE d.language_spans IS NOT NULL
-        RETURN 
+        RETURN
             d.id AS doc_id,
-            coalesce(d.title, d.source, 'Unknown') AS doc_title,
-            d.language_spans AS language_spans
+            coalesce(d.title, d.source, 'Unknown') AS doc_title
         LIMIT $top_k_docs
         """
-        
+
         results: List[Dict[str, Any]] = []
-        
+
         try:
             with self._driver.session() as session:
                 doc_result = session.run(
@@ -1205,110 +1200,72 @@ class Neo4jTextUnitStore:
                     group_id=self._group_id,
                     top_k_docs=top_k_docs,
                 )
-                docs_with_spans = list(doc_result)
-                
-                if not docs_with_spans:
+                all_docs = list(doc_result)
+
+                if not all_docs:
                     logger.debug(
-                        "get_all_documents_no_language_spans",
+                        "get_all_documents_none_found",
                         group_id=self._group_id,
                     )
                     return []
-                
-                for doc_record in docs_with_spans:
+
+                for doc_record in all_docs:
                     doc_id = doc_record.get("doc_id") or ""
                     doc_title = doc_record.get("doc_title") or "Unknown"
-                    language_spans_raw = doc_record.get("language_spans") or "[]"
-                    
-                    # Get full content from TextChunks
-                    content_query = """
-                    MATCH (c:TextChunk {group_id: $group_id})-[:IN_DOCUMENT]->(d:Document {id: $doc_id, group_id: $group_id})
-                    RETURN c.text AS text, c.chunk_index AS idx
-                    ORDER BY coalesce(c.chunk_index, 0) ASC
+
+                    sent_query = """
+                    MATCH (s:Sentence)-[:IN_DOCUMENT]->(d:Document {id: $doc_id, group_id: $group_id})
+                    WHERE s.group_id = $group_id
+                    RETURN s.text AS text, s.index_in_doc AS idx,
+                           s.page AS page, s.confidence AS confidence
+                    ORDER BY coalesce(s.index_in_doc, 0) ASC
+                    LIMIT $max_sentences
                     """
-                    content_result = session.run(
-                        content_query,
+                    sent_rows = list(session.run(
+                        sent_query,
                         group_id=self._group_id,
                         doc_id=doc_id,
-                    )
-                    
-                    # Reconstruct full document content
-                    # Azure DI spans are relative to original document content.
-                    # Concatenate chunks WITHOUT newlines to match original offsets.
-                    full_content = "".join(
-                        r.get("text") or "" for r in content_result
-                    )
-                    
-                    if not full_content.strip():
+                        max_sentences=max_sentences_per_doc,
+                    ))
+
+                    if not sent_rows:
                         continue
-                    
-                    # Parse language spans
+
                     sentences = []
-                    try:
-                        spans_data = json.loads(language_spans_raw) if isinstance(language_spans_raw, str) else language_spans_raw
-                        
-                        # Handle various formats:
-                        # 1. List with single dict: [{"locale": "en", "spans": [...]}]
-                        # 2. Direct dict: {"locale": "en", "spans": [...]}
-                        # 3. Direct list of spans: [{"offset": 0, "length": 10}, ...]
-                        if isinstance(spans_data, list) and len(spans_data) > 0:
-                            first_item = spans_data[0]
-                            if isinstance(first_item, dict) and "spans" in first_item:
-                                # Format 1: List with single dict containing spans
-                                spans_list = first_item.get("spans", [])
-                                locale = first_item.get("locale", "en")
-                                confidence = first_item.get("confidence", 1.0)
-                            elif isinstance(first_item, dict) and "offset" in first_item:
-                                # Format 3: Direct list of span objects
-                                spans_list = spans_data
-                                locale = "en"
-                                confidence = 1.0
-                            else:
-                                spans_list = []
-                                locale = "en"
-                                confidence = 1.0
-                        elif isinstance(spans_data, dict):
-                            # Format 2: Direct dict with spans
-                            spans_list = spans_data.get("spans", [])
-                            locale = spans_data.get("locale", "en")
-                            confidence = spans_data.get("confidence", 1.0)
-                        else:
-                            spans_list = []
-                            locale = "en"
-                            confidence = 1.0
-                        
-                        for span in spans_list[:max_sentences_per_doc]:
-                            offset = span.get("offset", 0)
-                            length = span.get("length", 0)
-                            
-                            if offset >= 0 and length > 0 and offset + length <= len(full_content):
-                                text = full_content[offset:offset + length]
-                                sentences.append({
-                                    "text": text,
-                                    "offset": offset,
-                                    "length": length,
-                                    "confidence": confidence,
-                                    "locale": locale,
-                                })
-                    except (json.JSONDecodeError, TypeError) as e:
-                        logger.debug("language_spans_parse_error", doc_id=doc_id, error=str(e))
-                    
-                    results.append({
-                        "document_title": doc_title,
-                        "document_id": doc_id,
-                        "sentences": sentences,
-                        "full_content": full_content[:5000],  # Truncate for memory
-                    })
-                
+                    full_parts = []
+                    offset = 0
+                    for r in sent_rows:
+                        text = (r.get("text") or "").strip()
+                        if not text:
+                            continue
+                        sentences.append({
+                            "text": text,
+                            "offset": offset,
+                            "length": len(text),
+                            "confidence": r.get("confidence") or 1.0,
+                            "locale": "en",
+                            "page": r.get("page"),
+                        })
+                        full_parts.append(text)
+                        offset += len(text) + 1
+                    if sentences:
+                        results.append({
+                            "document_title": doc_title,
+                            "document_id": doc_id,
+                            "sentences": sentences,
+                            "full_content": "\n".join(full_parts)[:5000],
+                        })
+
                 logger.info(
                     "get_all_documents_with_sentences",
                     num_docs=len(results),
                     total_sentences=sum(len(d.get("sentences", [])) for d in results),
                     group_id=self._group_id,
                 )
-                
+
         except Exception as e:
             logger.error("get_all_documents_with_sentences_failed", error=str(e), group_id=self._group_id)
-        
+
         return results
 
     def _get_workspace_document_overviews_sync(self, limit: int) -> List[Dict[str, Any]]:

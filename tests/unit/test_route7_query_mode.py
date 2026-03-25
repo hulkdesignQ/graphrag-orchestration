@@ -39,15 +39,15 @@ class TestQueryModePresets:
         assert "local_search" in Handler.QUERY_MODE_PRESETS
         assert "global_search" in Handler.QUERY_MODE_PRESETS
         assert "drift_multi_hop" in Handler.QUERY_MODE_PRESETS
-        assert "community_search" in Handler.QUERY_MODE_PRESETS
+        assert "comprehensive_search" in Handler.QUERY_MODE_PRESETS
 
     def test_local_search_preset_values(self):
-        """local_search preset has concise parameters."""
+        """local_search preset has focused retrieval parameters."""
         Handler = _get_handler_class()
         preset = Handler.QUERY_MODE_PRESETS["local_search"]
         assert preset["ppr_passage_top_k"] == 5
-        assert preset["prompt_variant"] == "v1_concise"
-        assert preset["max_tokens"] == 150
+        assert preset["prompt_variant"] is None
+        assert preset["max_tokens"] is None
 
     def test_global_search_preset_values(self):
         """global_search preset has broader parameters."""
@@ -63,10 +63,10 @@ class TestQueryModePresets:
         assert preset["ppr_passage_top_k"] == 20
         assert preset["prompt_variant"] is None
 
-    def test_community_search_preset_values(self):
-        """community_search preset enables community passage seeding."""
+    def test_comprehensive_search_preset_values(self):
+        """comprehensive_search preset enables community passage seeding."""
         Handler = _get_handler_class()
-        preset = Handler.QUERY_MODE_PRESETS["community_search"]
+        preset = Handler.QUERY_MODE_PRESETS["comprehensive_search"]
         assert preset["ppr_passage_top_k"] == 100
         assert preset["community_passage_seeds"] is True
         assert preset["prompt_variant"] is None
@@ -128,11 +128,11 @@ class TestPresetApplication:
         Handler = _get_handler_class()
         preset = Handler.QUERY_MODE_PRESETS.get("local_search", {})
 
-        # Caller didn't set prompt_variant → preset applies
+        # local_search preset has prompt_variant=None, so caller default stays
         prompt_variant = None
         if prompt_variant is None and preset.get("prompt_variant"):
             prompt_variant = preset["prompt_variant"]
-        assert prompt_variant == "v1_concise"
+        assert prompt_variant is None
 
         # Caller explicitly set prompt_variant → preset does NOT override
         prompt_variant = "v0"

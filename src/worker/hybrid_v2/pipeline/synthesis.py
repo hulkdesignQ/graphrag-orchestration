@@ -2529,6 +2529,7 @@ Response:"""
         simple_patterns = [
             "each document", "every document", "all documents",
             "different documents", "how many documents", "most documents",
+            "across the", "across all",
         ]
         # Regex patterns (for flexible matching)
         regex_patterns = [
@@ -2642,9 +2643,13 @@ Instructions:
 8. **Completeness over brevity.** If the question characterizes a topic one way (e.g. "percentage-based fees") but the evidence shows additional dimensions (e.g. fixed charges alongside percentages), include ALL dimensions — do not limit to the question's framing.
 9. **Expand categories, not count.** When the question lists categories in parentheses (e.g. "risk of loss, liability limitations, non-transferability"), treat each as a CATEGORY that may contain multiple items. List ALL items found in each category — do not cap at the number of categories mentioned.
 10. When the specific information requested is absent from the evidence, **lead with** an explicit statement that it was not found before mentioning any related information.
-11. Entities with different legal names are DIFFERENT entities (e.g. "Contoso Lifts LLC" ≠ "Contoso Ltd."). Do NOT conflate them.
+11. Entities with different legal names are DIFFERENT entities (e.g. "Contoso Lifts LLC" ≠ "Contoso Ltd.", "Fabrikam Construction" ≠ "Fabrikam Inc."). Do NOT conflate them. When the question asks about a specific entity name, match ONLY that exact legal name — a similar or related name on a different document is a DIFFERENT entity.
 12. **Prefer exact lexical matches over semantic paraphrases.** If the question asks about "non-transferability" and the evidence contains a clause saying something "is not transferable", cite THAT clause rather than a loosely related clause (e.g. "may not assign"). Match the question's specific terminology to the evidence's wording.
+13. **TOPIC BROADENING.** Interpret the question's topic broadly to include closely related concepts. For example, "insurance / indemnity / hold harmless" also encompasses risk-of-loss allocation, liability limitations, warranty exclusions, and consequential damage waivers. Report ALL related provisions, not just exact keyword matches.
+14. When listing named parties/organizations, also state their **role or capacity** in each document (e.g. "builder", "owner", "agent", "pumper", "customer", "contractor").
 {document_guidance}
+
+**CRITICAL — BEFORE YOU WRITE YOUR ANSWER:** The evidence below contains chunks from MULTIPLE documents grouped under `=== DOCUMENT: ... ===` headers. Scan ALL groups. If you only covered 1-2 documents, GO BACK and check the remaining groups for relevant facts.
 
 Respond using ONLY bullet points — no summary paragraph, no headers, no preamble:
 

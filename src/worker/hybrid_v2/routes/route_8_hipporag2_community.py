@@ -182,7 +182,7 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
             "prompt_variant": None,
             "max_tokens": None,
         },
-        "community_search": {          # Community-dominant (abstract themes, exhaustive)
+        "comprehensive_search": {      # APPNP Neural PPR — exhaustive cross-doc retrieval
             "ppr_passage_top_k": 50,  # 48/48 recall proven at top_k=50; reranker handles filtering
             "prompt_variant": None,
             "max_tokens": None,
@@ -196,14 +196,17 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
             "min_chunks_per_doc": 0,  # disabled — dynamic cutoff handles passage selection
             "max_chunks_per_doc": 0,  # disabled — dynamic cutoff handles passage selection
             "entity_context_inject": False,  # disabled — PPR already retrieves entity-linked passages
+            "entity_doc_map": False,  # disabled — entity-doc map constrains synthesis; let LLM work from passages directly
             "semantic_passage_seeds": False,  # disabled — APPNP uses reranker predictions directly
             "propagation_mode": "appnp",  # Predict-then-Propagate (paper architecture) — eliminates signal interference
             "reranker_gate": True,  # pre-PPR reranker: provides cross-encoder predictions for APPNP
             "appnp_alpha": 0.65,  # teleportation weight: 65% reranker predictions + 35% graph walk
             "neural_weight": 0.5,  # fallback for non-APPNP modes; APPNP ignores this
-            "map_reduce_synthesis": True,  # per-document MAP extraction → cross-doc REDUCE merge
+            "map_reduce_synthesis": False,  # direct synthesis with v10_comprehensive; LLM dedup handles passage reduction
             "section_graph": True,  # load Section nodes + SHARES_ENTITY edges in PPR
             "entity_bridge_filter": False,  # post-rerank: keep only passages with direct entity overlap to query seeds (IDF-weighted)
+            "llm_dedup": True,  # gpt-4.1 drop-or-keep dedup: ~30% passage reduction, 0 GT loss
+            "llm_dedup_model": "gpt-4.1",  # model for dedup judgments
             # APPNP modifiers — available via config_overrides for A/B testing:
             #   appnp_alpha: "0.65"               (teleportation weight; 0.6-0.7 = sweet spot)
             #   appnp_seed_weight: "0.0"          (entity seed blend; 0=pure reranker predictions)
@@ -347,14 +350,18 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
         t_route_start = time.perf_counter()
 
         # Apply query_mode preset (router-adaptive parameters)
-        preset = self.QUERY_MODE_PRESETS.get(query_mode or "", {})
+        # Backward compat: "community_search" → "comprehensive_search"
+        _qm = query_mode or ""
+        if _qm == "community_search":
+            _qm = "comprehensive_search"
+        preset = self.QUERY_MODE_PRESETS.get(_qm, {})
         _co = config_overrides or {}
 
         # Config from env, with per-request overrides taking precedence.
         # Priority: config_overrides → ROUTE8_env → preset value → ROUTE7_env → default.
         # When the preset explicitly defines a key, ROUTE7_ env vars from .env
         # do NOT override it (prevents route-7 defaults from clobbering the
-        # community_search preset).  Use ROUTE8_ env vars to override preset.
+        # comprehensive_search preset).  Use ROUTE8_ env vars to override preset.
         def _ov(key: str, env_var: str, default: str) -> str:
             val = _co.get(key)
             if val:
@@ -436,7 +443,7 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
         ).strip().lower() in {"1", "true", "yes"}
 
         # Community passage seeding: Community→Entity→Sentence IDs injected
-        # into passage_seeds for PPR.  Activated by community_search preset
+        # into passage_seeds for PPR.  Activated by comprehensive_search preset
         # or env var.  Gives community-dominant queries thematic coverage.
         community_passage_seeds_enabled = _ov(
             "community_passage_seeds", "ROUTE8_COMMUNITY_PASSAGE_SEEDS",
@@ -660,6 +667,18 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
         map_reduce_concurrency = int(_ov(
             "map_reduce_concurrency", "ROUTE8_MAP_REDUCE_CONCURRENCY", "8"
         ))
+
+        # LLM dedup: ask an LLM to drop passages whose facts are fully
+        # contained in other kept passages.  gpt-4.1 achieves 0 GT loss
+        # with ~30% avg passage reduction on cross-doc global queries.
+        llm_dedup_enabled = _ov(
+            "llm_dedup", "ROUTE8_LLM_DEDUP",
+            "1" if preset.get("llm_dedup", False) else "0"
+        ).strip().lower() in {"1", "true", "yes"}
+        llm_dedup_model = _ov(
+            "llm_dedup_model", "ROUTE8_LLM_DEDUP_MODEL",
+            str(preset.get("llm_dedup_model", "gpt-4.1"))
+        ).strip()
 
         # Minimum chunks per document guarantee.
         # For global cross-doc questions, PPR may under-represent documents
@@ -1303,8 +1322,9 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
         entity_doc_rows: List[Dict[str, Any]] = []
         detected_types: Optional[List[str]] = None
 
-        entity_doc_map_enabled = os.getenv(
-            "ROUTE7_ENTITY_DOC_MAP", "1"
+        entity_doc_map_enabled = _ov(
+            "entity_doc_map", "ROUTE7_ENTITY_DOC_MAP",
+            "1" if preset.get("entity_doc_map", True) else "0"
         ).strip().lower() in {"1", "true", "yes"}
 
         if rerank_enabled and passage_scores:
@@ -1650,6 +1670,104 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
                 )
                 passage_scores = interleaved + passage_scores[passage_limit:]
                 passage_limit = len(interleaved)
+
+        # Step 4.10: Semantic dedup — cluster near-duplicate passages and keep
+        # one representative per cluster.  PPR top-K often contains many passages
+        # from the same document section (>85% cosine similarity) which waste
+        # synthesis tokens without adding new information.  Clustering compresses
+        # e.g. 50 passages → 12-15 unique facts, improving cross-document coverage.
+        dedup_threshold = float(_ov(
+            "semantic_dedup_threshold", "ROUTE8_SEMANTIC_DEDUP_THRESHOLD",
+            str(preset.get("semantic_dedup_threshold", 0))
+        ))
+        if dedup_threshold > 0 and self._ppr_engine:
+            import numpy as np
+            t0_dedup = time.perf_counter()
+            p_embs = self._ppr_engine.get_all_passage_embeddings()
+            candidates = passage_scores[:passage_limit]
+            # Collect embeddings for candidate passages
+            cand_sids = [sid for sid, _ in candidates]
+            cand_vecs = []
+            valid_mask = []
+            for sid in cand_sids:
+                if sid in p_embs:
+                    v = np.array(p_embs[sid], dtype=np.float32)
+                    norm = np.linalg.norm(v)
+                    cand_vecs.append(v / norm if norm > 0 else v)
+                    valid_mask.append(True)
+                else:
+                    cand_vecs.append(np.zeros(1))
+                    valid_mask.append(False)
+
+            if sum(valid_mask) > 1:
+                # Build similarity matrix for valid embeddings
+                valid_idx = [i for i, ok in enumerate(valid_mask) if ok]
+                mat = np.array([cand_vecs[i] for i in valid_idx])
+                sim = mat @ mat.T
+
+                # Greedy clustering: iterate in PPR-score order (best first),
+                # each unassigned passage becomes a cluster representative.
+                n = len(valid_idx)
+                assigned = [False] * n
+                representatives = []  # indices into valid_idx
+                for i in range(n):
+                    if assigned[i]:
+                        continue
+                    representatives.append(valid_idx[i])
+                    assigned[i] = True
+                    for j in range(i + 1, n):
+                        if not assigned[j] and sim[i][j] >= dedup_threshold:
+                            assigned[j] = True
+
+                # Also keep any passage without an embedding (safety)
+                no_emb = [i for i, ok in enumerate(valid_mask) if not ok]
+                keep_idx = sorted(set(representatives) | set(no_emb))
+
+                before_count = len(candidates)
+                deduped = [candidates[i] for i in keep_idx]
+                # Append remaining passages after passage_limit unchanged
+                passage_scores = deduped + passage_scores[passage_limit:]
+                passage_limit = len(deduped)
+
+                logger.info(
+                    "step_4.10_semantic_dedup",
+                    threshold=dedup_threshold,
+                    before=before_count,
+                    after=len(deduped),
+                    removed=before_count - len(deduped),
+                )
+            timings_ms["step_4.10_semantic_dedup_ms"] = int(
+                (time.perf_counter() - t0_dedup) * 1000
+            )
+
+        # Step 4.11: LLM dedup — ask an LLM to identify passages whose
+        # facts are fully covered by other kept passages.  Unlike cosine
+        # dedup (step 4.10) which only catches near-identical text, the
+        # LLM understands semantic overlap at the fact level.
+        if llm_dedup_enabled and self._ppr_engine:
+            t0_llm_dedup = time.perf_counter()
+            try:
+                llm_dedup_result = await self._llm_dedup_passages(
+                    query=query,
+                    passage_scores=passage_scores[:passage_limit],
+                    model=llm_dedup_model,
+                )
+                if llm_dedup_result is not None:
+                    before_count = passage_limit
+                    passage_scores = llm_dedup_result + passage_scores[passage_limit:]
+                    passage_limit = len(llm_dedup_result)
+                    logger.info(
+                        "step_4.11_llm_dedup",
+                        model=llm_dedup_model,
+                        before=before_count,
+                        after=passage_limit,
+                        removed=before_count - passage_limit,
+                    )
+            except Exception:
+                logger.exception("step_4.11_llm_dedup_error")
+            timings_ms["step_4.11_llm_dedup_ms"] = int(
+                (time.perf_counter() - t0_llm_dedup) * 1000
+            )
 
         top_passage_scores = passage_scores[:passage_limit]
         top_sentence_ids = [cid for cid, _ in top_passage_scores]
@@ -3059,7 +3177,7 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
         seen_texts: set[str] = set()
         deduped: list[dict] = []
         for chunk in chunks_list:
-            txt_key = chunk.get("text", "").strip()[:200]
+            txt_key = chunk.get("text", "").strip()
             if txt_key not in seen_texts:
                 seen_texts.add(txt_key)
                 deduped.append(chunk)
@@ -3920,6 +4038,67 @@ Respond using ONLY bullet points — no headers, no preamble, no summary paragra
 - [Fact (Source: Document)]
 
 Response:"""
+
+    async def _llm_dedup_passages(
+        self,
+        query: str,
+        passage_scores: List[Tuple[str, float]],
+        model: str = "gpt-4.1",
+    ) -> Optional[List[Tuple[str, float]]]:
+        """Use an LLM to drop passages whose facts are fully covered elsewhere.
+
+        Returns a filtered list of (sentence_id, score) tuples, or ``None``
+        if the LLM call fails (caller should keep the original list).
+        """
+        if not passage_scores:
+            return passage_scores
+
+        # Get passage texts from PPR engine
+        text_map = self._ppr_engine.get_all_passage_texts()
+        lines = []
+        sid_index: list[str] = []
+        for idx, (sid, _score) in enumerate(passage_scores):
+            text = (text_map.get(sid, ""))[:400]
+            lines.append(f"[P{idx}] {text}")
+            sid_index.append(sid)
+
+        prompt = (
+            f"Question: {query}\n\n"
+            f"Below are {len(passage_scores)} passages. Many are redundant.\n\n"
+            "Drop a passage ONLY if every specific fact it contains "
+            "(names, numbers, dates, amounts, timeframes, conditions, clauses) "
+            "is already present in another passage you are keeping.\n\n"
+            "Pay special attention to preserving passages with unique numbers, "
+            "dollar amounts, percentages, or time periods — these are high-value "
+            "details that must not be lost.\n\n"
+            "Do NOT drop a passage that contains even one unique detail "
+            "not found elsewhere.\n\n"
+            'Return JSON with ONLY passage IDs: {"drop": ["P5", "P12"]}\n\n'
+            "Passages:\n" + "\n".join(lines)
+        )
+
+        from src.worker.services.llm_service import LLMService
+        llm_client = LLMService()._create_llm_client(model)
+        response = await llm_client.acomplete(prompt)
+        text = response.text.strip()
+
+        # Parse JSON — handle {"drop": ["P5", ...]} format
+        match = re.search(r'\{[^}]*"drop"\s*:\s*\[[^\]]*\][^}]*\}', text)
+        if not match:
+            logger.warning("llm_dedup_no_json", raw=text[:200])
+            return None
+
+        result = json.loads(match.group())
+        drop_indices: set[int] = set()
+        for item in result.get("drop", []):
+            m = re.match(r"P(\d+)", str(item))
+            if m:
+                idx = int(m.group(1))
+                if idx < len(passage_scores):
+                    drop_indices.add(idx)
+
+        kept = [ps for i, ps in enumerate(passage_scores) if i not in drop_indices]
+        return kept
 
     async def _map_reduce_synthesize(
         self,

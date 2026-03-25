@@ -255,7 +255,7 @@ def main():
     parser.add_argument("--url", default="http://localhost:8888")
     parser.add_argument("--group-id", default="test-5pdfs-v2-fix2")
     parser.add_argument("--force-route", default="hipporag2_community")
-    parser.add_argument("--query-mode", default="community_search")
+    parser.add_argument("--query-mode", default="comprehensive_search")
     parser.add_argument("--config-override", action="append", default=[])
     parser.add_argument("--questions", nargs="+", default=None)
     parser.add_argument("--top", type=int, default=20, help="Show top N passages")
