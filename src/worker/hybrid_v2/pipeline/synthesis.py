@@ -2634,8 +2634,8 @@ Instructions:
    synthesize all relevant information from the evidence even if the text is
    fragmentary or OCR-imperfect. Do NOT refuse when partial evidence is available.
 4. **RESPECT ALL QUALIFIERS** in the question. If the question asks for a specific type, category, or unit:
-   - Include ONLY items matching that qualifier
-   - EXCLUDE items that don't match, even if they seem related
+   - Include ONLY items that the document explicitly describes as or labels under that qualifier
+   - EXCLUDE items that merely relate to the qualifier in practice but are not described as such (e.g. "provide tax ID" is an obligation but NOT a "reporting/record-keeping" obligation; "furnish insurance policy" is an obligation but NOT a "notice/communication" mechanism)
    - If the question specifies a unit (e.g. "day-based"), do NOT include items in other units (weeks, months) even if convertible
 5. Cite sources using ONLY the numbered markers [1], [2], [3], etc. that appear at the start of each evidence chunk. Do NOT invent citation formats — never put document names, file paths, or section names inside square brackets.
 6. **Be EXHAUSTIVE within scope.** Include every distinct fact, clause, obligation, amount, or condition from the evidence that is relevant to the question. Do not summarize multiple distinct items into one bullet — give each its own bullet.
@@ -2645,7 +2645,7 @@ Instructions:
 10. When the specific information requested is absent from the evidence, **lead with** an explicit statement that it was not found before mentioning any related information.
 11. Entities with different legal names are DIFFERENT entities (e.g. "Contoso Lifts LLC" ≠ "Contoso Ltd.", "Fabrikam Construction" ≠ "Fabrikam Inc."). Do NOT conflate them. When the question asks about a specific entity name, match ONLY that exact legal name — a similar or related name on a different document is a DIFFERENT entity.
 12. **Prefer exact lexical matches over semantic paraphrases.** If the question asks about "non-transferability" and the evidence contains a clause saying something "is not transferable", cite THAT clause rather than a loosely related clause (e.g. "may not assign"). Match the question's specific terminology to the evidence's wording.
-13. **TOPIC BROADENING.** Interpret the question's topic broadly to include closely related concepts. For example, "insurance / indemnity / hold harmless" also encompasses risk-of-loss allocation, liability limitations, warranty exclusions, and consequential damage waivers. Report ALL related provisions, not just exact keyword matches.
+13. **TOPIC BROADENING.** Interpret the question's topic broadly to include closely related concepts. For example, "insurance / indemnity / hold harmless" also encompasses risk-of-loss allocation, liability limitations, warranty exclusions, and consequential damage waivers. Report ALL related provisions, not just exact keyword matches. However, do NOT broaden so far that you include items outside the question's category — e.g. general obligations are not "notice mechanisms", and financial requirements are not "reporting/record-keeping".
 14. When listing named parties/organizations, also state their **role or capacity** in each document (e.g. "builder", "owner", "agent", "pumper", "customer", "contractor").
 {document_guidance}
 

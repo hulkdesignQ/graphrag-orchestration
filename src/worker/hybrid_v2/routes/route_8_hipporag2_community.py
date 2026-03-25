@@ -4097,6 +4097,24 @@ Response:"""
                 if idx < len(passage_scores):
                     drop_indices.add(idx)
 
+        # --- Document-coverage guardrail ---
+        # Group passages by document (sentence IDs: doc_<hash>_sent_<N>)
+        doc_passages: dict[str, list[int]] = {}
+        for idx, sid in enumerate(sid_index):
+            doc_id = sid.rsplit("_sent_", 1)[0] if "_sent_" in sid else sid
+            doc_passages.setdefault(doc_id, []).append(idx)
+
+        # If ALL passages from a document are dropped, rescue the highest-ranked one
+        rescued = 0
+        for doc_id, indices in doc_passages.items():
+            if all(i in drop_indices for i in indices):
+                best = min(indices)
+                drop_indices.discard(best)
+                rescued += 1
+
+        if rescued:
+            logger.info("llm_dedup_doc_rescue", rescued_docs=rescued)
+
         kept = [ps for i, ps in enumerate(passage_scores) if i not in drop_indices]
         return kept
 

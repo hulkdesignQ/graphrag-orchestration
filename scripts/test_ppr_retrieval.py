@@ -42,10 +42,13 @@ GROUND_TRUTH: Dict[str, Dict[str, Any]] = {
         "required": [
             ("sixty (60) day", "PROPERTY MANAGEMENT"),       # PMA termination notice
             ("written notice", "PROPERTY MANAGEMENT"),       # PMA: written notice to terminate
+            ("confirmed reservations", "PROPERTY MANAGEMENT"), # PMA: owner honors confirmed reservations
             ("3 business days", "purchase_contract"),        # purchase: cancellation window
             ("deposit is forfeited", "purchase_contract"),   # purchase: forfeiture after window
             ("terminat", "HOLDING TANK"),                    # holding tank: remains until terminated
             ("sells", "WARRANTY"),                           # warranty: terminates if purchaser sells/moves
+            ("one (1) year", "WARRANTY"),                    # warranty: terms terminate 1 year
+            ("survive", "WARRANTY"),                         # warranty: arbitration provisions survive termination
         ],
     },
     "Q-G2": {
@@ -55,19 +58,27 @@ GROUND_TRUTH: Dict[str, Dict[str, Any]] = {
             ("Pocatello", "WARRANTY"),
             ("State of Florida", "purchase_contract"),
             ("State of Hawaii", "PROPERTY MANAGEMENT"),
+            ("SPS 383", "HOLDING TANK"),                     # WI Code SPS 383.21(2)5
+            ("Washburn", "HOLDING TANK"),                    # County of Washburn
         ],
     },
     "Q-G3": {
         "query": "Summarize who pays what across the set (fees/charges/taxes).",
         "required": [
+            ("29900", "contoso_lifts_invoice"),               # invoice total
             ("29,900", "purchase_contract"),                 # purchase price
+            ("20,000", "purchase_contract"),                 # signing installment
             ("25%", "PROPERTY MANAGEMENT"),                  # leasing commission
             ("10%", "PROPERTY MANAGEMENT"),                  # management commission or repair fee
             ("$75", "PROPERTY MANAGEMENT"),                  # advertising fee
             ("$50", "PROPERTY MANAGEMENT"),                  # admin fee
             ("$35", "PROPERTY MANAGEMENT"),                  # scheduling fee
             ("excise tax", "PROPERTY MANAGEMENT"),           # Hawaii excise tax
+            ("$250", "PROPERTY MANAGEMENT"),                 # non-refundable start-up fee
+            ("credit card", "PROPERTY MANAGEMENT"),          # agent deducts credit card fees
             ("pumper", "HOLDING TANK"),                      # owner pays pumper
+            ("no charge", "WARRANTY"),                       # builder repairs at no charge
+            ("one-half", "WARRANTY"),                        # each party pays half arbitration
         ],
     },
     "Q-G4": {
@@ -75,7 +86,13 @@ GROUND_TRUTH: Dict[str, Dict[str, Any]] = {
         "required": [
             ("report", "HOLDING TANK"),                      # pumper submits reports
             ("volumes", "HOLDING TANK"),                     # volumes pumped
+            ("sanitary permit", "HOLDING TANK"),             # sanitary permit number
+            ("disposal", "HOLDING TANK"),                    # disposal sites
+            ("Washburn", "HOLDING TANK"),                    # file with County of Washburn
+            ("ten (10) business days", "HOLDING TANK"),     # file changes within 10 business days
             ("monthly statement", "PROPERTY MANAGEMENT"),    # agent monthly statement
+            ("inspection", "PROPERTY MANAGEMENT"),           # initial property inspection
+            ("inventory", "PROPERTY MANAGEMENT"),            # inventory of furniture/furnishings
         ],
     },
     "Q-G5": {
@@ -84,7 +101,14 @@ GROUND_TRUTH: Dict[str, Dict[str, Any]] = {
             ("arbitration", "WARRANTY"),                     # binding arbitration
             ("small claims", "WARRANTY"),                    # small claims carveout
             ("confidential", "WARRANTY"),                    # confidentiality language
+            ("AAA", "WARRANTY"),                             # administered by AAA
+            ("one-half", "WARRANTY"),                        # each party pays half
+            ("lien", "WARRANTY"),                            # preserved lien/foreclosure remedies
+            ("180", "WARRANTY"),                             # 180-day target completion
+            ("no charge", "WARRANTY"),                       # builder repairs at no charge within 60 days
             ("legal fees", "purchase_contract"),             # legal fees recoverable
+            ("3", "purchase_contract"),                      # 3-day cancellation remedy
+            ("indemnif", "PROPERTY MANAGEMENT"),             # owner indemnifies agent
         ],
     },
     "Q-G6": {
@@ -94,7 +118,11 @@ GROUND_TRUTH: Dict[str, Dict[str, Any]] = {
             ("Fabrikam", "HOLDING TANK"),                    # pumper in holding tank
             ("Contoso", "PROPERTY MANAGEMENT"),              # owner in PMA
             ("Contoso Lifts", "purchase_contract"),          # contractor in purchase
+            ("Contoso Lifts", "contoso_lifts_invoice"),      # issuer in invoice
             ("Walt Flood", "PROPERTY MANAGEMENT"),           # agent in PMA
+            ("Fabrikam Construction", "contoso_lifts_invoice"), # bill-to customer in invoice
+            ("American Arbitration", "WARRANTY"),            # AAA in warranty
+            ("Bayfront", "purchase_contract"),               # job name/site
         ],
     },
     "Q-G7": {
@@ -102,10 +130,16 @@ GROUND_TRUTH: Dict[str, Dict[str, Any]] = {
         "required": [
             ("sixty (60) day", "PROPERTY MANAGEMENT"),       # PMA: 60 days written notice to terminate
             ("written notice", "PROPERTY MANAGEMENT"),       # PMA: written notice requirement
+            ("five (5) business days", "PROPERTY MANAGEMENT"), # PMA: 5 days notification if listed for sale
+            ("Three Hundred", "PROPERTY MANAGEMENT"),        # PMA: prior written approval >$300
             ("certified mail", "WARRANTY"),                  # warranty: certified mail return receipt
             ("phone", "WARRANTY"),                           # warranty: emergency by phone
             ("in writing", "WARRANTY"),                      # warranty: defect notice in writing
+            ("Washburn", "HOLDING TANK"),                    # holding tank: file with County of Washburn
             ("business days", "HOLDING TANK"),               # holding tank: 10 business days filing
+            ("report", "HOLDING TANK"),                      # holding tank: pumper submits reports
+            ("in writing", "purchase_contract"),             # purchase: changes in writing
+            ("assign", "purchase_contract"),                 # purchase: assignment requires written consent
         ],
     },
     "Q-G8": {
@@ -113,8 +147,13 @@ GROUND_TRUTH: Dict[str, Dict[str, Any]] = {
         "required": [
             ("300,000", "PROPERTY MANAGEMENT"),              # BI limit
             ("25,000", "PROPERTY MANAGEMENT"),               # PD limit
+            ("additional insured", "PROPERTY MANAGEMENT"),   # agent named as additional insured
             ("indemnify", "PROPERTY MANAGEMENT"),            # hold harmless/indemnify
             ("negligence", "PROPERTY MANAGEMENT"),           # except gross negligence
+            ("holds risk", "purchase_contract"),              # contractor/customer risk allocation
+            ("consequential", "WARRANTY"),                   # excludes consequential damages
+            ("merchantability", "WARRANTY"),                 # disclaims implied warranties
+            ("Failure to promptly notify", "WARRANTY"),      # failure to notify relieves builder
         ],
     },
     "Q-G9": {
@@ -132,7 +171,8 @@ GROUND_TRUTH: Dict[str, Dict[str, Any]] = {
             ("warranty", "WARRANTY"),                        # warranty doc
             ("servic", "HOLDING TANK"),                      # holding tank servicing
             ("manag", "PROPERTY MANAGEMENT"),                # property management
-            ("purchase", "purchase_contract"),               # purchase contract
+            ("invoice", "contoso_lifts_invoice"),            # invoice doc
+            ("contract", "purchase_contract"),               # purchase contract
         ],
     },
 }
