@@ -284,6 +284,9 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
             passage_shortcuts = os.getenv(
                 "ROUTE7_PASSAGE_SHORTCUTS", "0"
             ).strip().lower() in {"1", "true", "yes"}
+            mentions_cosine_weighting = os.getenv(
+                "ROUTE7_MENTIONS_COSINE_WEIGHTING", "0"
+            ).strip().lower() in {"1", "true", "yes"}
 
             # Load triple store and PPR graph in parallel
             triple_store = TripleEmbeddingStore()
@@ -312,6 +315,7 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
                     monopartite_min_degree=monopartite_min_degree,
                     monopartite_edge_weight_mode=monopartite_edge_weight_mode,
                     passage_shortcuts=passage_shortcuts,
+                    mentions_cosine_weighting=mentions_cosine_weighting,
                 ),
             )
 
@@ -648,6 +652,11 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
             str(preset.get("appnp_norm_mode", "symmetric"))
         ).strip().lower()
 
+        score_log_scaling = _ov(
+            "score_log_scaling", "ROUTE8_SCORE_LOG_SCALING",
+            "1" if preset.get("score_log_scaling", False) else "0"
+        ).strip().lower() in {"1", "true", "yes"}
+
         # Sentence window: preset provides the default; config_overrides / env
         # can still override (e.g. re-enable windowing for local_search).
         sentence_window_enabled = _ov(
@@ -679,6 +688,10 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
             "llm_dedup_model", "ROUTE8_LLM_DEDUP_MODEL",
             str(preset.get("llm_dedup_model", "gpt-4.1"))
         ).strip()
+        llm_dedup_query_blind = _ov(
+            "llm_dedup_query_blind", "ROUTE8_LLM_DEDUP_QUERY_BLIND",
+            "1" if preset.get("llm_dedup_query_blind", True) else "0"
+        ).strip().lower() in {"1", "true", "yes"}
 
         # Minimum chunks per document guarantee.
         # For global cross-doc questions, PPR may under-represent documents
@@ -1249,6 +1262,7 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
                 hub_penalty_alpha=appnp_hub_penalty_alpha,
                 hub_penalty_base=appnp_hub_penalty_base,
                 norm_mode=appnp_norm_mode,
+                score_log_scaling=score_log_scaling,
             )
         elif propagation_mode == "gpr":
             passage_scores, entity_scores = self._ppr_engine.run_gpr(
@@ -1264,6 +1278,8 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
                 symmetric_norm=ppr_symmetric_norm,
                 community_balance=ppr_community_balance,
                 community_balance_alpha=ppr_community_balance_alpha,
+                reranker_predictions=pre_ppr_reranker_scores,
+                score_log_scaling=score_log_scaling,
             )
         else:
             passage_scores, entity_scores = self._ppr_engine.run_ppr(
@@ -1289,6 +1305,8 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
                 reranker_scores=pre_ppr_reranker_scores,
                 reranker_gate_threshold=reranker_gate_threshold,
                 reranker_teleport_weight=reranker_teleport_weight,
+                reranker_predictions=pre_ppr_reranker_scores if reranker_teleport_weight >= 1.0 else None,
+                score_log_scaling=score_log_scaling,
             )
 
         # Bug 3 fix: if PPR produced no passage scores, fall back to raw DPR order
@@ -1751,6 +1769,7 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
                     query=query,
                     passage_scores=passage_scores[:passage_limit],
                     model=llm_dedup_model,
+                    query_blind=llm_dedup_query_blind,
                 )
                 if llm_dedup_result is not None:
                     before_count = passage_limit
@@ -4044,8 +4063,13 @@ Response:"""
         query: str,
         passage_scores: List[Tuple[str, float]],
         model: str = "gpt-4.1",
+        query_blind: bool = True,
     ) -> Optional[List[Tuple[str, float]]]:
         """Use an LLM to drop passages whose facts are fully covered elsewhere.
+
+        When *query_blind* is True (default), the query is **not** shown to
+        the LLM.  This prevents the model from conflating "irrelevant to the
+        question" with "redundant" — it can only judge content overlap.
 
         Returns a filtered list of (sentence_id, score) tuples, or ``None``
         if the LLM call fails (caller should keep the original list).
@@ -4055,27 +4079,83 @@ Response:"""
 
         # Get passage texts from PPR engine
         text_map = self._ppr_engine.get_all_passage_texts()
-        lines = []
         sid_index: list[str] = []
-        for idx, (sid, _score) in enumerate(passage_scores):
-            text = (text_map.get(sid, ""))[:400]
-            lines.append(f"[P{idx}] {text}")
+        for _idx, (sid, _score) in enumerate(passage_scores):
             sid_index.append(sid)
 
-        prompt = (
-            f"Question: {query}\n\n"
-            f"Below are {len(passage_scores)} passages. Many are redundant.\n\n"
-            "Drop a passage ONLY if every specific fact it contains "
-            "(names, numbers, dates, amounts, timeframes, conditions, clauses) "
-            "is already present in another passage you are keeping.\n\n"
-            "Pay special attention to preserving passages with unique numbers, "
-            "dollar amounts, percentages, or time periods — these are high-value "
-            "details that must not be lost.\n\n"
-            "Do NOT drop a passage that contains even one unique detail "
-            "not found elsewhere.\n\n"
-            'Return JSON with ONLY passage IDs: {"drop": ["P5", "P12"]}\n\n'
-            "Passages:\n" + "\n".join(lines)
-        )
+        # Build entity-path context: show WHY each passage was retrieved
+        entity_context = ""
+        if self._ppr_engine and hasattr(self._ppr_engine, 'get_passage_entity_context'):
+            # Get entity seeds used for this query (stored during step 3)
+            entity_seed_names = []
+            if hasattr(self, '_last_entity_seed_names'):
+                entity_seed_names = self._last_entity_seed_names or []
+            path_map = self._ppr_engine.get_passage_entity_context(
+                sid_index, entity_seed_names=entity_seed_names,
+            )
+            # Only include entity annotations inline with each passage
+            # (the LLM sees which entities connect each passage to the query)
+
+        lines = []
+        for idx, (sid, _score) in enumerate(passage_scores):
+            text = (text_map.get(sid, ""))[:400]
+            # Annotate with connecting entities if available
+            if entity_context == "" and self._ppr_engine and hasattr(self._ppr_engine, 'get_passage_entity_context'):
+                entities = path_map.get(sid, [])
+                if entities:
+                    ent_str = ", ".join(entities[:5])
+                    lines.append(f"[P{idx}] [Entities: {ent_str}] {text}")
+                else:
+                    lines.append(f"[P{idx}] {text}")
+            else:
+                lines.append(f"[P{idx}] {text}")
+
+        # Build entity path header
+        entity_header = ""
+        if self._ppr_engine and hasattr(self._ppr_engine, 'get_passage_entity_context'):
+            has_seeds = any("★" in e for ents in path_map.values() for e in ents)
+            if has_seeds:
+                entity_header = (
+                    "GRAPH PROVENANCE — each passage is annotated with the "
+                    "knowledge graph entities that connect it to the query. "
+                    "Entities marked (★) are direct query matches.\n"
+                    "A passage with (★) entities was retrieved because the graph "
+                    "found a direct path from the query. Do NOT drop passages "
+                    "with (★) entities unless truly redundant.\n\n"
+                )
+
+        if query_blind:
+            prompt = (
+                f"Below are {len(passage_scores)} passages retrieved from a document collection. "
+                "Many passages contain overlapping or duplicate content.\n\n"
+                "Your task is PURE DEDUPLICATION — remove passages whose factual content "
+                "is fully covered by other passages you are keeping.\n\n"
+                "Drop a passage ONLY if every specific fact it contains "
+                "(names, numbers, dates, amounts, timeframes, conditions, clauses) "
+                "is already present in another passage you are keeping.\n\n"
+                "Do NOT judge relevance or importance — you have no question to answer. "
+                "Simply identify content overlap.\n\n"
+                "Do NOT drop a passage that contains even one unique detail "
+                "not found elsewhere.\n\n"
+                'Return JSON: {"drop": ["P5", "P12"]}\n\n'
+                "Passages:\n" + "\n".join(lines)
+            )
+        else:
+            prompt = (
+                f"Question: {query}\n\n"
+                f"{entity_header}"
+                f"Below are {len(passage_scores)} passages. Many are redundant.\n\n"
+                "Drop a passage ONLY if every specific fact it contains "
+                "(names, numbers, dates, amounts, timeframes, conditions, clauses) "
+                "is already present in another passage you are keeping.\n\n"
+                "Pay special attention to preserving passages with unique numbers, "
+                "dollar amounts, percentages, or time periods — these are high-value "
+                "details that must not be lost.\n\n"
+                "Do NOT drop a passage that contains even one unique detail "
+                "not found elsewhere.\n\n"
+                'Return JSON with ONLY passage IDs: {"drop": ["P5", "P12"]}\n\n'
+                "Passages:\n" + "\n".join(lines)
+            )
 
         from src.worker.services.llm_service import LLMService
         llm_client = LLMService()._create_llm_client(model)
@@ -4116,6 +4196,13 @@ Response:"""
             logger.info("llm_dedup_doc_rescue", rescued_docs=rescued)
 
         kept = [ps for i, ps in enumerate(passage_scores) if i not in drop_indices]
+        logger.info(
+            "llm_dedup_result",
+            query_blind=query_blind,
+            input_count=len(passage_scores),
+            dropped=len(drop_indices),
+            kept=len(kept),
+        )
         return kept
 
     async def _map_reduce_synthesize(

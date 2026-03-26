@@ -45,7 +45,7 @@ GROUND_TRUTH: Dict[str, Dict[str, Any]] = {
             ("confirmed reservations", "PROPERTY MANAGEMENT"), # PMA: owner honors confirmed reservations
             ("3 business days", "purchase_contract"),        # purchase: cancellation window
             ("deposit is forfeited", "purchase_contract"),   # purchase: forfeiture after window
-            ("terminat", "HOLDING TANK"),                    # holding tank: remains until terminated
+            ("pumper terminates", "HOLDING TANK"),             # holding tank: remains until terminated
             ("sells", "WARRANTY"),                           # warranty: terminates if purchaser sells/moves
             ("one (1) year", "WARRANTY"),                    # warranty: terms terminate 1 year
             ("survive", "WARRANTY"),                         # warranty: arbitration provisions survive termination
@@ -84,10 +84,10 @@ GROUND_TRUTH: Dict[str, Dict[str, Any]] = {
     "Q-G4": {
         "query": "What obligations are explicitly described as reporting / record-keeping?",
         "required": [
-            ("report", "HOLDING TANK"),                      # pumper submits reports
+            ("submit to the County, reports", "HOLDING TANK"), # pumper submits reports to county
             ("volumes", "HOLDING TANK"),                     # volumes pumped
             ("sanitary permit", "HOLDING TANK"),             # sanitary permit number
-            ("disposal", "HOLDING TANK"),                    # disposal sites
+            ("disposal sites", "HOLDING TANK"),               # disposal sites delivered to
             ("Washburn", "HOLDING TANK"),                    # file with County of Washburn
             ("ten (10) business days", "HOLDING TANK"),     # file changes within 10 business days
             ("monthly statement", "PROPERTY MANAGEMENT"),    # agent monthly statement
@@ -104,10 +104,10 @@ GROUND_TRUTH: Dict[str, Dict[str, Any]] = {
             ("AAA", "WARRANTY"),                             # administered by AAA
             ("one-half", "WARRANTY"),                        # each party pays half
             ("lien", "WARRANTY"),                            # preserved lien/foreclosure remedies
-            ("180", "WARRANTY"),                             # 180-day target completion
+            ("180 days", "WARRANTY"),                         # 180-day target completion
             ("no charge", "WARRANTY"),                       # builder repairs at no charge within 60 days
             ("legal fees", "purchase_contract"),             # legal fees recoverable
-            ("3", "purchase_contract"),                      # 3-day cancellation remedy
+            ("3 business days", "purchase_contract"),          # 3-day cancellation remedy
             ("indemnif", "PROPERTY MANAGEMENT"),             # owner indemnifies agent
         ],
     },
@@ -133,13 +133,13 @@ GROUND_TRUTH: Dict[str, Dict[str, Any]] = {
             ("five (5) business days", "PROPERTY MANAGEMENT"), # PMA: 5 days notification if listed for sale
             ("Three Hundred", "PROPERTY MANAGEMENT"),        # PMA: prior written approval >$300
             ("certified mail", "WARRANTY"),                  # warranty: certified mail return receipt
-            ("phone", "WARRANTY"),                           # warranty: emergency by phone
+            ("telephone the Builder", "WARRANTY"),            # warranty: emergency by phone
             ("in writing", "WARRANTY"),                      # warranty: defect notice in writing
             ("Washburn", "HOLDING TANK"),                    # holding tank: file with County of Washburn
             ("business days", "HOLDING TANK"),               # holding tank: 10 business days filing
-            ("report", "HOLDING TANK"),                      # holding tank: pumper submits reports
+            ("submit to the County", "HOLDING TANK"),          # holding tank: pumper submits reports
             ("in writing", "purchase_contract"),             # purchase: changes in writing
-            ("assign", "purchase_contract"),                 # purchase: assignment requires written consent
+            ("may assign this contract", "purchase_contract"), # purchase: assignment requires written consent
         ],
     },
     "Q-G8": {
@@ -168,11 +168,11 @@ GROUND_TRUTH: Dict[str, Dict[str, Any]] = {
     "Q-G10": {
         "query": "Summarize each document's main purpose in one sentence.",
         "required": [
-            ("warranty", "WARRANTY"),                        # warranty doc
-            ("servic", "HOLDING TANK"),                      # holding tank servicing
+            ("Limited Warranty", "WARRANTY"),                  # warranty doc
+            ("holding tank", "HOLDING TANK"),                  # holding tank servicing
             ("manag", "PROPERTY MANAGEMENT"),                # property management
-            ("invoice", "contoso_lifts_invoice"),            # invoice doc
-            ("contract", "purchase_contract"),               # purchase contract
+            ("AMOUNT DUE", "contoso_lifts_invoice"),           # invoice doc
+            ("Contoso Lifts", "purchase_contract"),            # purchase contract
         ],
     },
 }

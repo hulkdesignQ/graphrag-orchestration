@@ -66,6 +66,7 @@ class HippoRAG2PPR:
         self._passage_full_texts: Dict[str, str] = {}  # node_id -> full text (for reranker)
         self._passage_embeddings: Dict[str, List[float]] = {}  # node_id -> embedding vector (for pre-filter)
         self._entity_mention_counts: Dict[str, int] = {}  # entity_id -> # passages mentioning it
+        self._entity_embeddings: Dict[str, List[float]] = {}  # entity_id -> embedding vector
         # Community metadata for community-balanced personalization
         self._community_id: Dict[int, int] = {}  # node_idx -> community_id
         self._community_sizes: Dict[int, int] = {}  # community_id -> member_count
@@ -94,12 +95,175 @@ class HippoRAG2PPR:
         """
         return self._passage_full_texts
 
+    def get_passage_neighbors(self, passage_ids: List[str]) -> Dict[str, List[Tuple[str, float]]]:
+        """Return adjacency list for passages within the given set.
+
+        For each passage, returns its neighbors (also in the set) with edge
+        weights. In monopartite mode, these are overlap-coefficient edges.
+        In bipartite mode, passages connect through shared entities.
+
+        Used to build cluster context for LLM-guided cutoff.
+        """
+        idx_set = set()
+        id_to_idx = {}
+        for sid in passage_ids:
+            idx = self._node_to_idx.get(sid)
+            if idx is not None:
+                idx_set.add(idx)
+                id_to_idx[sid] = idx
+
+        result: Dict[str, List[Tuple[str, float]]] = {}
+        for sid, src_idx in id_to_idx.items():
+            neighbors = []
+            for tgt_idx, weight in self._adj.get(src_idx, []):
+                if tgt_idx in idx_set:
+                    tgt_id = self._idx_to_node[tgt_idx]
+                    neighbors.append((tgt_id, weight))
+            neighbors.sort(key=lambda x: x[1], reverse=True)
+            result[sid] = neighbors
+        return result
+
+    def cluster_passages(
+        self,
+        passage_ids: List[str],
+        min_overlap: float = 0.1,
+    ) -> List[List[str]]:
+        """Group passages into connected clusters based on graph edges.
+
+        Uses simple connected-components on the passage subgraph (edges
+        with weight >= min_overlap). Returns list of clusters, each a
+        list of passage IDs, sorted by cluster size descending.
+        """
+        adj = self.get_passage_neighbors(passage_ids)
+        id_set = set(passage_ids)
+
+        # Union-Find
+        parent: Dict[str, str] = {sid: sid for sid in id_set}
+
+        def find(x: str) -> str:
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        def union(a: str, b: str) -> None:
+            ra, rb = find(a), find(b)
+            if ra != rb:
+                parent[ra] = rb
+
+        for sid, neighbors in adj.items():
+            for tgt_id, weight in neighbors:
+                if weight >= min_overlap and tgt_id in id_set:
+                    union(sid, tgt_id)
+
+        # Collect clusters
+        from collections import defaultdict
+        clusters: Dict[str, List[str]] = defaultdict(list)
+        for sid in passage_ids:
+            if sid in parent:
+                clusters[find(sid)].append(sid)
+
+        sorted_clusters = sorted(clusters.values(), key=len, reverse=True)
+        return sorted_clusters
+
+    def cluster_passages_by_cosine(
+        self,
+        passage_ids: List[str],
+        threshold: float = 0.8,
+    ) -> List[List[str]]:
+        """Group passages by embedding cosine similarity.
+
+        Uses single-linkage clustering: two passages in the same cluster
+        if cosine(emb_a, emb_b) >= threshold. Returns topic-based clusters
+        — much more informative than structural overlap for dedup context.
+        """
+        import numpy as np
+        from collections import defaultdict
+
+        # Normalize embeddings
+        vecs: Dict[str, Any] = {}
+        for sid in passage_ids:
+            emb = self._passage_embeddings.get(sid)
+            if emb is not None:
+                v = np.array(emb, dtype=np.float32)
+                n = np.linalg.norm(v)
+                if n > 0:
+                    vecs[sid] = v / n
+
+        # Union-Find
+        parent: Dict[str, str] = {sid: sid for sid in vecs}
+
+        def find(x: str) -> str:
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        def union(a: str, b: str) -> None:
+            ra, rb = find(a), find(b)
+            if ra != rb:
+                parent[ra] = rb
+
+        sids = list(vecs.keys())
+        for i in range(len(sids)):
+            for j in range(i + 1, len(sids)):
+                sim = float(np.dot(vecs[sids[i]], vecs[sids[j]]))
+                if sim >= threshold:
+                    union(sids[i], sids[j])
+
+        groups: Dict[str, List[str]] = defaultdict(list)
+        for sid in passage_ids:
+            if sid in parent:
+                groups[find(sid)].append(sid)
+
+        return sorted(groups.values(), key=len, reverse=True)
+
     def get_all_passage_embeddings(self) -> Dict[str, List[float]]:
         """Return all passage node IDs mapped to their embedding vectors.
 
         Used for fast cosine pre-filtering before cross-encoder reranking.
         """
         return self._passage_embeddings
+
+    def get_passage_entity_context(
+        self,
+        passage_ids: List[str],
+        entity_seed_names: Optional[List[str]] = None,
+    ) -> Dict[str, List[str]]:
+        """For each passage, return the entity names that connect it to the graph.
+
+        Uses the pre-monopartite entity→passage map so this works even
+        after monopartite projection clears entity edges. If entity_seed_names
+        is provided, marks which connecting entities were query seeds (★).
+
+        Returns: {passage_id: ["entity_name (★)", "other_entity", ...]}
+        """
+        seed_set = set(entity_seed_names or [])
+
+        # Build reverse map: passage_idx → [entity_idx]
+        passage_to_entities: Dict[int, List[int]] = {}
+        for ent_idx, p_indices in self._entity_passage_map.items():
+            for p_idx in p_indices:
+                passage_to_entities.setdefault(p_idx, []).append(ent_idx)
+
+        result: Dict[str, List[str]] = {}
+        for sid in passage_ids:
+            p_idx = self._node_to_idx.get(sid)
+            if p_idx is None:
+                result[sid] = []
+                continue
+            ent_indices = passage_to_entities.get(p_idx, [])
+            names = []
+            for ent_idx in ent_indices:
+                name = self._node_names.get(ent_idx, "?")
+                if name.lower() in {s.lower() for s in seed_set}:
+                    names.append(f"{name} (★)")
+                else:
+                    names.append(name)
+            # Seeds first, then alphabetical
+            names.sort(key=lambda n: (0 if "★" in n else 1, n.lower()))
+            result[sid] = names
+        return result
 
     def cosine_prefilter(
         self,
@@ -154,6 +318,29 @@ class HippoRAG2PPR:
         top_indices = top_indices[np.argsort(scores[top_indices])[::-1]]
 
         return [(ids[i], float(scores[i])) for i in top_indices]
+
+    @staticmethod
+    def _apply_log_scaling(
+        scores: List[Tuple[str, float]],
+    ) -> List[Tuple[str, float]]:
+        """Apply log scaling to compress wide PPR score distributions.
+
+        Transforms raw PPR scores via log(1 + score * C) where C is chosen
+        to map the max score near 1.0. This compresses the typical 1e-1..1e-10
+        PPR range into a narrower band, making score gaps more meaningful for
+        downstream thresholding and dynamic cutoff.
+
+        Ranking order is preserved (log is monotonic).
+        """
+        if not scores:
+            return scores
+        import math as _math
+        max_score = scores[0][1] if scores else 1.0  # already sorted desc
+        if max_score <= 0:
+            return scores
+        # Scale factor: maps max_score to log(1 + 1) ≈ 0.693
+        C = 1.0 / max_score
+        return [(sid, _math.log(1.0 + s * C)) for sid, s in scores]
 
     @property
     def entity_mention_counts(self) -> Dict[str, int]:
@@ -263,6 +450,77 @@ class HippoRAG2PPR:
             "mentions_idf_reweighting",
             mode=mode,
             entities_reweighted=len(entity_factors),
+            edges_reweighted=reweighted,
+        )
+
+    def _apply_mentions_cosine_weighting(self) -> None:
+        """Reweight MENTIONS edges by cosine similarity between sentence and entity embeddings.
+
+        For each Sentence↔Entity edge, computes cosine_similarity(sentence_emb, entity_emb)
+        and uses it as the edge weight. This guides the PPR walker along semantically
+        relevant paths — irrelevant structural connections get near-zero weight.
+
+        Requires both passage_embeddings and entity_embeddings to be loaded.
+        Edges where either embedding is missing keep their current weight.
+        """
+        import numpy as _np
+
+        if not self._passage_embeddings or not self._entity_embeddings:
+            logger.warning(
+                "mentions_cosine_weighting_skipped",
+                reason="missing embeddings",
+                passage_embs=len(self._passage_embeddings),
+                entity_embs=len(self._entity_embeddings),
+            )
+            return
+
+        # Build entity idx → normalized embedding lookup
+        entity_idx_to_emb: Dict[int, _np.ndarray] = {}
+        for eid, emb in self._entity_embeddings.items():
+            idx = self._node_to_idx.get(eid)
+            if idx is not None:
+                v = _np.array(emb, dtype=_np.float32)
+                norm = _np.linalg.norm(v)
+                if norm > 1e-10:
+                    entity_idx_to_emb[idx] = v / norm
+
+        # Build passage idx → normalized embedding lookup
+        passage_idx_to_emb: Dict[int, _np.ndarray] = {}
+        for pid, emb in self._passage_embeddings.items():
+            idx = self._node_to_idx.get(pid)
+            if idx is not None:
+                v = _np.array(emb, dtype=_np.float32)
+                norm = _np.linalg.norm(v)
+                if norm > 1e-10:
+                    passage_idx_to_emb[idx] = v / norm
+
+        reweighted = 0
+        for src_idx in range(self._node_count):
+            new_edges = []
+            for tgt_idx, w in self._adj.get(src_idx, []):
+                # Identify MENTIONS edges: one endpoint is passage, other is entity
+                src_is_passage = src_idx in passage_idx_to_emb
+                src_is_entity = src_idx in entity_idx_to_emb
+                tgt_is_passage = tgt_idx in passage_idx_to_emb
+                tgt_is_entity = tgt_idx in entity_idx_to_emb
+
+                if src_is_passage and tgt_is_entity:
+                    cos_sim = float(passage_idx_to_emb[src_idx] @ entity_idx_to_emb[tgt_idx])
+                    # Clamp to [0.01, 1.0] — zero/negative weights would block flow
+                    new_edges.append((tgt_idx, max(0.01, cos_sim) * w))
+                    reweighted += 1
+                elif src_is_entity and tgt_is_passage:
+                    cos_sim = float(entity_idx_to_emb[src_idx] @ passage_idx_to_emb[tgt_idx])
+                    new_edges.append((tgt_idx, max(0.01, cos_sim) * w))
+                    reweighted += 1
+                else:
+                    new_edges.append((tgt_idx, w))
+            self._adj[src_idx] = new_edges
+
+        logger.info(
+            "mentions_cosine_weighting",
+            entities_with_emb=len(entity_idx_to_emb),
+            passages_with_emb=len(passage_idx_to_emb),
             edges_reweighted=reweighted,
         )
 
@@ -610,6 +868,7 @@ class HippoRAG2PPR:
         monopartite_min_degree: int = 0,
         monopartite_edge_weight_mode: str = "count",
         passage_shortcuts: bool = False,
+        mentions_cosine_weighting: bool = False,
     ) -> None:
         """Load Entity + Sentence nodes and edges from Neo4j.
 
@@ -633,6 +892,9 @@ class HippoRAG2PPR:
                 "log"  = weight = 1 / log(1 + degree).
                 "sqrt" = weight = 1 / sqrt(degree).
                 "inv"  = weight = 1 / degree (full Article Rank style).
+            mentions_cosine_weighting: Reweight MENTIONS edges by cosine
+                similarity between sentence and entity embeddings. Guides
+                the PPR walker along semantically relevant paths.
         """
         t0 = time.perf_counter()
 
@@ -652,6 +914,10 @@ class HippoRAG2PPR:
         # Reweight MENTIONS edges by inverse entity degree (hub dampening).
         if mentions_idf_weighting != "none":
             self._apply_mentions_idf(mentions_idf_weighting)
+
+        # Reweight MENTIONS edges by cosine similarity (semantic path guidance).
+        if mentions_cosine_weighting:
+            self._apply_mentions_cosine_weighting()
 
         # Cap entity degree (structural hub removal).
         if max_entity_degree > 0:
@@ -726,7 +992,8 @@ class HippoRAG2PPR:
                 "MATCH (e:Entity) "
                 "WHERE e.group_id IN $group_ids "
                 "RETURN e.id AS id, e.name AS name, "
-                "e.community_id AS community_id",
+                "e.community_id AS community_id, "
+                "e.entity_embedding AS emb",
                 group_ids=group_ids,
             )
             for record in result:
@@ -734,6 +1001,9 @@ class HippoRAG2PPR:
                 cid = record["community_id"]
                 if cid is not None:
                     self._community_id[idx] = int(cid)
+                emb = record["emb"]
+                if emb is not None:
+                    self._entity_embeddings[record["id"]] = list(emb)
 
             # ----------------------------------------------------------
             # 2. Load Sentence (passage) nodes + embeddings
@@ -1039,6 +1309,8 @@ class HippoRAG2PPR:
         reranker_scores: Optional[Dict[str, float]] = None,
         reranker_gate_threshold: float = 0.0,
         reranker_teleport_weight: float = 0.0,
+        reranker_predictions: Optional[Dict[str, float]] = None,
+        score_log_scaling: bool = False,
     ) -> Tuple[List[Tuple[str, float]], List[Tuple[str, float]]]:
         """Run Personalized PageRank with weighted seeds.
 
@@ -1051,6 +1323,8 @@ class HippoRAG2PPR:
             entity_seeds: {entity_id: weight} — from triple linking.
             passage_seeds: {sentence_id: weight} — from DPR (score * passage_node_weight).
             damping: Damping factor (default 0.5, upstream HippoRAG 2).
+                When reranker_predictions is provided, damping acts as the
+                teleport-back probability to reranker scores (like APPNP's α).
             max_iterations: Max power iteration steps.
             convergence_threshold: L1 convergence threshold.
             dangling_redistribution: If True, mass from dangling nodes
@@ -1104,6 +1378,11 @@ class HippoRAG2PPR:
             reranker_teleport_weight: If > 0, blend reranker scores into
                 PPR personalization vector (like neural_weight but using
                 cross-encoder scores instead of cosine).
+            reranker_predictions: Pre-computed cross-encoder scores
+                {sentence_id: relevance_score}. APPNP-style injection:
+                completely replaces the personalization vector with reranker
+                scores. damping then acts as teleport-back probability
+                (like APPNP's α). Ignores entity_seeds/passage_seeds.
 
         Returns:
             Tuple of:
@@ -1113,6 +1392,111 @@ class HippoRAG2PPR:
         if self._node_count == 0:
             return [], []
 
+        # ── Reranker predictions mode (APPNP-style) ──────────────────
+        # When reranker_predictions provided, use them as the full
+        # personalization vector. damping = teleport probability back
+        # to these predictions (same math as APPNP's α).
+        if reranker_predictions:
+            import numpy as np
+            predictions = np.zeros(self._node_count, dtype=np.float64)
+            passage_count = 0
+            for node_id, score in reranker_predictions.items():
+                idx = self._node_to_idx.get(node_id)
+                if idx is not None:
+                    predictions[idx] = max(score, 0.0)
+                    passage_count += 1
+            pred_sum = predictions.sum()
+            if pred_sum > 0:
+                predictions /= pred_sum
+            else:
+                logger.warning("ppr_reranker_predictions_zero")
+                return [], []
+            personalization = predictions.tolist()
+            logger.info(
+                "ppr_reranker_predictions",
+                passages=passage_count,
+                damping_as_alpha=damping,
+            )
+
+            # Skip all structural/neural personalization — go straight to iteration
+            # Reuse self-loop weight from APPNP for fair comparison
+            self_loop_weight = 1.0
+
+            # Precompute normalization (symmetric by default like APPNP)
+            degree_divisor = np.zeros(self._node_count, dtype=np.float64)
+            for idx in range(self._node_count):
+                d = self._out_weight_sum.get(idx, 0.0) + self_loop_weight
+                degree_divisor[idx] = math.sqrt(d)
+
+            hub_factor_rp: Dict[int, float] = {}
+            effective_hub_mode = hub_penalty_mode
+            if hub_devaluation and hub_penalty_mode == "none":
+                effective_hub_mode = "raw"
+            if effective_hub_mode != "none":
+                for idx in range(self._node_count):
+                    if self._node_types.get(idx) == "entity":
+                        degree = max(len(self._adj.get(idx, [])), 1)
+                        if effective_hub_mode == "log":
+                            hub_factor_rp[idx] = 1.0 / math.log(hub_penalty_base + degree) ** hub_penalty_alpha
+                        elif effective_hub_mode == "raw":
+                            hub_factor_rp[idx] = 1.0 / degree
+
+            # Power iteration: rank = (1-damping)·Â·rank + damping·predictions
+            # (damping here = APPNP's α = teleport probability)
+            alpha = damping  # rename for clarity
+            rank = list(personalization)
+
+            for iteration in range(max_iterations):
+                new_rank = [alpha * personalization[i] for i in range(self._node_count)]
+
+                for src in range(self._node_count):
+                    if rank[src] == 0.0:
+                        continue
+                    d_src = degree_divisor[src]
+
+                    # Self-loop (symmetric norm)
+                    self_share = (1.0 - alpha) * rank[src] * self_loop_weight / (d_src * d_src)
+                    new_rank[src] += self_share
+
+                    for tgt, edge_weight in self._adj.get(src, []):
+                        d_tgt = degree_divisor[tgt]
+                        share = (1.0 - alpha) * rank[src] * edge_weight / (d_src * d_tgt)
+                        if src in hub_factor_rp:
+                            share *= hub_factor_rp[src]
+                        new_rank[tgt] += share
+
+                diff = sum(abs(new_rank[i] - rank[i]) for i in range(self._node_count))
+                rank = new_rank
+                if diff < convergence_threshold:
+                    break
+
+            # Extract scores
+            passage_scores: List[Tuple[str, float]] = []
+            entity_scores: List[Tuple[str, float]] = []
+            for idx in range(self._node_count):
+                node_id = self._idx_to_node[idx]
+                node_type = self._node_types[idx]
+                score = rank[idx]
+                if node_type == "passage":
+                    passage_scores.append((node_id, score))
+                elif node_type == "entity":
+                    name = self._node_names[idx]
+                    entity_scores.append((name, score))
+            passage_scores.sort(key=lambda x: x[1], reverse=True)
+            entity_scores.sort(key=lambda x: x[1], reverse=True)
+            if score_log_scaling:
+                passage_scores = self._apply_log_scaling(passage_scores)
+                entity_scores = self._apply_log_scaling(entity_scores)
+            logger.info(
+                "hipporag2_ppr_reranker_complete",
+                iterations=iteration + 1,
+                damping_as_alpha=damping,
+                hub_penalty=effective_hub_mode,
+                top_passage_score=passage_scores[0][1] if passage_scores else 0.0,
+            )
+            return passage_scores, entity_scores
+
+        # ── Standard PPR (structural seeds) ───────────────────────────
         # Build structural personalization vector (entity + passage seeds)
         structural_p = [0.0] * self._node_count
 
@@ -1433,6 +1817,11 @@ class HippoRAG2PPR:
         passage_scores.sort(key=lambda x: x[1], reverse=True)
         entity_scores.sort(key=lambda x: x[1], reverse=True)
 
+        # Log scaling: compress wide score distribution for better thresholding
+        if score_log_scaling:
+            passage_scores = self._apply_log_scaling(passage_scores)
+            entity_scores = self._apply_log_scaling(entity_scores)
+
         logger.info(
             "hipporag2_ppr_complete",
             iterations=min(iteration + 1, max_iterations) if self._node_count > 0 else 0,
@@ -1445,6 +1834,7 @@ class HippoRAG2PPR:
             community_balance=community_balance,
             community_balance_alpha=community_balance_alpha,
             community_count=len(self._community_sizes),
+            score_log_scaling=score_log_scaling,
             top_passage_score=passage_scores[0][1] if passage_scores else 0.0,
             top_entity_score=entity_scores[0][1] if entity_scores else 0.0,
         )
@@ -1465,6 +1855,7 @@ class HippoRAG2PPR:
         hub_penalty_alpha: float = 1.0,
         hub_penalty_base: float = 2.0,
         norm_mode: str = "symmetric",
+        score_log_scaling: bool = False,
     ) -> Tuple[List[Tuple[str, float]], List[Tuple[str, float]]]:
         """True APPNP: Predict then Propagate (Gasteiger et al., ICLR 2019).
 
@@ -1728,6 +2119,11 @@ class HippoRAG2PPR:
         passage_scores.sort(key=lambda x: x[1], reverse=True)
         entity_scores.sort(key=lambda x: x[1], reverse=True)
 
+        # Log scaling: compress wide score distribution
+        if score_log_scaling:
+            passage_scores = self._apply_log_scaling(passage_scores)
+            entity_scores = self._apply_log_scaling(entity_scores)
+
         logger.info(
             "appnp_complete",
             predictor=predictor_type,
@@ -1735,6 +2131,7 @@ class HippoRAG2PPR:
             iterations=min(iteration + 1, max_iterations) if self._node_count > 0 else 0,
             passages=passage_count,
             seed_weight=seed_weight,
+            score_log_scaling=score_log_scaling,
             top_passage_score=passage_scores[0][1] if passage_scores else 0.0,
             top_entity_score=entity_scores[0][1] if entity_scores else 0.0,
         )
@@ -1755,13 +2152,15 @@ class HippoRAG2PPR:
         symmetric_norm: str = "off",
         community_balance: bool = False,
         community_balance_alpha: float = 0.0,
+        reranker_predictions: Optional[Dict[str, float]] = None,
+        score_log_scaling: bool = False,
     ) -> Tuple[List[Tuple[str, float]], List[Tuple[str, float]]]:
         """GPR-GNN style per-hop weighted propagation (ICLR 2021).
 
         Instead of standard PPR's coupled teleportation+walk loop, this
         separates propagation from aggregation:
 
-        1. H^0 = personalization vector (seed scores)
+        1. H^0 = personalization vector (seed scores or reranker predictions)
         2. H^k = A_norm @ H^(k-1) for k = 1..K  (pure graph walk, no restart)
         3. final = Σ γ_k * H^k  (weighted combination of all hops)
 
@@ -1790,6 +2189,10 @@ class HippoRAG2PPR:
             symmetric_norm: Same as run_ppr.
             community_balance: Same as run_ppr.
             community_balance_alpha: Same as run_ppr.
+            reranker_predictions: Pre-computed cross-encoder scores
+                {sentence_id: relevance_score}. When provided, replaces
+                structural seeds as H⁰. The reranker signal then gets
+                propagated and combined across hops via γ_k weights.
 
         Returns:
             Same as run_ppr: (passage_scores, entity_scores) sorted desc.
@@ -1797,39 +2200,58 @@ class HippoRAG2PPR:
         if self._node_count == 0:
             return [], []
 
-        # Build personalization vector (same as run_ppr structural seeds)
-        personalization = [0.0] * self._node_count
+        # Build H⁰: reranker predictions (if provided) or structural seeds
+        if reranker_predictions:
+            personalization = [0.0] * self._node_count
+            passage_count = 0
+            for node_id, score in reranker_predictions.items():
+                idx = self._node_to_idx.get(node_id)
+                if idx is not None:
+                    personalization[idx] = max(score, 0.0)
+                    passage_count += 1
+            total_p = sum(personalization)
+            if total_p <= 0:
+                logger.warning("gpr_reranker_predictions_zero")
+                return [], []
+            personalization = [p / total_p for p in personalization]
+            logger.info("gpr_reranker_predictions", passages=passage_count)
+        else:
+            # Build personalization vector (structural seeds)
+            personalization = [0.0] * self._node_count
 
-        for node_id, weight in entity_seeds.items():
-            idx = self._node_to_idx.get(node_id)
-            if idx is not None:
-                personalization[idx] += weight
+            for node_id, weight in entity_seeds.items():
+                idx = self._node_to_idx.get(node_id)
+                if idx is not None:
+                    personalization[idx] += weight
 
-        for node_id, weight in passage_seeds.items():
-            idx = self._node_to_idx.get(node_id)
-            if idx is not None:
-                personalization[idx] += weight
+            for node_id, weight in passage_seeds.items():
+                idx = self._node_to_idx.get(node_id)
+                if idx is not None:
+                    personalization[idx] += weight
 
-        # Community-balanced personalization (same logic as run_ppr)
-        if community_balance and self._community_sizes:
-            for idx in range(self._node_count):
-                if personalization[idx] > 0 and idx in self._community_id:
-                    cid = self._community_id[idx]
-                    c_size = self._community_sizes.get(cid, 1)
-                    if community_balance_alpha > 0:
-                        personalization[idx] /= c_size ** community_balance_alpha
-                    else:
-                        personalization[idx] /= math.log(2 + c_size)
+            # Community-balanced personalization (same logic as run_ppr)
+            if community_balance and self._community_sizes:
+                for idx in range(self._node_count):
+                    if personalization[idx] > 0 and idx in self._community_id:
+                        cid = self._community_id[idx]
+                        c_size = self._community_sizes.get(cid, 1)
+                        if community_balance_alpha > 0:
+                            personalization[idx] /= c_size ** community_balance_alpha
+                        else:
+                            personalization[idx] /= math.log(2 + c_size)
 
-        # Normalize personalization to sum to 1
-        total_p = sum(personalization)
-        if total_p <= 0:
-            logger.warning("gpr_no_valid_seeds")
-            return [], []
-        personalization = [p / total_p for p in personalization]
+            # Normalize personalization to sum to 1
+            total_p = sum(personalization)
+            if total_p <= 0:
+                logger.warning("gpr_no_valid_seeds")
+                return [], []
+            personalization = [p / total_p for p in personalization]
 
-        # Precompute effective out-weight sums
-        effective_out_sum = dict(self._out_weight_sum)
+        # Precompute effective out-weight sums (include self-loop for Â = A+I)
+        self_loop_weight = 1.0
+        effective_out_sum = {}
+        for idx in range(self._node_count):
+            effective_out_sum[idx] = self._out_weight_sum.get(idx, 0.0) + self_loop_weight
 
         # Precompute hub penalty factors (entity nodes only)
         hub_factor: Dict[int, float] = {}
@@ -1840,7 +2262,7 @@ class HippoRAG2PPR:
                     if hub_penalty_mode == "log":
                         hub_factor[idx] = 1.0 / math.log(hub_penalty_base + degree) ** hub_penalty_alpha
 
-        # Precompute sqrt for symmetric normalization
+        # Precompute sqrt for symmetric normalization (includes self-loop)
         sqrt_out: Dict[int, float] = {}
         use_symmetric = symmetric_norm in ("all", "entity_only")
         if use_symmetric:
@@ -1849,7 +2271,7 @@ class HippoRAG2PPR:
                 sqrt_out[idx] = math.sqrt(s) if s > 0 else 0.0
 
         # ---- Per-hop propagation (no teleportation restart) ----
-        # H^0 = personalization, H^k = A_norm @ H^(k-1)
+        # H^0 = personalization, H^k = Â_norm @ H^(k-1) where Â = A + I
         hop_results: List[List[float]] = [list(personalization)]  # H^0
         current = list(personalization)
 
@@ -1861,6 +2283,15 @@ class HippoRAG2PPR:
                 out_sum = effective_out_sum.get(src, 0.0)
                 if out_sum == 0.0:
                     continue
+
+                # Self-loop: Â = A + I (renormalization trick from paper)
+                if use_symmetric:
+                    sqrt_src = sqrt_out.get(src, 0.0)
+                    if sqrt_src > 0:
+                        self_share = current[src] * self_loop_weight / (sqrt_src * sqrt_src)
+                        next_hop[src] += self_share
+                else:
+                    next_hop[src] += current[src] * self_loop_weight / out_sum
 
                 for tgt, edge_weight in self._adj[src]:
                     apply_sym = False
@@ -1889,10 +2320,9 @@ class HippoRAG2PPR:
 
                     next_hop[tgt] += share
 
-            # Normalize each hop to sum to 1 to prevent mass explosion/collapse
-            hop_total = sum(next_hop)
-            if hop_total > 0:
-                next_hop = [v / hop_total for v in next_hop]
+            # Paper: NO per-hop normalization. Mass naturally decays/concentrates.
+            # This preserves the signal that different hops carry different mass,
+            # which is exactly what γ_k weights are meant to capture.
 
             hop_results.append(next_hop)
             current = next_hop
@@ -1953,6 +2383,11 @@ class HippoRAG2PPR:
         passage_scores.sort(key=lambda x: x[1], reverse=True)
         entity_scores.sort(key=lambda x: x[1], reverse=True)
 
+        # Log scaling: compress wide score distribution
+        if score_log_scaling:
+            passage_scores = self._apply_log_scaling(passage_scores)
+            entity_scores = self._apply_log_scaling(entity_scores)
+
         logger.info(
             "hipporag2_gpr_complete",
             num_hops=num_hops,
@@ -1962,6 +2397,7 @@ class HippoRAG2PPR:
             hub_penalty=hub_penalty_mode,
             hub_penalty_alpha=hub_penalty_alpha,
             symmetric_norm=symmetric_norm,
+            score_log_scaling=score_log_scaling,
             top_passage_score=passage_scores[0][1] if passage_scores else 0.0,
             top_entity_score=entity_scores[0][1] if entity_scores else 0.0,
         )
