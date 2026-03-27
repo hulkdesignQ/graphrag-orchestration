@@ -1335,6 +1335,80 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
         )
 
         # ------------------------------------------------------------------
+        # Step 4.45: Entity-aware graph-noise discount.
+        #
+        # APPNP propagates reranker scores through the graph.  Hub entities
+        # (e.g. "owner" in 39 passages) can inflate scores for passages that
+        # the cross-encoder rated low and that share no query entities.
+        # This step applies a soft discount:
+        #
+        #   discount = 1.0 - factor × (1 - reranker_agreement) × (1 - entity_overlap)
+        #
+        # where:
+        #   reranker_agreement = norm(pre_ppr_reranker_score) ∈ [0, 1]
+        #   entity_overlap = 1 if passage shares ≥1 entity with query, else 0
+        #   factor = configurable strength (0 = disabled)
+        #
+        # Passages with high reranker score OR entity overlap are unaffected.
+        # Only passages inflated purely by graph propagation get discounted.
+        # ------------------------------------------------------------------
+        entity_discount_factor = float(_ov(
+            "entity_discount_factor", "ROUTE8_ENTITY_DISCOUNT_FACTOR",
+            str(preset.get("entity_discount_factor", 0))
+        ))
+        if entity_discount_factor > 0 and pre_ppr_reranker_scores and self._ppr_engine:
+            t0_ed = time.perf_counter()
+            # Build set of passage IDs that share entities with the query
+            ppr = self._ppr_engine
+            query_entity_idxs = set()
+            for eid in triple_entity_ids:
+                idx = ppr._node_to_idx.get(eid)
+                if idx is not None:
+                    query_entity_idxs.add(idx)
+
+            # Passages reachable from query entities (1-hop in original bipartite)
+            entity_linked_sids: set = set()
+            for eidx in query_entity_idxs:
+                for pidx in ppr._entity_passage_map.get(eidx, []):
+                    sid = ppr._idx_to_node.get(pidx, "")
+                    if sid:
+                        entity_linked_sids.add(sid)
+
+            # Normalise reranker scores to [0, 1]
+            rr_vals = list(pre_ppr_reranker_scores.values())
+            rr_min = min(rr_vals) if rr_vals else 0.0
+            rr_max = max(rr_vals) if rr_vals else 1.0
+            rr_spread = rr_max - rr_min if rr_max > rr_min else 1.0
+
+            discounted = 0
+            new_scores = []
+            for sid, appnp_score in passage_scores:
+                has_entity = sid in entity_linked_sids
+                rr_raw = pre_ppr_reranker_scores.get(sid)
+                if not has_entity and rr_raw is not None:
+                    rr_norm = (rr_raw - rr_min) / rr_spread
+                    discount = 1.0 - entity_discount_factor * (1.0 - rr_norm)
+                    new_scores.append((sid, appnp_score * discount))
+                    discounted += 1
+                else:
+                    new_scores.append((sid, appnp_score))
+            # Re-sort by discounted score
+            new_scores.sort(key=lambda x: x[1], reverse=True)
+            passage_scores = new_scores
+
+            timings_ms["step_4.45_entity_discount_ms"] = int(
+                (time.perf_counter() - t0_ed) * 1000
+            )
+            logger.info(
+                "step_4.45_entity_discount",
+                factor=entity_discount_factor,
+                query_entities=len(query_entity_idxs),
+                entity_linked_passages=len(entity_linked_sids),
+                discounted=discounted,
+                total=len(passage_scores),
+            )
+
+        # ------------------------------------------------------------------
         # Step 4.5: Rerank PPR output with cross-encoder (optional)
         #
         # The cross-encoder (voyage-rerank-2.5) sees query+passage together
@@ -1615,6 +1689,76 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
         if rerank_all_injected > 0:
             # Re-sort by score so injected passages compete fairly
             passage_scores.sort(key=lambda x: x[1], reverse=True)
+
+        # ------------------------------------------------------------------
+        # Adaptive passage limit via reranker score-gap detection.
+        #
+        # The fixed ppr_passage_top_k (e.g. 90) is arbitrary.  The pre-PPR
+        # reranker scored every passage for query relevance independently
+        # of the graph.  We sort those scores descending and look for the
+        # largest relative gap — the natural "elbow" where relevance drops.
+        # passage_limit is then set to include all passages above that gap,
+        # bounded by [min_k, max_k] to prevent extreme values.
+        #
+        # This is query-adaptive: a focused factoid question may cut at 30
+        # passages while a broad cross-document question may expand to 170+.
+        # ------------------------------------------------------------------
+        adaptive_cutoff_enabled = _ov(
+            "adaptive_cutoff", "ROUTE8_ADAPTIVE_CUTOFF",
+            "1" if preset.get("adaptive_cutoff", False) else "0"
+        ).strip().lower() in {"1", "true", "yes"}
+        adaptive_min_k = int(_ov(
+            "adaptive_min_k", "ROUTE8_ADAPTIVE_MIN_K",
+            str(preset.get("adaptive_min_k", 30))
+        ))
+        adaptive_max_k = int(_ov(
+            "adaptive_max_k", "ROUTE8_ADAPTIVE_MAX_K",
+            str(preset.get("adaptive_max_k", 200))
+        ))
+
+        if adaptive_cutoff_enabled and pre_ppr_reranker_scores and len(passage_scores) > adaptive_min_k:
+            t0_ac = time.perf_counter()
+            # Get reranker scores for current APPNP-ranked passages
+            scored = []
+            for sid, appnp_score in passage_scores:
+                rr = pre_ppr_reranker_scores.get(sid)
+                if rr is not None:
+                    scored.append((sid, appnp_score, rr))
+
+            if len(scored) > adaptive_min_k:
+                # Sort by reranker score descending
+                scored.sort(key=lambda x: x[2], reverse=True)
+                rr_sorted = [rr for _, _, rr in scored]
+
+                # Find largest relative gap between consecutive scores
+                # Only search within [min_k, max_k] range
+                best_gap = 0.0
+                best_gap_idx = adaptive_min_k
+                for i in range(adaptive_min_k, min(adaptive_max_k, len(rr_sorted) - 1)):
+                    if rr_sorted[i] > 0:
+                        relative_gap = (rr_sorted[i] - rr_sorted[i + 1]) / rr_sorted[i]
+                    else:
+                        relative_gap = 0.0
+                    if relative_gap > best_gap:
+                        best_gap = relative_gap
+                        best_gap_idx = i + 1  # include everything up to the gap
+
+                old_limit = passage_limit
+                passage_limit = max(adaptive_min_k, min(best_gap_idx, adaptive_max_k))
+
+                logger.info(
+                    "adaptive_cutoff",
+                    old_limit=old_limit,
+                    new_limit=passage_limit,
+                    gap_position=best_gap_idx,
+                    gap_magnitude=round(best_gap, 4),
+                    rr_score_at_cutoff=round(rr_sorted[min(passage_limit, len(rr_sorted)) - 1], 4),
+                    rr_score_at_gap=round(rr_sorted[min(best_gap_idx, len(rr_sorted)) - 1], 4),
+                )
+
+            timings_ms["adaptive_cutoff_ms"] = int(
+                (time.perf_counter() - t0_ac) * 1000
+            )
 
         # Step 4.7: LLM relevance filter — reduce over-inclusion for thematic queries
         # Filters the combined passage pool (PPR + rerank-all) through an LLM
