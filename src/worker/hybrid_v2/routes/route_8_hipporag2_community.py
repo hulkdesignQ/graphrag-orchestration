@@ -1361,21 +1361,38 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
         if entity_discount_factor > 0 and pre_ppr_reranker_scores and self._ppr_engine:
             t0_ed = time.perf_counter()
 
+            # Build rank-normalised scores (0=worst, 1=best) so APPNP and
+            # reranker are on the same scale for comparison.
+            sids_ordered = [sid for sid, _ in passage_scores]
+            appnp_vals = [sc for _, sc in passage_scores]
+            rr_vals = [pre_ppr_reranker_scores.get(sid, 0.0) for sid in sids_ordered]
+
+            def _rank_norm(vals):
+                n = len(vals)
+                if n <= 1:
+                    return [1.0] * n
+                order = sorted(range(n), key=lambda i: vals[i])
+                normed = [0.0] * n
+                for rank, idx in enumerate(order):
+                    normed[idx] = rank / (n - 1)
+                return normed
+
+            appnp_rn = _rank_norm(appnp_vals)
+            rr_rn = _rank_norm(rr_vals)
+
             discounted = 0
             new_scores = []
-            for sid, appnp_score in passage_scores:
-                rr_raw = pre_ppr_reranker_scores.get(sid)
-                if rr_raw is not None and appnp_score > 0:
-                    # boost_ratio: how much of the APPNP score is graph-donated
-                    # 0.0 = score entirely from reranker, 1.0 = entirely from graph
-                    boost_ratio = max(0.0, 1.0 - rr_raw / appnp_score)
-                    discount = 1.0 - entity_discount_factor * boost_ratio
-                    discount = max(discount, 0.0)
-                    new_scores.append((sid, appnp_score * discount))
-                    if boost_ratio > 0.01:
-                        discounted += 1
-                else:
-                    new_scores.append((sid, appnp_score))
+            for i, (sid, appnp_score) in enumerate(passage_scores):
+                # boost_ratio: how much rank the passage gained from graph
+                # propagation beyond what the reranker alone would give.
+                # 0 = reranker rank ≥ APPNP rank (no graph boost)
+                # 1 = reranker says bottom, APPNP says top (max boost)
+                boost_ratio = max(0.0, appnp_rn[i] - rr_rn[i])
+                discount = 1.0 - entity_discount_factor * boost_ratio
+                new_scores.append((sid, appnp_score * discount))
+                if boost_ratio > 0.01:
+                    discounted += 1
+
             # Re-sort by discounted score
             new_scores.sort(key=lambda x: x[1], reverse=True)
             passage_scores = new_scores
