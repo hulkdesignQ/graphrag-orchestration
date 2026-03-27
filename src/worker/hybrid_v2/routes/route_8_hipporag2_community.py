@@ -4206,12 +4206,15 @@ Response:"""
                 "Many passages contain overlapping or duplicate content.\n\n"
                 "Your task is PURE DEDUPLICATION — remove passages whose factual content "
                 "is fully covered by other passages you are keeping.\n\n"
-                "Drop a passage ONLY if every specific fact it contains "
+                "RULES:\n"
+                "1. Drop a passage ONLY if every specific fact it contains "
                 "(names, numbers, dates, amounts, timeframes, conditions, clauses) "
-                "is already present in another passage you are keeping.\n\n"
-                "Do NOT judge relevance or importance — you have no question to answer. "
-                "Simply identify content overlap.\n\n"
-                "Do NOT drop a passage that contains even one unique detail "
+                "is already present in another passage you are KEEPING.\n"
+                "2. When several passages share the same facts, KEEP the most complete "
+                "one and drop the rest — never drop ALL copies.\n"
+                "3. Do NOT judge relevance or importance — you have no question to answer. "
+                "Simply identify content overlap.\n"
+                "4. Do NOT drop a passage that contains even one unique detail "
                 "not found elsewhere.\n\n"
                 'Return JSON: {"drop": ["P5", "P12"]}\n\n'
                 "Passages:\n" + "\n".join(lines)
@@ -4272,12 +4275,14 @@ Response:"""
             logger.info("llm_dedup_doc_rescue", rescued_docs=rescued)
 
         kept = [ps for i, ps in enumerate(passage_scores) if i not in drop_indices]
+        dropped_pindices = sorted(drop_indices)
         logger.info(
             "llm_dedup_result",
             query_blind=query_blind,
             input_count=len(passage_scores),
             dropped=len(drop_indices),
             kept=len(kept),
+            dropped_indices=dropped_pindices,
         )
         return kept
 
