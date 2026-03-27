@@ -205,7 +205,6 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
             "map_reduce_synthesis": False,  # direct synthesis with v10_comprehensive; LLM dedup handles passage reduction
             "section_graph": True,  # load Section nodes + SHARES_ENTITY edges in PPR
             "entity_bridge_filter": False,  # post-rerank: keep only passages with direct entity overlap to query seeds (IDF-weighted)
-            "mmr_lambda": 0.7,  # MMR diversity reranking: 0.7 = relevance-biased, 0 = disabled
             "llm_dedup": True,  # gpt-4.1 drop-or-keep dedup: ~30% passage reduction, 0 GT loss
             "llm_dedup_model": "gpt-4.1",  # model for dedup judgments
             "monopartite": True,  # passage-passage projection via shared entities — critical for recall (+3 phrases)
@@ -1836,107 +1835,9 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
                 passage_scores = interleaved + passage_scores[passage_limit:]
                 passage_limit = len(interleaved)
 
-        # Step 4.10: MMR (Maximal Marginal Relevance) reranking.
-        # PPR top-K often contains many near-duplicate passages from the same
-        # document section.  MMR iteratively selects passages that are both
-        # relevant (high APPNP score) and diverse (low similarity to already-
-        # selected passages).  This replaces greedy cosine dedup with a
-        # principled relevance-diversity trade-off.
-        #
-        # score(p) = λ × norm_appnp(p) - (1-λ) × max_cos_sim(p, selected)
-        #
-        # λ=1.0 = pure relevance (no diversity), λ=0.5 = balanced,
-        # λ=0.0 = pure diversity.  Default 0.7 biases toward relevance
-        # while still suppressing redundant passages.
-        mmr_lambda = float(_ov(
-            "mmr_lambda", "ROUTE8_MMR_LAMBDA",
-            str(preset.get("mmr_lambda", 0))
-        ))
-        if mmr_lambda > 0 and self._ppr_engine:
-            import numpy as np
-            t0_mmr = time.perf_counter()
-            p_embs = self._ppr_engine.get_all_passage_embeddings()
-            candidates = passage_scores[:passage_limit]
-
-            # Collect and normalise passage embeddings
-            cand_sids = [sid for sid, _ in candidates]
-            cand_scores = np.array([sc for _, sc in candidates], dtype=np.float64)
-            cand_vecs = []
-            valid_mask = []
-            for sid in cand_sids:
-                if sid in p_embs:
-                    v = np.array(p_embs[sid], dtype=np.float32)
-                    norm = np.linalg.norm(v)
-                    cand_vecs.append(v / norm if norm > 0 else v)
-                    valid_mask.append(True)
-                else:
-                    cand_vecs.append(np.zeros(1))
-                    valid_mask.append(False)
-
-            n_valid = sum(valid_mask)
-            if n_valid > 1:
-                valid_idx = [i for i, ok in enumerate(valid_mask) if ok]
-                mat = np.array([cand_vecs[i] for i in valid_idx])
-                # Pre-compute pairwise cosine similarities
-                sim = mat @ mat.T
-
-                # Normalise APPNP scores to [0, 1] for valid candidates
-                valid_scores = cand_scores[valid_idx]
-                s_min, s_max = valid_scores.min(), valid_scores.max()
-                if s_max > s_min:
-                    norm_scores = (valid_scores - s_min) / (s_max - s_min)
-                else:
-                    norm_scores = np.ones(len(valid_idx))
-
-                # Greedy MMR selection (vectorized inner loop)
-                n_v = len(valid_idx)
-                lam = mmr_lambda
-                selected_vi: list[int] = []
-                chosen = np.zeros(n_v, dtype=bool)
-                # Track running max similarity to selected set
-                max_sim_to_selected = np.full(n_v, -1.0)
-
-                # First pick: highest APPNP score
-                first = int(np.argmax(norm_scores))
-                selected_vi.append(first)
-                chosen[first] = True
-                max_sim_to_selected = np.maximum(max_sim_to_selected, sim[first])
-
-                for _ in range(n_v - 1):
-                    mmr_scores = lam * norm_scores - (1.0 - lam) * max_sim_to_selected
-                    mmr_scores[chosen] = -np.inf
-                    best_j = int(np.argmax(mmr_scores))
-                    selected_vi.append(best_j)
-                    chosen[best_j] = True
-                    max_sim_to_selected = np.maximum(max_sim_to_selected, sim[best_j])
-
-                # Map back to candidate indices, preserving passages without embeddings
-                selected_orig = [valid_idx[vi] for vi in selected_vi]
-                no_emb = [i for i, ok in enumerate(valid_mask) if not ok]
-                # Insert no-embedding passages at their original positions
-                all_keep = sorted(set(selected_orig) | set(no_emb))
-                # But we want MMR order for valid passages, so: MMR-ordered valids + no-emb at end
-                reordered = [candidates[valid_idx[vi]] for vi in selected_vi]
-                reordered.extend(candidates[i] for i in no_emb)
-
-                before_count = len(candidates)
-                passage_scores = reordered + passage_scores[passage_limit:]
-                passage_limit = len(reordered)
-
-                logger.info(
-                    "step_4.10_mmr_rerank",
-                    mmr_lambda=lam,
-                    before=before_count,
-                    after=len(reordered),
-                )
-            timings_ms["step_4.10_mmr_ms"] = int(
-                (time.perf_counter() - t0_mmr) * 1000
-            )
-
         # Step 4.11: LLM dedup — ask an LLM to identify passages whose
-        # facts are fully covered by other kept passages.  Unlike cosine
-        # dedup (step 4.10) which only catches near-identical text, the
-        # LLM understands semantic overlap at the fact level.
+        # facts are fully covered by other kept passages.  The LLM
+        # understands semantic overlap at the fact level.
         if llm_dedup_enabled and self._ppr_engine:
             t0_llm_dedup = time.perf_counter()
             try:
