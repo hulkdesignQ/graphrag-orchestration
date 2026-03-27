@@ -27,7 +27,7 @@ export const FileList = ({ files, selected, loading, onToggleSelect, onDelete, o
     }
 
     if (files.length === 0) {
-        return <div className={styles.fileListWrapper} />;
+        return <div className={styles.fileListWrapper}>{t("files.noFilesYet")}</div>;
     }
 
     const getExt = (name: string) => {
