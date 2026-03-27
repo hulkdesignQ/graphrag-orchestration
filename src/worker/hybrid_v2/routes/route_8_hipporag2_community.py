@@ -431,6 +431,14 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
             preset.get("rerank_instruction", "")
         ).strip()
 
+        # Context predictor: use voyage-context-3 contextualized_embed() with query
+        # as document context. Re-embeds all passages at query time so cosine scores
+        # reflect query-passage relevance (multi-hop aware). Replaces reranker gate.
+        context_predictor_enabled = _ov(
+            "context_predictor", "ROUTE8_CONTEXT_PREDICTOR",
+            "1" if preset.get("context_predictor", False) else "0"
+        ).strip().lower() in {"1", "true", "yes"}
+
         # Preset can override prompt_variant (only if caller didn't explicitly set one)
         if prompt_variant is None and preset.get("prompt_variant"):
             prompt_variant = preset["prompt_variant"]
@@ -1243,6 +1251,30 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
             )
 
         # ------------------------------------------------------------------
+        # Step 3.6: Context predictor (voyage-context-3 with query as context)
+        # ------------------------------------------------------------------
+        context_predictor_scores: Optional[Dict[str, float]] = None
+        if context_predictor_enabled:
+            t0_ctx = time.perf_counter()
+            try:
+                context_predictor_scores = await self._context_predictor_scores(
+                    query, user_id=user_id,
+                )
+                logger.info(
+                    "context_predictor_computed",
+                    passages_scored=len(context_predictor_scores),
+                    elapsed_ms=int((time.perf_counter() - t0_ctx) * 1000),
+                )
+            except Exception as e:
+                logger.warning("context_predictor_failed", error=str(e))
+            timings_ms["step_3.6_context_predictor_ms"] = int(
+                (time.perf_counter() - t0_ctx) * 1000
+            )
+
+        # Choose the best available prediction signal for APPNP
+        appnp_predictions = context_predictor_scores or pre_ppr_reranker_scores
+
+        # ------------------------------------------------------------------
         # Step 4: PPR or DPR-only fallback
         # ------------------------------------------------------------------
         t0 = time.perf_counter()
@@ -1262,7 +1294,7 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
                 alpha=appnp_alpha,
                 entity_seeds=entity_seeds if appnp_seed_weight > 0 else None,
                 seed_weight=appnp_seed_weight,
-                reranker_predictions=pre_ppr_reranker_scores,
+                reranker_predictions=appnp_predictions,
                 self_loop_weight=appnp_self_loop,
                 hub_penalty_mode=appnp_hub_penalty_mode,
                 hub_penalty_alpha=appnp_hub_penalty_alpha,
@@ -3857,6 +3889,86 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
         sim_results = await asyncio.to_thread(_compute_similarities)
         sim_results.sort(key=lambda x: -x[1])
         return [sid for sid, _ in sim_results[:top_n]]
+
+    # ==================================================================
+    # Step 3.6 helper: Context predictor (voyage-context-3 + query context)
+    # ==================================================================
+
+    async def _context_predictor_scores(
+        self,
+        query: str,
+        user_id: Optional[str] = None,
+    ) -> Dict[str, float]:
+        """Re-embed all passages grouped by source document using voyage-context-3.
+
+        Groups passages by their source document (extracted from sentence_id),
+        then calls contextualized_embed() with sibling passages as chunks of
+        one document. This gives each passage awareness of its document context,
+        improving multi-hop scoring where document membership matters.
+
+        Returns cosine similarity scores between the query embedding and each
+        contextualized passage embedding.
+        """
+        import numpy as np
+        from collections import defaultdict
+        from src.core.config import settings
+
+        text_map = self._ppr_engine.get_all_passage_texts()
+        if not text_map:
+            return {}
+
+        vc = make_voyage_client()
+        loop = asyncio.get_running_loop()
+
+        # Embed query
+        q_result = await loop.run_in_executor(
+            None,
+            lambda: vc.contextualized_embed(
+                inputs=[[query]],
+                model=settings.VOYAGE_MODEL_NAME,
+                input_type="query",
+                output_dimension=settings.VOYAGE_EMBEDDING_DIM,
+            ),
+        )
+        q_emb = np.array(q_result.results[0].embeddings[0], dtype=np.float32)
+        q_norm = np.linalg.norm(q_emb)
+        if q_norm > 0:
+            q_emb /= q_norm
+
+        # Group passages by source document
+        doc_groups: Dict[str, list] = defaultdict(list)
+        for sid, text in text_map.items():
+            # sentence_id format: doc_<hash>_sent_llm_<n>_<m>
+            parts = sid.split("_sent_")
+            doc_id = parts[0] if len(parts) > 1 else sid
+            doc_groups[doc_id].append((sid, text))
+
+        # Embed each document group: passages are chunks contextualized by siblings
+        scores: Dict[str, float] = {}
+        for doc_id, passages in doc_groups.items():
+            chunk_texts = [text for _, text in passages]
+            chunk_sids = [sid for sid, _ in passages]
+
+            result = await loop.run_in_executor(
+                None,
+                lambda ct=chunk_texts: vc.contextualized_embed(
+                    inputs=[ct],
+                    model=settings.VOYAGE_MODEL_NAME,
+                    input_type="document",
+                    output_dimension=settings.VOYAGE_EMBEDDING_DIM,
+                ),
+            )
+
+            for i, emb in enumerate(result.results[0].embeddings):
+                d_emb = np.array(emb, dtype=np.float32)
+                d_norm = np.linalg.norm(d_emb)
+                if d_norm > 0:
+                    cos = float(np.dot(q_emb, d_emb / d_norm))
+                    scores[chunk_sids[i]] = max(cos, 0.0)
+                else:
+                    scores[chunk_sids[i]] = 0.0
+
+        return scores
 
     # ==================================================================
     # Step 2 helper: Rerank ALL sentences using PPR-cached texts (legacy)
