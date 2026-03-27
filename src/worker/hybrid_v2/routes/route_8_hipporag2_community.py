@@ -183,7 +183,7 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
             "max_tokens": None,
         },
         "comprehensive_search": {      # APPNP Neural PPR — exhaustive cross-doc retrieval
-            "ppr_passage_top_k": 120,  # 158/159 GT recall (Q-G+Q-D+Q-MH) at alpha=0.65; top_k=120 maximises reranked recall
+            "ppr_passage_top_k": 90,   # 158/159 PPR recall (Q-G 88 + Q-D 31 + Q-MH 40) at alpha=0.65
             "prompt_variant": None,
             "max_tokens": None,
             "community_passage_seeds": False,  # tested: no benefit — community matcher doesn't reach chain-start docs
@@ -207,6 +207,8 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
             "entity_bridge_filter": False,  # post-rerank: keep only passages with direct entity overlap to query seeds (IDF-weighted)
             "llm_dedup": True,  # gpt-4.1 drop-or-keep dedup: ~30% passage reduction, 0 GT loss
             "llm_dedup_model": "gpt-4.1",  # model for dedup judgments
+            "monopartite": True,  # passage-passage projection via shared entities — critical for recall (+3 phrases)
+            "monopartite_edge_weight_mode": "overlap",  # |shared|/min(|set1|,|set2|); IDF/community variants tested, no benefit
             # APPNP modifiers — available via config_overrides for A/B testing:
             #   appnp_alpha: "0.65"               (teleportation weight; 0.50-0.80 stable range)
             #   appnp_seed_weight: "0.0"          (entity seed blend; 0=pure reranker predictions)
@@ -267,7 +269,7 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
                 "ROUTE7_MAX_ENTITY_DEGREE", "0"
             ).strip())
             monopartite = os.getenv(
-                "ROUTE7_MONOPARTITE", "0"
+                "ROUTE7_MONOPARTITE", "1"
             ).strip().lower() in {"1", "true", "yes"}
             monopartite_hub_threshold = int(os.getenv(
                 "ROUTE7_MONOPARTITE_HUB_THRESHOLD", "0"
@@ -279,7 +281,7 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
                 "ROUTE7_MONOPARTITE_MIN_DEGREE", "0"
             ).strip())
             monopartite_edge_weight_mode = os.getenv(
-                "ROUTE7_MONOPARTITE_EDGE_WEIGHT_MODE", "count"
+                "ROUTE7_MONOPARTITE_EDGE_WEIGHT_MODE", "overlap"
             ).strip().lower()
             monopartite_cross_community_dampen = float(os.getenv(
                 "ROUTE7_MONOPARTITE_CROSS_COMMUNITY_DAMPEN", "0.3"
