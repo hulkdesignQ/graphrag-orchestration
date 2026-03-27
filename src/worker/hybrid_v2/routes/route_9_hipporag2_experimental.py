@@ -200,6 +200,8 @@ class HippoRAG2ExperimentalHandler(BaseRouteHandler):
             "propagation_mode": "appnp",  # Predict-then-Propagate (paper architecture) — eliminates signal interference
             "reranker_gate": True,  # pre-PPR reranker: provides cross-encoder predictions for APPNP
             "appnp_alpha": 0.65,  # teleportation weight: 65% reranker predictions + 35% graph walk
+            "monopartite": True,  # passage-passage overlap projection — +2.5% multi-hop recall (87.5% vs 85%)
+            "monopartite_edge_weight_mode": "overlap",  # |shared|/min(|set1|,|set2|)
             "neural_weight": 0.5,  # fallback for non-APPNP modes; APPNP ignores this
             "map_reduce_synthesis": True,  # per-document MAP extraction → cross-doc REDUCE merge
             "section_graph": True,  # load Section nodes + SHARES_ENTITY edges in PPR
@@ -266,7 +268,7 @@ class HippoRAG2ExperimentalHandler(BaseRouteHandler):
                 "ROUTE7_MAX_ENTITY_DEGREE", "0"
             ).strip())
             monopartite = os.getenv(
-                "ROUTE9_MONOPARTITE", os.getenv("ROUTE7_MONOPARTITE", "0")
+                "ROUTE9_MONOPARTITE", os.getenv("ROUTE7_MONOPARTITE", "1")
             ).strip().lower() in {"1", "true", "yes"}
             monopartite_hub_threshold = int(os.getenv(
                 "ROUTE9_MONOPARTITE_HUB_THRESHOLD", os.getenv("ROUTE7_MONOPARTITE_HUB_THRESHOLD", "0")
