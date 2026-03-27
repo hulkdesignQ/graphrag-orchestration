@@ -277,7 +277,77 @@ Use for `mode=raptor` (or queries intended to route to hierarchical summaries).
 
 ---
 
-## F) Negative Tests (10)
+## F) Multi-Hop Reasoning Questions (10)
+Each question requires chaining entity resolution across 3–5 documents via multiple cross-document entity bridges. The number of cross-document hops and the documents traversed are listed for each question. Cannot be answered from a single passage or even a single document pair.
+
+**Entity bridge map** (for reference):
+- **Fabrikam Inc.** spans 4 docs: Warranty (builder), Holding Tank (pumper), PMA (principal broker), Purchase Contract (customer)
+- **Contoso Ltd.** spans 3 docs: Warranty (buyer/owner), Holding Tank (owner), PMA (owner)
+- **Contoso Lifts LLC** spans 2 docs: Invoice (issuer), Purchase Contract (contractor)
+
+1. **Q-MH1:** The company that issued the elevator equipment invoice is a contractor in a purchase agreement. The customer in that agreement is the principal broker in a property management agreement. That same broker is the builder in a warranty. What defects does the warranty cover, and what is the builder's remedy obligation?
+   - **Hops:** 3 — Invoice →[Contoso Lifts]→ PC →[Fabrikam]→ PMA →[Fabrikam]→ Warranty
+   - **Docs:** Invoice, Purchase Contract, PMA, Warranty (4 docs)
+   - **Expected:** Contoso Lifts LLC issued the invoice and is the contractor. Fabrikam Inc. is the customer (PC), principal broker (PMA), and builder (Warranty). The warranty covers defects in materials and workmanship. Builder must repair or replace at no charge; buyer notifies by certified mail; builder has 60 days to complete repairs.
+   - **Source:** contoso_lifts_invoice.pdf; purchase_contract.pdf; PROPERTY MANAGEMENT AGREEMENT.pdf; BUILDERS LIMITED WARRANTY.pdf
+
+2. **Q-MH2:** The invoice issuer is a contractor in a purchase agreement. The customer in that agreement also serves as the pumper in a holding tank servicing contract. The property owner in that contract is the buyer under a builder's warranty. Is the warranty transferable if the buyer sells the property?
+   - **Hops:** 3 — Invoice →[Contoso Lifts]→ PC →[Fabrikam]→ HT →[Contoso Ltd]→ Warranty
+   - **Docs:** Invoice, Purchase Contract, Holding Tank, Warranty (4 docs)
+   - **Expected:** Contoso Lifts (invoice issuer/contractor) → Fabrikam (customer/pumper) → Contoso Ltd (HT owner/warranty buyer). The warranty is not transferable; it terminates if the first purchaser sells or moves out.
+   - **Source:** contoso_lifts_invoice.pdf; purchase_contract.pdf; HOLDING TANK SERVICING CONTRACT.pdf; BUILDERS LIMITED WARRANTY.pdf
+
+3. **Q-MH3:** The invoice issuer is a contractor in a purchase agreement. The customer in that agreement is the principal broker in a PMA. The property owner in that PMA is also the owner in a holding tank contract. What filing obligations does that owner have, and with which county must changes be filed?
+   - **Hops:** 3 — Invoice →[Contoso Lifts]→ PC →[Fabrikam]→ PMA →[Contoso Ltd]→ HT
+   - **Docs:** Invoice, Purchase Contract, PMA, Holding Tank (4 docs)
+   - **Expected:** Chain: Contoso Lifts (invoice) → Fabrikam (customer→broker) → Contoso Ltd (PMA owner→HT owner). Owner must file the original contract with the County of Washburn and file changes within ten (10) business days.
+   - **Source:** contoso_lifts_invoice.pdf; purchase_contract.pdf; PROPERTY MANAGEMENT AGREEMENT.pdf; HOLDING TANK SERVICING CONTRACT.pdf
+
+4. **Q-MH4:** The purchase contract contact's email domain (@fabrikam.com) identifies a company that is the builder in a warranty. The buyer under that warranty is the owner in a PMA. That same owner is the owner in a holding tank contract. What filing deadline applies, and what are the pumper's record-keeping obligations?
+   - **Hops:** 3 (with entity resolution) — PC →[email→Fabrikam]→ Warranty →[Contoso Ltd]→ PMA →[Contoso Ltd]→ HT
+   - **Docs:** Purchase Contract, Warranty, PMA, Holding Tank (4 docs)
+   - **Expected:** enolasco@fabrikam.com → Fabrikam Inc. (builder) → Contoso Ltd (buyer→owner) → HT: owner must file changes within ten (10) business days with County of Washburn. Pumper must submit reports on volumes and disposal sites.
+   - **Source:** purchase_contract.pdf; BUILDERS LIMITED WARRANTY.pdf; PROPERTY MANAGEMENT AGREEMENT.pdf; HOLDING TANK SERVICING CONTRACT.pdf
+
+5. **Q-MH5:** The invoice issuer is a contractor in a purchase agreement. The customer in that agreement is the principal broker in a PMA. The property owner in the PMA is the owner in a holding tank contract. That owner is also the buyer under a builder's warranty. What notification method must the buyer use to report defects, and within what timeframe must the builder complete repairs?
+   - **Hops:** 4 — Invoice →[Contoso Lifts]→ PC →[Fabrikam]→ PMA →[Contoso Ltd]→ HT →[Contoso Ltd]→ Warranty
+   - **Docs:** Invoice, Purchase Contract, PMA, Holding Tank, Warranty (all 5 docs)
+   - **Expected:** Full 5-doc chain: Contoso Lifts → Fabrikam → Contoso Ltd → through HT → Warranty. Buyer must notify by certified mail (or telephone for emergencies). Builder has 60 days to complete repairs.
+   - **Source:** All 5 PDFs
+
+6. **Q-MH6:** The invoice issuer is a contractor in a purchase agreement. The customer in that agreement serves as the pumper in a holding tank contract. The property owner in that contract is also the owner in a PMA. The principal broker in the PMA is the builder in a warranty. How long does the warranty cover workmanship defects, and what must the buyer do to make a claim?
+   - **Hops:** 4 — Invoice →[Contoso Lifts]→ PC →[Fabrikam]→ HT →[Contoso Ltd]→ PMA →[Fabrikam]→ Warranty
+   - **Docs:** Invoice, Purchase Contract, Holding Tank, PMA, Warranty (all 5 docs)
+   - **Expected:** Full 5-doc chain (different path from Q-MH5). Warranty covers workmanship for one (1) year. Buyer must promptly notify builder in writing; failure to promptly notify relieves builder of obligation.
+   - **Source:** All 5 PDFs
+
+7. **Q-MH7:** The PMA agent works under a principal broker who also serves as pumper in a holding tank contract. The property owner in that contract is the buyer in a warranty. The builder in that warranty is the customer in a purchase agreement. What are that customer's cancellation rights and deposit terms?
+   - **Hops:** 3 — PMA →[Fabrikam]→ HT →[Contoso Ltd]→ Warranty →[Fabrikam]→ PC
+   - **Docs:** PMA, Holding Tank, Warranty, Purchase Contract (4 docs)
+   - **Expected:** Walt Flood (agent) → Fabrikam (broker→pumper) → Contoso Ltd (HT owner→warranty buyer) → Fabrikam (builder→customer). Customer may cancel within 3 business days for full refund; after that, deposit is forfeited.
+   - **Source:** PROPERTY MANAGEMENT AGREEMENT.pdf; HOLDING TANK SERVICING CONTRACT.pdf; BUILDERS LIMITED WARRANTY.pdf; purchase_contract.pdf
+
+8. **Q-MH8:** The warranty's arbitration is administered by the AAA. The buyer under that warranty is the owner in a PMA. The principal broker in that PMA is the customer in a purchase agreement. The contractor in that agreement issued an invoice. What are the specific line items on that invoice?
+   - **Hops:** 3 — Warranty →[Contoso Ltd]→ PMA →[Fabrikam]→ PC →[Contoso Lifts]→ Invoice
+   - **Docs:** Warranty, PMA, Purchase Contract, Invoice (4 docs)
+   - **Expected:** AAA → Contoso Ltd (buyer→owner) → Fabrikam (broker→customer) → Contoso Lifts (contractor→issuer). Invoice line items: Vertical Platform Lift \$11,200, Special Size cab \$5,800, aluminum door \$5,000, power system \$3,000.
+   - **Source:** BUILDERS LIMITED WARRANTY.pdf; PROPERTY MANAGEMENT AGREEMENT.pdf; purchase_contract.pdf; contoso_lifts_invoice.pdf
+
+9. **Q-MH9:** The holding tank contract's pumper is the principal broker in a PMA. The property owner in that PMA is the buyer in a builder's warranty. The builder in that warranty is the customer in a purchase agreement. The contractor in that agreement issued an invoice and warrants labor for 90 days. How does the contractor's labor warranty compare to the builder's warranty period?
+   - **Hops:** 4 — HT →[Fabrikam]→ PMA →[Contoso Ltd]→ Warranty →[Fabrikam]→ PC →[Contoso Lifts]→ Invoice
+   - **Docs:** Holding Tank, PMA, Warranty, Purchase Contract, Invoice (all 5 docs)
+   - **Expected:** Full 5-doc chain: Fabrikam (pumper→broker) → Contoso Ltd (owner→buyer) → Fabrikam (builder→customer) → Contoso Lifts (contractor→issuer, 90-day labor warranty). Builder's warranty = 1 year for workmanship. Contractor's = 90 days for labor.
+   - **Source:** All 5 PDFs
+
+10. **Q-MH10:** The holding tank property owner is the buyer in a builder's warranty. The builder in that warranty is the principal broker in a PMA. That broker is the customer in a purchase agreement. The contractor in that agreement issued an invoice. What is the total on the invoice, and what are the payment installments in the purchase agreement?
+    - **Hops:** 4 — HT →[Contoso Ltd]→ Warranty →[Fabrikam]→ PMA →[Fabrikam]→ PC →[Contoso Lifts]→ Invoice
+    - **Docs:** Holding Tank, Warranty, PMA, Purchase Contract, Invoice (all 5 docs)
+    - **Expected:** Contoso Ltd (HT owner→warranty buyer) → Fabrikam (builder→broker→customer) → Contoso Lifts (contractor→issuer). Invoice total \$29,900. Payment: \$20,000 upon signing, \$7,000 upon delivery, \$2,900 upon completion.
+    - **Source:** All 5 PDFs
+---
+
+## G) Negative Tests (10)
+
 These should return **“not found / not specified in the provided documents”** (or equivalent) for group `phase1-5docs-1766595043`.
 
 1. **Q-N1:** What is the **late fee** percentage for overdue payments on the invoice?

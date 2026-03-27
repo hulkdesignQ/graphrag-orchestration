@@ -265,6 +265,114 @@ GROUND_TRUTH_QD: Dict[str, Dict[str, Any]] = {
     },
 }
 
+# ---------------------------------------------------------------------------
+# Q-MH (Multi-Hop) retrieval ground truth  —  DEEP chains (3-4 hops)
+# Each question chains entity resolution across 3-5 documents.
+# GT phrases verify passages from both chain-start and chain-end docs.
+# ---------------------------------------------------------------------------
+GROUND_TRUTH_QMH: Dict[str, Dict[str, Any]] = {
+    # 3 hops, 4 docs: Invoice →[CL]→ PC →[F]→ PMA →[F]→ Warranty
+    "Q-MH1": {
+        "query": "The company that issued the elevator equipment invoice is a contractor in a purchase agreement. The customer in that agreement is the principal broker in a property management agreement. That same broker is the builder in a warranty. What defects does the warranty cover, and what is the builder's remedy obligation?",
+        "required": [
+            ("Contoso Lifts", "contoso_lifts_invoice"),         # chain start: invoice issuer
+            ("repair or replace", "WARRANTY"),                  # chain end: builder remedy
+            ("no charge", "WARRANTY"),                          # chain end: cost to buyer
+            ("certified mail", "WARRANTY"),                     # chain end: notification method
+        ],
+    },
+    # 3 hops, 4 docs: Invoice →[CL]→ PC →[F]→ HT →[C]→ Warranty
+    "Q-MH2": {
+        "query": "The invoice issuer is a contractor in a purchase agreement. The customer in that agreement also serves as the pumper in a holding tank servicing contract. The property owner in that contract is the buyer under a builder's warranty. Is the warranty transferable if the buyer sells the property?",
+        "required": [
+            ("Contoso Lifts", "contoso_lifts_invoice"),         # chain start: invoice issuer
+            ("pumper", "HOLDING TANK"),                         # intermediate: Fabrikam as pumper
+            ("not transferable", "WARRANTY"),                   # chain end: answer
+            ("sells", "WARRANTY"),                              # chain end: termination trigger
+        ],
+    },
+    # 3 hops, 4 docs: Invoice →[CL]→ PC →[F]→ PMA →[C]→ HT
+    "Q-MH3": {
+        "query": "The invoice issuer is a contractor in a purchase agreement. The customer in that agreement is the principal broker in a PMA. The property owner in that PMA is also the owner in a holding tank contract. What filing obligations does that owner have, and with which county must changes be filed?",
+        "required": [
+            ("Contoso Lifts", "contoso_lifts_invoice"),         # chain start: invoice issuer
+            ("ten (10)", "HOLDING TANK"),                       # chain end: filing deadline
+            ("Washburn", "HOLDING TANK"),                       # chain end: county name
+            ("submit to the County", "HOLDING TANK"),           # chain end: filing obligation
+        ],
+    },
+    # 3 hops (with entity resolution), 4 docs: PC →[email→F]→ Warranty →[C]→ PMA →[C]→ HT
+    "Q-MH4": {
+        "query": "The purchase contract contact's email domain (@fabrikam.com) identifies a company that is the builder in a warranty. The buyer under that warranty is the owner in a PMA. That same owner is the owner in a holding tank contract. What filing deadline applies, and what are the pumper's record-keeping obligations?",
+        "required": [
+            ("enolasco@fabrikam", "purchase_contract"),         # chain start: email → entity resolution
+            ("ten (10)", "HOLDING TANK"),                       # chain end: filing deadline
+            ("Washburn", "HOLDING TANK"),                       # chain end: county
+            ("volumes", "HOLDING TANK"),                        # chain end: pumper record-keeping
+        ],
+    },
+    # 4 hops, 5 docs: Invoice →[CL]→ PC →[F]→ PMA →[C]→ HT →[C]→ Warranty
+    "Q-MH5": {
+        "query": "The invoice issuer is a contractor in a purchase agreement. The customer in that agreement is the principal broker in a PMA. The property owner in the PMA is the owner in a holding tank contract. That owner is also the buyer under a builder's warranty. What notification method must the buyer use to report defects, and within what timeframe must the builder complete repairs?",
+        "required": [
+            ("Contoso Lifts", "contoso_lifts_invoice"),         # chain start: invoice issuer
+            ("certified mail", "WARRANTY"),                     # chain end: notification method
+            ("60 days", "WARRANTY"),                            # chain end: builder repair window
+        ],
+    },
+    # 4 hops, 5 docs: Invoice →[CL]→ PC →[F]→ HT →[C]→ PMA →[F]→ Warranty
+    "Q-MH6": {
+        "query": "The invoice issuer is a contractor in a purchase agreement. The customer in that agreement serves as the pumper in a holding tank contract. The property owner in that contract is also the owner in a PMA. The principal broker in the PMA is the builder in a warranty. How long does the warranty cover workmanship defects, and what must the buyer do to make a claim?",
+        "required": [
+            ("Contoso Lifts", "contoso_lifts_invoice"),         # chain start: invoice issuer
+            ("pumper", "HOLDING TANK"),                         # intermediate: Fabrikam as pumper
+            ("one (1) year", "WARRANTY"),                       # chain end: coverage period
+            ("promptly notify", "WARRANTY"),                    # chain end: buyer obligation
+        ],
+    },
+    # 3 hops, 4 docs: PMA →[F]→ HT →[C]→ Warranty →[F]→ PC
+    "Q-MH7": {
+        "query": "The PMA agent works under a principal broker who also serves as pumper in a holding tank contract. The property owner in that contract is the buyer in a warranty. The builder in that warranty is the customer in a purchase agreement. What are that customer's cancellation rights and deposit terms?",
+        "required": [
+            ("Walt Flood", "PROPERTY MANAGEMENT"),              # chain start: PMA agent
+            ("3 business days", "purchase_contract"),           # chain end: cancellation window
+            ("deposit is forfeited", "purchase_contract"),      # chain end: deposit forfeiture
+        ],
+    },
+    # 3 hops, 4 docs: Warranty →[C]→ PMA →[F]→ PC →[CL]→ Invoice
+    "Q-MH8": {
+        "query": "The warranty's arbitration is administered by the AAA. The buyer under that warranty is the owner in a PMA. The principal broker in that PMA is the customer in a purchase agreement. The contractor in that agreement issued an invoice. What are the specific line items on that invoice?",
+        "required": [
+            ("American Arbitration", "WARRANTY"),               # chain start: AAA
+            ("11200", "contoso_lifts_invoice"),                 # chain end: lift price
+            ("5800", "contoso_lifts_invoice"),                  # chain end: cab price
+            ("5000", "contoso_lifts_invoice"),                  # chain end: door price
+            ("3000", "contoso_lifts_invoice"),                  # chain end: power system
+        ],
+    },
+    # 4 hops, 5 docs: HT →[F]→ PMA →[C]→ Warranty →[F]→ PC →[CL]→ Invoice
+    "Q-MH9": {
+        "query": "The holding tank contract's pumper is the principal broker in a PMA. The property owner in that PMA is the buyer in a builder's warranty. The builder in that warranty is the customer in a purchase agreement. The contractor in that agreement issued an invoice and warrants labor for 90 days. How does the contractor's labor warranty compare to the builder's warranty period?",
+        "required": [
+            ("pumper", "HOLDING TANK"),                         # chain start: pumper in HT
+            ("90 days", "purchase_contract"),                   # chain end: contractor warranty
+            ("one (1) year", "WARRANTY"),                       # chain end: builder warranty
+            ("Contoso Lifts", "contoso_lifts_invoice"),         # chain end: invoice issuer
+        ],
+    },
+    # 4 hops, 5 docs: HT →[C]→ Warranty →[F]→ PMA →[F]→ PC →[CL]→ Invoice
+    "Q-MH10": {
+        "query": "The holding tank property owner is the buyer in a builder's warranty. The builder in that warranty is the principal broker in a PMA. That broker is the customer in a purchase agreement. The contractor in that agreement issued an invoice. What is the total on the invoice, and what are the payment installments in the purchase agreement?",
+        "required": [
+            ("Washburn", "HOLDING TANK"),                       # chain start: identifies HT
+            ("29900", "contoso_lifts_invoice"),                 # chain end: invoice total
+            ("20,000", "purchase_contract"),                    # chain end: 1st installment
+            ("7,000", "purchase_contract"),                     # chain end: 2nd installment
+            ("2,900", "purchase_contract"),                     # chain end: 3rd installment
+        ],
+    },
+}
+
 
 def query_api(
     url: str,
@@ -488,8 +596,8 @@ def main():
     parser.add_argument("--json", type=str, default=None,
                         help="Save results to JSON file")
     parser.add_argument("--question-set", default="Q-G",
-                        choices=["Q-G", "Q-D", "all"],
-                        help="Which question set to evaluate (Q-G=global, Q-D=drift, all=both)")
+                        choices=["Q-G", "Q-D", "Q-MH", "all"],
+                        help="Which question set to evaluate (Q-G=global, Q-D=drift, Q-MH=multi-hop, all=all)")
     args = parser.parse_args()
 
     config_overrides = {}
@@ -503,9 +611,12 @@ def main():
     if args.question_set == "Q-D":
         gt_dict = GROUND_TRUTH_QD
         gt_label = "Q-D (drift/multi-hop)"
+    elif args.question_set == "Q-MH":
+        gt_dict = GROUND_TRUTH_QMH
+        gt_label = "Q-MH (multi-hop)"
     elif args.question_set == "all":
-        gt_dict = {**GROUND_TRUTH, **GROUND_TRUTH_QD}
-        gt_label = "Q-G + Q-D (all)"
+        gt_dict = {**GROUND_TRUTH, **GROUND_TRUTH_QD, **GROUND_TRUTH_QMH}
+        gt_label = "Q-G + Q-D + Q-MH (all)"
     else:
         gt_dict = GROUND_TRUTH
         gt_label = "Q-G (global)"

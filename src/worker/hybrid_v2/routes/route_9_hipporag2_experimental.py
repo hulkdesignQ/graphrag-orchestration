@@ -266,19 +266,19 @@ class HippoRAG2ExperimentalHandler(BaseRouteHandler):
                 "ROUTE7_MAX_ENTITY_DEGREE", "0"
             ).strip())
             monopartite = os.getenv(
-                "ROUTE7_MONOPARTITE", "0"
+                "ROUTE9_MONOPARTITE", os.getenv("ROUTE7_MONOPARTITE", "0")
             ).strip().lower() in {"1", "true", "yes"}
             monopartite_hub_threshold = int(os.getenv(
-                "ROUTE7_MONOPARTITE_HUB_THRESHOLD", "0"
+                "ROUTE9_MONOPARTITE_HUB_THRESHOLD", os.getenv("ROUTE7_MONOPARTITE_HUB_THRESHOLD", "0")
             ).strip())
             monopartite_edge_scaler = os.getenv(
-                "ROUTE7_MONOPARTITE_EDGE_SCALER", "none"
+                "ROUTE9_MONOPARTITE_EDGE_SCALER", os.getenv("ROUTE7_MONOPARTITE_EDGE_SCALER", "none")
             ).strip().lower()
             monopartite_min_degree = int(os.getenv(
-                "ROUTE7_MONOPARTITE_MIN_DEGREE", "0"
+                "ROUTE9_MONOPARTITE_MIN_DEGREE", os.getenv("ROUTE7_MONOPARTITE_MIN_DEGREE", "0")
             ).strip())
             monopartite_edge_weight_mode = os.getenv(
-                "ROUTE7_MONOPARTITE_EDGE_WEIGHT_MODE", "count"
+                "ROUTE9_MONOPARTITE_EDGE_WEIGHT_MODE", os.getenv("ROUTE7_MONOPARTITE_EDGE_WEIGHT_MODE", "overlap")
             ).strip().lower()
             passage_shortcuts = os.getenv(
                 "ROUTE7_PASSAGE_SHORTCUTS", "0"
@@ -1248,6 +1248,7 @@ class HippoRAG2ExperimentalHandler(BaseRouteHandler):
                 hub_penalty_alpha=appnp_hub_penalty_alpha,
                 hub_penalty_base=appnp_hub_penalty_base,
                 norm_mode=appnp_norm_mode,
+                score_log_scaling=True,
             )
         elif propagation_mode == "gpr":
             passage_scores, entity_scores = self._ppr_engine.run_gpr(

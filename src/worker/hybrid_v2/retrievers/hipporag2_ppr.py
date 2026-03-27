@@ -590,15 +590,22 @@ class HippoRAG2PPR:
         edge_scaler: str = "none",
         min_passage_degree: int = 0,
         edge_weight_mode: str = "count",
+        cross_community_dampen: float = 0.3,
     ) -> None:
         """Replace bipartite graph with passage-passage graph.
 
         For each hub entity (degree > hub_degree_threshold), its connected
         passages become pairwise connected. Edge weight depends on
         edge_weight_mode:
-          "count"   = raw shared entity count (default)
-          "jaccard"  = |shared| / |union| (Neo4j nodeSimilarity style)
-          "overlap"  = |shared| / min(|set1|, |set2|)
+          "count"             = raw shared entity count (default)
+          "jaccard"           = |shared| / |union| (Neo4j nodeSimilarity style)
+          "overlap"           = |shared| / min(|set1|, |set2|)
+          "idf_overlap"       = sum(IDF(e)) / min(|set1|, |set2|)
+          "community_overlap" = overlap × dampen for cross-community pairs.
+                                Each passage's dominant community is the mode
+                                of its entities' community_ids. Same-community
+                                pairs keep full overlap weight; cross-community
+                                pairs are scaled by cross_community_dampen.
         The hub entity is then disconnected from the walk.
 
         Specific entities (degree ≤ hub_degree_threshold) are kept in the
@@ -658,12 +665,53 @@ class HippoRAG2PPR:
 
         # Compute passage-passage edges from HUB entities only
         pair_weights: Dict[tuple, float] = {}
-        if edge_weight_mode in ("jaccard", "overlap"):
+        if edge_weight_mode in ("jaccard", "overlap", "idf_overlap", "community_overlap"):
             # Build passage → entity set mapping (hub entities only)
             passage_entity_set: Dict[int, set] = defaultdict(set)
             for ent_idx, passages in hub_entities.items():
                 for p in passages:
                     passage_entity_set[p].add(ent_idx)
+
+            # Precompute IDF weights for idf_overlap mode
+            idf_weight: Dict[int, float] = {}
+            if edge_weight_mode == "idf_overlap":
+                total_passages = sum(
+                    1 for idx in range(self._node_count)
+                    if self._node_types.get(idx) == "passage"
+                )
+                for ent_idx in hub_entities:
+                    df = len(hub_entities[ent_idx])  # passages mentioning this entity
+                    idf_weight[ent_idx] = math.log(total_passages / max(df, 1))
+
+                idf_vals = sorted(idf_weight.values())
+                logger.info(
+                    "monopartite_idf_weights",
+                    total_passages=total_passages,
+                    num_entities=len(idf_weight),
+                    min_idf=round(idf_vals[0], 3) if idf_vals else 0,
+                    median_idf=round(idf_vals[len(idf_vals) // 2], 3) if idf_vals else 0,
+                    max_idf=round(idf_vals[-1], 3) if idf_vals else 0,
+                )
+
+            # Precompute passage dominant community for community_overlap
+            passage_dominant_community: Dict[int, int] = {}
+            if edge_weight_mode == "community_overlap":
+                from collections import Counter
+                for p_idx, ent_set in passage_entity_set.items():
+                    cids = [self._community_id[e] for e in ent_set if e in self._community_id]
+                    if cids:
+                        passage_dominant_community[p_idx] = Counter(cids).most_common(1)[0][0]
+
+                # Log community coverage
+                comm_counts = Counter(passage_dominant_community.values())
+                logger.info(
+                    "monopartite_passage_communities",
+                    passages_with_community=len(passage_dominant_community),
+                    total_passages_in_graph=len(passage_entity_set),
+                    community_distribution={str(k): v for k, v in comm_counts.most_common()},
+                    cross_community_dampen=cross_community_dampen,
+                )
+
             # Compute similarity-weighted edges
             for ent_idx, passages in hub_entities.items():
                 for i in range(len(passages)):
@@ -676,6 +724,19 @@ class HippoRAG2PPR:
                             if edge_weight_mode == "jaccard":
                                 union = passage_entity_set[p1] | passage_entity_set[p2]
                                 pair_weights[(p1, p2)] = len(shared) / len(union)
+                            elif edge_weight_mode == "idf_overlap":
+                                idf_sum = sum(idf_weight.get(e, 0.0) for e in shared)
+                                min_size = min(len(passage_entity_set[p1]), len(passage_entity_set[p2]))
+                                pair_weights[(p1, p2)] = idf_sum / min_size if min_size > 0 else 0.0
+                            elif edge_weight_mode == "community_overlap":
+                                min_size = min(len(passage_entity_set[p1]), len(passage_entity_set[p2]))
+                                w = len(shared) / min_size if min_size > 0 else 0.0
+                                # Dampen cross-community edges
+                                c1 = passage_dominant_community.get(p1)
+                                c2 = passage_dominant_community.get(p2)
+                                if c1 is not None and c2 is not None and c1 != c2:
+                                    w *= cross_community_dampen
+                                pair_weights[(p1, p2)] = w
                             else:  # overlap
                                 min_size = min(len(passage_entity_set[p1]), len(passage_entity_set[p2]))
                                 pair_weights[(p1, p2)] = len(shared) / min_size if min_size > 0 else 0.0
@@ -780,6 +841,7 @@ class HippoRAG2PPR:
             sim_edges_preserved=sim_edge_count,
             topk_edges_added=topk_edges_added,
             min_passage_degree=min_passage_degree,
+            edge_weight_mode=edge_weight_mode,
             total_edges=mono_edge_count + sim_edge_count + kept_edge_count + topk_edges_added,
         )
 
@@ -867,6 +929,7 @@ class HippoRAG2PPR:
         monopartite_edge_scaler: str = "none",
         monopartite_min_degree: int = 0,
         monopartite_edge_weight_mode: str = "count",
+        monopartite_cross_community_dampen: float = 0.3,
         passage_shortcuts: bool = False,
         mentions_cosine_weighting: bool = False,
     ) -> None:
@@ -930,6 +993,7 @@ class HippoRAG2PPR:
                 edge_scaler=monopartite_edge_scaler,
                 min_passage_degree=monopartite_min_degree,
                 edge_weight_mode=monopartite_edge_weight_mode,
+                cross_community_dampen=monopartite_cross_community_dampen,
             )
         elif passage_shortcuts:
             self._add_passage_shortcuts(edge_scaler=monopartite_edge_scaler)
@@ -2018,7 +2082,7 @@ class HippoRAG2PPR:
             # Degree = count of edges (ignoring weights) + self-loop
             for idx in range(self._node_count):
                 d = float(len(self._adj.get(idx, []))) + self_loop_weight
-                degree_divisor[idx] = math.sqrt(d)
+                degree_divisor[idx] = math.sqrt(d) if d > 0 else 1.0
         elif norm_mode in ("random_walk", "article_rank"):
             avg_degree = 0.0
             if norm_mode == "article_rank":
@@ -2029,12 +2093,12 @@ class HippoRAG2PPR:
                 # Neo4j formula: deg_out(u) + avg_deg_out
                 edge_count = float(len(self._adj.get(idx, [])))
                 d = edge_count + self_loop_weight + avg_degree
-                degree_divisor[idx] = d  # NOT sqrt — row normalization
+                degree_divisor[idx] = d if d > 0 else 1.0  # NOT sqrt — row normalization
         else:
             # Default symmetric: D = diag(weight sums + self-loop)
             for idx in range(self._node_count):
                 d = self._out_weight_sum.get(idx, 0.0) + self_loop_weight
-                degree_divisor[idx] = math.sqrt(d)
+                degree_divisor[idx] = math.sqrt(d) if d > 0 else 1.0
 
         use_sqrt_norm = norm_mode in ("symmetric", "structural_symmetric")
 
