@@ -1250,7 +1250,6 @@ class HippoRAG2ExperimentalHandler(BaseRouteHandler):
                 hub_penalty_alpha=appnp_hub_penalty_alpha,
                 hub_penalty_base=appnp_hub_penalty_base,
                 norm_mode=appnp_norm_mode,
-                score_log_scaling=True,
             )
         elif propagation_mode == "gpr":
             passage_scores, entity_scores = self._ppr_engine.run_gpr(
