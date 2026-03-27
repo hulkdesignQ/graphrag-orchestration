@@ -1337,20 +1337,22 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
         # ------------------------------------------------------------------
         # Step 4.45: Entity-aware graph-noise discount.
         #
-        # APPNP propagates reranker scores through the graph.  Hub entities
-        # (e.g. "owner" in 39 passages) can inflate scores for passages that
-        # the cross-encoder rated low and that share no query entities.
-        # This step applies a soft discount:
+        # APPNP propagates reranker scores through the graph.  Monopartite
+        # entity cliques can inflate scores for passages that the cross-encoder
+        # rated low — even when those passages share entities with the query.
+        # This step compares each passage's reranker score (pre-propagation)
+        # with its APPNP score (post-propagation) to measure the "boost ratio":
         #
-        #   discount = 1.0 - factor × (1 - reranker_agreement) × (1 - entity_overlap)
+        #   boost_ratio = 1 - (reranker_score / appnp_score)
         #
-        # where:
-        #   reranker_agreement = norm(pre_ppr_reranker_score) ∈ [0, 1]
-        #   entity_overlap = 1 if passage shares ≥1 entity with query, else 0
-        #   factor = configurable strength (0 = disabled)
+        # A passage with reranker 0.85 → APPNP 0.88 has boost_ratio ~0.03
+        # (earned its score). A passage with reranker 0.15 → APPNP 0.70 has
+        # boost_ratio ~0.79 (structurally inflated).
         #
-        # Passages with high reranker score OR entity overlap are unaffected.
-        # Only passages inflated purely by graph propagation get discounted.
+        #   discount = 1.0 - factor × boost_ratio
+        #
+        # No entity-overlap guard — clique noise passages often DO share
+        # entities with the query; that's what creates the clique.
         # ------------------------------------------------------------------
         entity_discount_factor = float(_ov(
             "entity_discount_factor", "ROUTE8_ENTITY_DISCOUNT_FACTOR",
@@ -1358,38 +1360,20 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
         ))
         if entity_discount_factor > 0 and pre_ppr_reranker_scores and self._ppr_engine:
             t0_ed = time.perf_counter()
-            # Build set of passage IDs that share entities with the query
-            ppr = self._ppr_engine
-            query_entity_idxs = set()
-            for eid in triple_entity_ids:
-                idx = ppr._node_to_idx.get(eid)
-                if idx is not None:
-                    query_entity_idxs.add(idx)
-
-            # Passages reachable from query entities (1-hop in original bipartite)
-            entity_linked_sids: set = set()
-            for eidx in query_entity_idxs:
-                for pidx in ppr._entity_passage_map.get(eidx, []):
-                    sid = ppr._idx_to_node.get(pidx, "")
-                    if sid:
-                        entity_linked_sids.add(sid)
-
-            # Normalise reranker scores to [0, 1]
-            rr_vals = list(pre_ppr_reranker_scores.values())
-            rr_min = min(rr_vals) if rr_vals else 0.0
-            rr_max = max(rr_vals) if rr_vals else 1.0
-            rr_spread = rr_max - rr_min if rr_max > rr_min else 1.0
 
             discounted = 0
             new_scores = []
             for sid, appnp_score in passage_scores:
-                has_entity = sid in entity_linked_sids
                 rr_raw = pre_ppr_reranker_scores.get(sid)
-                if not has_entity and rr_raw is not None:
-                    rr_norm = (rr_raw - rr_min) / rr_spread
-                    discount = 1.0 - entity_discount_factor * (1.0 - rr_norm)
+                if rr_raw is not None and appnp_score > 0:
+                    # boost_ratio: how much of the APPNP score is graph-donated
+                    # 0.0 = score entirely from reranker, 1.0 = entirely from graph
+                    boost_ratio = max(0.0, 1.0 - rr_raw / appnp_score)
+                    discount = 1.0 - entity_discount_factor * boost_ratio
+                    discount = max(discount, 0.0)
                     new_scores.append((sid, appnp_score * discount))
-                    discounted += 1
+                    if boost_ratio > 0.01:
+                        discounted += 1
                 else:
                     new_scores.append((sid, appnp_score))
             # Re-sort by discounted score
@@ -1402,8 +1386,6 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
             logger.info(
                 "step_4.45_entity_discount",
                 factor=entity_discount_factor,
-                query_entities=len(query_entity_idxs),
-                entity_linked_passages=len(entity_linked_sids),
                 discounted=discounted,
                 total=len(passage_scores),
             )
@@ -1730,17 +1712,14 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
                 scored.sort(key=lambda x: x[2], reverse=True)
                 rr_sorted = [rr for _, _, rr in scored]
 
-                # Find largest relative gap between consecutive scores
+                # Find largest absolute gap between consecutive reranker scores
                 # Only search within [min_k, max_k] range
                 best_gap = 0.0
                 best_gap_idx = adaptive_min_k
                 for i in range(adaptive_min_k, min(adaptive_max_k, len(rr_sorted) - 1)):
-                    if rr_sorted[i] > 0:
-                        relative_gap = (rr_sorted[i] - rr_sorted[i + 1]) / rr_sorted[i]
-                    else:
-                        relative_gap = 0.0
-                    if relative_gap > best_gap:
-                        best_gap = relative_gap
+                    abs_gap = rr_sorted[i] - rr_sorted[i + 1]
+                    if abs_gap > best_gap:
+                        best_gap = abs_gap
                         best_gap_idx = i + 1  # include everything up to the gap
 
                 old_limit = passage_limit
