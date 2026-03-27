@@ -183,7 +183,7 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
             "max_tokens": None,
         },
         "comprehensive_search": {      # APPNP Neural PPR — exhaustive cross-doc retrieval
-            "ppr_passage_top_k": 50,  # 48/48 recall proven at top_k=50; reranker handles filtering
+            "ppr_passage_top_k": 90,   # 88/88 GT recall at alpha=0.80; rank ~85-90 captures all misses
             "prompt_variant": None,
             "max_tokens": None,
             "community_passage_seeds": False,  # APPNP achieves 100% recall — injection redundant
@@ -200,7 +200,7 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
             "semantic_passage_seeds": False,  # disabled — APPNP uses reranker predictions directly
             "propagation_mode": "appnp",  # Predict-then-Propagate (paper architecture) — eliminates signal interference
             "reranker_gate": True,  # pre-PPR reranker: provides cross-encoder predictions for APPNP
-            "appnp_alpha": 0.65,  # teleportation weight: 65% reranker predictions + 35% graph walk
+            "appnp_alpha": 0.80,  # teleportation weight: 80% reranker predictions + 20% graph walk
             "neural_weight": 0.5,  # fallback for non-APPNP modes; APPNP ignores this
             "map_reduce_synthesis": False,  # direct synthesis with v10_comprehensive; LLM dedup handles passage reduction
             "section_graph": True,  # load Section nodes + SHARES_ENTITY edges in PPR
@@ -208,7 +208,7 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
             "llm_dedup": True,  # gpt-4.1 drop-or-keep dedup: ~30% passage reduction, 0 GT loss
             "llm_dedup_model": "gpt-4.1",  # model for dedup judgments
             # APPNP modifiers — available via config_overrides for A/B testing:
-            #   appnp_alpha: "0.65"               (teleportation weight; 0.6-0.7 = sweet spot)
+            #   appnp_alpha: "0.80"               (teleportation weight; 0.75-0.85 = sweet spot)
             #   appnp_seed_weight: "0.0"          (entity seed blend; 0=pure reranker predictions)
             #   appnp_self_loop: "0.0"            (self-loop weight for A+I; 0=disabled)
             #   appnp_hub_penalty_mode: "none"    (post-walk hub penalty)

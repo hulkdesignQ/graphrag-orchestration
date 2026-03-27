@@ -171,7 +171,7 @@ GROUND_TRUTH: Dict[str, Dict[str, Any]] = {
             ("Limited Warranty", "WARRANTY"),                  # warranty doc
             ("holding tank", "HOLDING TANK"),                  # holding tank servicing
             ("manag", "PROPERTY MANAGEMENT"),                # property management
-            ("AMOUNT DUE", "contoso_lifts_invoice"),           # invoice doc
+            ("Contoso Lifts LLC", "contoso_lifts_invoice"),      # invoice doc
             ("Contoso Lifts", "purchase_contract"),            # purchase contract
         ],
     },
