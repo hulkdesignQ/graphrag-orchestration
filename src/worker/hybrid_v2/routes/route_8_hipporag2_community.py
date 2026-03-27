@@ -205,6 +205,7 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
             "map_reduce_synthesis": False,  # direct synthesis with v10_comprehensive; LLM dedup handles passage reduction
             "section_graph": True,  # load Section nodes + SHARES_ENTITY edges in PPR
             "entity_bridge_filter": False,  # post-rerank: keep only passages with direct entity overlap to query seeds (IDF-weighted)
+            "mmr_lambda": 0.7,  # MMR diversity reranking: 0.7 = relevance-biased, 0 = disabled
             "llm_dedup": True,  # gpt-4.1 drop-or-keep dedup: ~30% passage reduction, 0 GT loss
             "llm_dedup_model": "gpt-4.1",  # model for dedup judgments
             "monopartite": True,  # passage-passage projection via shared entities — critical for recall (+3 phrases)
@@ -1695,22 +1696,31 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
                 passage_scores = interleaved + passage_scores[passage_limit:]
                 passage_limit = len(interleaved)
 
-        # Step 4.10: Semantic dedup — cluster near-duplicate passages and keep
-        # one representative per cluster.  PPR top-K often contains many passages
-        # from the same document section (>85% cosine similarity) which waste
-        # synthesis tokens without adding new information.  Clustering compresses
-        # e.g. 50 passages → 12-15 unique facts, improving cross-document coverage.
-        dedup_threshold = float(_ov(
-            "semantic_dedup_threshold", "ROUTE8_SEMANTIC_DEDUP_THRESHOLD",
-            str(preset.get("semantic_dedup_threshold", 0))
+        # Step 4.10: MMR (Maximal Marginal Relevance) reranking.
+        # PPR top-K often contains many near-duplicate passages from the same
+        # document section.  MMR iteratively selects passages that are both
+        # relevant (high APPNP score) and diverse (low similarity to already-
+        # selected passages).  This replaces greedy cosine dedup with a
+        # principled relevance-diversity trade-off.
+        #
+        # score(p) = λ × norm_appnp(p) - (1-λ) × max_cos_sim(p, selected)
+        #
+        # λ=1.0 = pure relevance (no diversity), λ=0.5 = balanced,
+        # λ=0.0 = pure diversity.  Default 0.7 biases toward relevance
+        # while still suppressing redundant passages.
+        mmr_lambda = float(_ov(
+            "mmr_lambda", "ROUTE8_MMR_LAMBDA",
+            str(preset.get("mmr_lambda", 0))
         ))
-        if dedup_threshold > 0 and self._ppr_engine:
+        if mmr_lambda > 0 and self._ppr_engine:
             import numpy as np
-            t0_dedup = time.perf_counter()
+            t0_mmr = time.perf_counter()
             p_embs = self._ppr_engine.get_all_passage_embeddings()
             candidates = passage_scores[:passage_limit]
-            # Collect embeddings for candidate passages
+
+            # Collect and normalise passage embeddings
             cand_sids = [sid for sid, _ in candidates]
+            cand_scores = np.array([sc for _, sc in candidates], dtype=np.float64)
             cand_vecs = []
             valid_mask = []
             for sid in cand_sids:
@@ -1723,45 +1733,64 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
                     cand_vecs.append(np.zeros(1))
                     valid_mask.append(False)
 
-            if sum(valid_mask) > 1:
-                # Build similarity matrix for valid embeddings
+            n_valid = sum(valid_mask)
+            if n_valid > 1:
                 valid_idx = [i for i, ok in enumerate(valid_mask) if ok]
                 mat = np.array([cand_vecs[i] for i in valid_idx])
+                # Pre-compute pairwise cosine similarities
                 sim = mat @ mat.T
 
-                # Greedy clustering: iterate in PPR-score order (best first),
-                # each unassigned passage becomes a cluster representative.
-                n = len(valid_idx)
-                assigned = [False] * n
-                representatives = []  # indices into valid_idx
-                for i in range(n):
-                    if assigned[i]:
-                        continue
-                    representatives.append(valid_idx[i])
-                    assigned[i] = True
-                    for j in range(i + 1, n):
-                        if not assigned[j] and sim[i][j] >= dedup_threshold:
-                            assigned[j] = True
+                # Normalise APPNP scores to [0, 1] for valid candidates
+                valid_scores = cand_scores[valid_idx]
+                s_min, s_max = valid_scores.min(), valid_scores.max()
+                if s_max > s_min:
+                    norm_scores = (valid_scores - s_min) / (s_max - s_min)
+                else:
+                    norm_scores = np.ones(len(valid_idx))
 
-                # Also keep any passage without an embedding (safety)
+                # Greedy MMR selection (vectorized inner loop)
+                n_v = len(valid_idx)
+                lam = mmr_lambda
+                selected_vi: list[int] = []
+                chosen = np.zeros(n_v, dtype=bool)
+                # Track running max similarity to selected set
+                max_sim_to_selected = np.full(n_v, -1.0)
+
+                # First pick: highest APPNP score
+                first = int(np.argmax(norm_scores))
+                selected_vi.append(first)
+                chosen[first] = True
+                max_sim_to_selected = np.maximum(max_sim_to_selected, sim[first])
+
+                for _ in range(n_v - 1):
+                    mmr_scores = lam * norm_scores - (1.0 - lam) * max_sim_to_selected
+                    mmr_scores[chosen] = -np.inf
+                    best_j = int(np.argmax(mmr_scores))
+                    selected_vi.append(best_j)
+                    chosen[best_j] = True
+                    max_sim_to_selected = np.maximum(max_sim_to_selected, sim[best_j])
+
+                # Map back to candidate indices, preserving passages without embeddings
+                selected_orig = [valid_idx[vi] for vi in selected_vi]
                 no_emb = [i for i, ok in enumerate(valid_mask) if not ok]
-                keep_idx = sorted(set(representatives) | set(no_emb))
+                # Insert no-embedding passages at their original positions
+                all_keep = sorted(set(selected_orig) | set(no_emb))
+                # But we want MMR order for valid passages, so: MMR-ordered valids + no-emb at end
+                reordered = [candidates[valid_idx[vi]] for vi in selected_vi]
+                reordered.extend(candidates[i] for i in no_emb)
 
                 before_count = len(candidates)
-                deduped = [candidates[i] for i in keep_idx]
-                # Append remaining passages after passage_limit unchanged
-                passage_scores = deduped + passage_scores[passage_limit:]
-                passage_limit = len(deduped)
+                passage_scores = reordered + passage_scores[passage_limit:]
+                passage_limit = len(reordered)
 
                 logger.info(
-                    "step_4.10_semantic_dedup",
-                    threshold=dedup_threshold,
+                    "step_4.10_mmr_rerank",
+                    mmr_lambda=lam,
                     before=before_count,
-                    after=len(deduped),
-                    removed=before_count - len(deduped),
+                    after=len(reordered),
                 )
-            timings_ms["step_4.10_semantic_dedup_ms"] = int(
-                (time.perf_counter() - t0_dedup) * 1000
+            timings_ms["step_4.10_mmr_ms"] = int(
+                (time.perf_counter() - t0_mmr) * 1000
             )
 
         # Step 4.11: LLM dedup — ask an LLM to identify passages whose
