@@ -624,6 +624,7 @@ class HippoRAG2PPR:
                 concept). 0 = no guarantee (default).
         """
         from collections import defaultdict
+        import numpy as np
 
         # Build entity → passage index (saved for seed translation)
         entity_to_passages: Dict[int, List[int]] = defaultdict(list)
@@ -636,6 +637,77 @@ class HippoRAG2PPR:
 
         # Save mapping for entity seed translation (all entities)
         self._entity_passage_map = dict(entity_to_passages)
+
+        # ── Pre-APPNP passage clustering ──────────────────────────────
+        # Merge near-duplicate passages into a single representative node
+        # so they don't consume multiple top-K slots with identical content.
+        # After APPNP, the representative's score is copied to all members.
+        cluster_threshold = 0.95  # cosine sim threshold for merging
+        self._passage_clusters: Dict[int, List[int]] = {}  # rep → [members]
+
+        all_passage_idxs = [
+            idx for idx in range(self._node_count)
+            if self._node_types.get(idx) == "passage"
+        ]
+        if self._passage_embeddings and len(all_passage_idxs) > 1:
+            # Build embedding matrix for passages that have embeddings
+            p_idx_list = []
+            emb_list = []
+            for p_idx in all_passage_idxs:
+                node_id = self._idx_to_node.get(p_idx)
+                if node_id and node_id in self._passage_embeddings:
+                    e = np.array(self._passage_embeddings[node_id], dtype=np.float32)
+                    norm = np.linalg.norm(e)
+                    if norm > 0:
+                        emb_list.append(e / norm)
+                        p_idx_list.append(p_idx)
+
+            if len(emb_list) > 1:
+                emb_mat = np.stack(emb_list)
+                sim_mat = emb_mat @ emb_mat.T
+
+                # Greedy clustering: assign each passage to the first
+                # representative it's similar enough to
+                assigned: Dict[int, int] = {}  # passage_idx → representative_idx
+                for i in range(len(p_idx_list)):
+                    if p_idx_list[i] in assigned:
+                        continue
+                    # This passage becomes a representative
+                    rep = p_idx_list[i]
+                    cluster = [rep]
+                    for j in range(i + 1, len(p_idx_list)):
+                        if p_idx_list[j] in assigned:
+                            continue
+                        if sim_mat[i, j] >= cluster_threshold:
+                            cluster.append(p_idx_list[j])
+                            assigned[p_idx_list[j]] = rep
+                    if len(cluster) > 1:
+                        self._passage_clusters[rep] = cluster
+                        assigned[rep] = rep
+
+                # Merge: transfer non-representative members' entity connections
+                # to the representative, then remove members from graph
+                merged_count = 0
+                for rep, members in self._passage_clusters.items():
+                    for member in members[1:]:  # skip rep itself
+                        # Transfer entity edges to representative
+                        for ent_idx, passages in entity_to_passages.items():
+                            if member in passages:
+                                if rep not in passages:
+                                    passages.append(rep)
+                                passages[:] = [p for p in passages if p != member]
+                        # Mark member as merged (will be excluded from graph)
+                        self._node_types[member] = "merged"
+                        merged_count += 1
+
+                if merged_count > 0:
+                    logger.info(
+                        "monopartite_passage_clustering",
+                        clusters=len(self._passage_clusters),
+                        merged_passages=merged_count,
+                        remaining_passages=len(all_passage_idxs) - merged_count,
+                        threshold=cluster_threshold,
+                    )
 
         # Split entities into hubs (project out) vs specific (keep)
         hub_entities: Dict[int, List[int]] = {}
@@ -2182,6 +2254,26 @@ class HippoRAG2PPR:
 
         passage_scores.sort(key=lambda x: x[1], reverse=True)
         entity_scores.sort(key=lambda x: x[1], reverse=True)
+
+        # Expand passage clusters: copy representative score to merged members
+        if hasattr(self, '_passage_clusters') and self._passage_clusters:
+            rep_score_map = {nid: sc for nid, sc in passage_scores}
+            expanded = []
+            for rep, members in self._passage_clusters.items():
+                rep_id = self._idx_to_node.get(rep)
+                if rep_id and rep_id in rep_score_map:
+                    for member in members[1:]:  # skip rep itself
+                        member_id = self._idx_to_node.get(member)
+                        if member_id:
+                            expanded.append((member_id, rep_score_map[rep_id]))
+            if expanded:
+                passage_scores.extend(expanded)
+                passage_scores.sort(key=lambda x: x[1], reverse=True)
+                logger.info(
+                    "appnp_cluster_expand",
+                    expanded=len(expanded),
+                    total=len(passage_scores),
+                )
 
         # Log scaling: compress wide score distribution
         if score_log_scaling:
