@@ -2255,26 +2255,6 @@ class HippoRAG2PPR:
         passage_scores.sort(key=lambda x: x[1], reverse=True)
         entity_scores.sort(key=lambda x: x[1], reverse=True)
 
-        # Expand passage clusters: copy representative score to merged members
-        if hasattr(self, '_passage_clusters') and self._passage_clusters:
-            rep_score_map = {nid: sc for nid, sc in passage_scores}
-            expanded = []
-            for rep, members in self._passage_clusters.items():
-                rep_id = self._idx_to_node.get(rep)
-                if rep_id and rep_id in rep_score_map:
-                    for member in members[1:]:  # skip rep itself
-                        member_id = self._idx_to_node.get(member)
-                        if member_id:
-                            expanded.append((member_id, rep_score_map[rep_id]))
-            if expanded:
-                passage_scores.extend(expanded)
-                passage_scores.sort(key=lambda x: x[1], reverse=True)
-                logger.info(
-                    "appnp_cluster_expand",
-                    expanded=len(expanded),
-                    total=len(passage_scores),
-                )
-
         # Log scaling: compress wide score distribution
         if score_log_scaling:
             passage_scores = self._apply_log_scaling(passage_scores)
@@ -2293,6 +2273,67 @@ class HippoRAG2PPR:
         )
 
         return passage_scores, entity_scores
+
+    def expand_clusters(
+        self,
+        passage_scores: List[Tuple[str, float]],
+        reranker_scores: Optional[Dict[str, float]] = None,
+        reranker_threshold: float = 0.0,
+    ) -> List[Tuple[str, float]]:
+        """Expand passage clusters selectively for synthesis.
+
+        Only expands clusters whose representative is in *passage_scores*.
+        If *reranker_scores* is provided, only includes cluster members
+        whose reranker score meets *reranker_threshold* (query-relevance
+        gate). Members without a reranker score are always included.
+
+        Returns a new passage_scores list with expanded members inserted
+        at the representative's score.
+        """
+        if not hasattr(self, '_passage_clusters') or not self._passage_clusters:
+            return passage_scores
+
+        # Build lookup: which representatives are in the surviving set?
+        surviving_sids = {sid for sid, _ in passage_scores}
+        rep_id_to_score: Dict[str, float] = {}
+        for rep_idx, members in self._passage_clusters.items():
+            rep_id = self._idx_to_node.get(rep_idx)
+            if rep_id and rep_id in surviving_sids:
+                rep_id_to_score[rep_id] = next(
+                    sc for sid, sc in passage_scores if sid == rep_id
+                )
+
+        if not rep_id_to_score:
+            return passage_scores
+
+        expanded = []
+        for rep_idx, members in self._passage_clusters.items():
+            rep_id = self._idx_to_node.get(rep_idx)
+            if rep_id not in rep_id_to_score:
+                continue
+            rep_score = rep_id_to_score[rep_id]
+            for member_idx in members[1:]:  # skip rep itself
+                member_id = self._idx_to_node.get(member_idx)
+                if not member_id:
+                    continue
+                # Query-relevance gate: skip members the reranker scored too low
+                if reranker_scores:
+                    rr = reranker_scores.get(member_id)
+                    if rr is not None and rr < reranker_threshold:
+                        continue
+                expanded.append((member_id, rep_score))
+
+        if expanded:
+            passage_scores = list(passage_scores) + expanded
+            passage_scores.sort(key=lambda x: x[1], reverse=True)
+            logger.info(
+                "cluster_expand_selective",
+                clusters_expanded=len(rep_id_to_score),
+                members_added=len(expanded),
+                total=len(passage_scores),
+            )
+
+        return passage_scores
 
     def run_gpr(
         self,

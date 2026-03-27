@@ -1864,6 +1864,19 @@ class HippoRAG2CommunityHandler(BaseRouteHandler):
                 (time.perf_counter() - t0_llm_dedup) * 1000
             )
 
+        # ── Expand passage clusters (query-selective) ──────────────────
+        # Only expand clusters whose representative survived all filtering.
+        # Use reranker scores as query-relevance gate for cluster members.
+        if self._ppr_engine and hasattr(self._ppr_engine, 'expand_clusters'):
+            passage_scores_before_expand = len(passage_scores[:passage_limit])
+            expanded = self._ppr_engine.expand_clusters(
+                passage_scores[:passage_limit],
+                reranker_scores=pre_ppr_reranker_scores,
+                reranker_threshold=0.15,
+            )
+            passage_scores = expanded + passage_scores[passage_limit:]
+            passage_limit = len(expanded)
+
         top_passage_scores = passage_scores[:passage_limit]
         top_sentence_ids = [cid for cid, _ in top_passage_scores]
         ppr_scores_map = {cid: score for cid, score in top_passage_scores}
