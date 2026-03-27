@@ -1,6 +1,9 @@
 # Architecture Design: Hybrid LazyGraphRAG + HippoRAG 2 System
 
-**Last Updated:** March 12, 2026
+**Last Updated:** March 27, 2026
+
+**Recent Updates (March 27, 2026):**
+- ✅ **§59 APPNP Architecture Analysis:** Documented Predict-then-Propagate design — original paper (Gasteiger ICLR 2019) vs our implementation. Key divergences: α=0.80 (vs 0.1), cross-encoder reranker (vs 2-layer MLP), monopartite-projected graph (vs homogeneous). Analysis of why high-α shallow walks work for multi-hop questions (monopartite projection pre-computes depth). Identified densification noise as remaining challenge with five candidate denoising approaches mapped to specific pipeline positions: MMR at Step 4.10, entity-aware discount at new Step 4.45, score-gap detection at Step 4.5, cluster-then-select at Step 4.10, propagation-aware dedup inside run_appnp().
 
 **Recent Updates (March 12, 2026):**
 - ✅ **Mega-Block Parallelization + Tier 2 + Stability:** Steps 4.x (section graph) now runs in parallel with Steps 5-7 (entity extraction) — ~30-60s saving. Steps 7.5 (triples) ‖ 7.6 (synonymy) parallelized. Batch document upsert (1 vs N queries). Batch community queries (1 vs N+1). GDS checkpoint bug fix. Voyage retry (3× backoff). Neo4j transaction timeouts. Combined: ~75-115s total pipeline (was 250-450s). See [§58b-c](#58b--tier-1-sleep-removal--parallelization-2026-03-12).
@@ -13391,3 +13394,436 @@ The only persistent miss across all configurations is **Q-G1 "not transferable"*
 | `c58b8283` | Embedding pre-filter for reranker token savings |
 | `14665478` | Instructed pre-filter query |
 | `b5f8f220` | Neural PPR — query-conditioned teleportation |
+
+---
+
+## §59 — APPNP: Predict-then-Propagate Architecture Analysis (2026-03-27)
+
+### The Core Idea: Separate Prediction from Propagation
+
+**Paper:** *"Predict then Propagate: Graph Neural Networks meet Personalized PageRank"*
+— Gasteiger, Bojchevski, Günnemann (ICLR 2019)
+
+- **arXiv:** https://arxiv.org/abs/1810.05997
+- **GitHub:** https://github.com/gasteigerjo/ppnp
+
+Most Graph Neural Networks (GCNs, GATs) try to do two things at once: learn
+node features *and* propagate information through the graph, all in one big
+neural network stack. The deeper the stack, the more hops you traverse, but
+the training gets harder and node features start "over-smoothing" — every node
+ends up looking the same.
+
+APPNP's insight is simple: **don't mix the two.** Split the work into two
+completely independent stages:
+
+1. **Predict** — A plain neural network (MLP) looks at each node's features
+   in isolation and makes its best guess. It never sees the graph. It just says
+   "I think this node belongs to class A with 70% confidence."
+
+2. **Propagate** — Take those raw predictions and smooth them across the graph
+   using Personalized PageRank. If node #42's neighbours all predicted "class A"
+   too, then #42's confidence goes up. If #42 was an outlier, the graph
+   corrects it.
+
+The formula is clean:
+
+```
+preds = (1 − α) · D^{−½}(A+I)D^{−½} · preds  +  α · predictions
+                    ↑ graph smoothing                ↑ teleport back to original prediction
+```
+
+At each iteration, every node's score is a blend of:
+- **(1 − α):** What its neighbours think (graph smoothing)
+- **α:** What the MLP originally predicted (teleport / retention)
+
+The α parameter is the key dial. Low α means "trust the graph more than the
+predictor." High α means "trust the predictor more than the graph."
+
+---
+
+### What the Original Paper Actually Does
+
+The paper's setup is semi-supervised **node classification** on citation
+networks (Cora, Citeseer, PubMed). Think of it like this: you have a graph
+of academic papers linked by citations. Some papers have labels (e.g., "Neural
+Networks", "Reinforcement Learning"). You want to predict labels for the
+unlabelled papers.
+
+**The MLP** is intentionally simple — 2 layers, 64 hidden units, ReLU,
+dropout. Input is bag-of-words features for each paper. Output is a probability
+distribution over class labels. It's *not* a powerful model. It doesn't see
+the graph at all. It just looks at a paper's text features and guesses.
+
+**The key insight** is that even this weak predictor, when combined with PPR
+graph smoothing, outperforms deeper GNNs that try to learn everything
+end-to-end. The graph structure *corrects* the MLP's mistakes.
+
+**Original paper settings:**
+
+| Parameter | Paper Value | What it means |
+|-----------|-------------|---------------|
+| α (alpha) | **0.1** (0.2 for MS Academic) | Only 10% trust in the MLP. The graph does 90% of the work. |
+| K (steps) | **10** | 10 propagation iterations — the walk goes deep. |
+| Predictor | 2-layer MLP (64 hidden, ReLU, dropout) | Simple, cheap. Sees only node features (bag-of-words). |
+| Graph | Homogeneous citation network | All nodes are papers. All edges are citations. One type of each. |
+| Task | Semi-supervised node classification | "What topic is this paper about?" |
+| Prediction target | **Node class — query-independent** | A paper's topic doesn't change depending on who's asking. The label is a static property of the node. |
+
+Notice: there is **no query** anywhere. The MLP assigns a fixed class to each
+node. The PPR smooths those fixed assignments. Nothing is dynamic or
+query-dependent.
+
+With α = 0.1, at each propagation step 90% of the signal diffuses to
+neighbours. After K steps the walk reaches 5–6+ hops deep. This is necessary
+because the MLP is weak — it needs heavy graph correction.
+
+---
+
+### Our Implementation: Same Formula, Completely Different Architecture
+
+We borrow the APPNP formula verbatim but repurpose it for **passage retrieval
+in a RAG pipeline**. Almost every design choice is different:
+
+| Aspect | Original Paper | Our App |
+|--------|---------------|---------|
+| **α (alpha)** | 0.1 — graph dominates (90% smoothing) | **0.80** — reranker dominates (80% retention) |
+| **K (steps)** | 10 | **20** (max, with early convergence) |
+| **Predictor** | 2-layer MLP trained on node features | Voyage `rerank-2.5` cross-encoder — no training required |
+| **What the predictor sees** | One node's bag-of-words features | The **(query, passage)** pair jointly |
+| **What the predictor predicts** | Node class label — *static, query-independent* | Query↔passage relevance score — *dynamic, changes every query* |
+| **Graph type** | Homogeneous (one node type, one edge type) | Bipartite (passage ↔ entity) projected to monopartite passage-only graph |
+| **Task** | Semi-supervised classification | Passage ranking for RAG synthesis |
+| **Entity nodes at propagation time** | N/A (single node type) | Collapsed out — entities become passage↔passage edge weights |
+| **Entity seed weight** | N/A | 0.0 — entity seeds completely ignored |
+
+Let's unpack each divergence and why it works.
+
+---
+
+#### Why α = 0.80 Instead of 0.1
+
+This is the most dramatic difference. The paper uses α = 0.1 because its
+predictor (a 2-layer MLP on bag-of-words) is weak. It gets maybe 60-70%
+accuracy on its own. The graph needs to do heavy lifting to fix mistakes.
+So 90% of the signal comes from graph smoothing.
+
+Our predictor is a **Voyage rerank-2.5 cross-encoder** — a large transformer
+trained on internet-scale relevance data. It already produces highly accurate
+relevance scores. When the reranker says "this passage is 0.85 relevant," it's
+almost always right. The graph doesn't need to fix much — it just provides a
+mild structural boost.
+
+What α = 0.80 means in practice:
+- 80% of each node's score comes from the reranker's original judgment
+- 20% diffuses from graph neighbours
+- Effective signal at each hop: `(1−α)^K = 0.2^K`
+
+| Hops from seed | Signal remaining |
+|----------------|-----------------|
+| 1 | 20% |
+| 2 | 4% |
+| 3 | 0.8% |
+| 4 | 0.16% — essentially zero |
+
+So at α = 0.80, **the walk barely goes 2 hops deep**. You might think this
+breaks multi-hop reasoning. It doesn't, for a surprising reason explained
+below.
+
+Testing confirms higher α is consistently better:
+
+| α | Quality | Why |
+|---|---------|-----|
+| 0.65 (35% graph) | ✅ Good | Works, but graph adds noise the reranker already handled |
+| 0.80 (20% graph) | ✅ Better | Sweet spot: reranker trusted, graph just boosts neighbours |
+| 0.90 (10% graph) | ≈ Same | Graph contribution is marginal but harmless |
+
+---
+
+#### Why Shallow Walks Work for Multi-Hop Questions
+
+This seems paradoxical: if the walk only goes 2 hops, how does it handle
+questions that require traversing 4 entities to connect distant passages?
+
+The answer is that the **monopartite projection already collapsed the hops
+before APPNP even runs.**
+
+In the original bipartite graph, a "4-hop question" requires this path:
+```
+Passage A → Entity1 → Passage B → Entity2 → Passage C → Entity3 → Passage D
+```
+
+That's 6 edges and 3 intermediate entity nodes to traverse. Standard PPR with
+α = 0.1 could walk this. But our APPNP with α = 0.8 can't — the signal dies
+at hop 2.
+
+However, **before** APPNP runs, we project the bipartite graph into a
+monopartite (passage-only) graph using overlap coefficient edge weighting.
+Every entity is replaced by direct passage↔passage edges between all passages
+that shared that entity. After projection:
+
+```
+Passage A ↔ Passage B    (shared Entity1)
+Passage B ↔ Passage C    (shared Entity2)
+Passage C ↔ Passage D    (shared Entity3)
+Passage A ↔ Passage C    (both shared Entity1 & Entity2 indirectly)
+Passage A ↔ Passage D    (if they share any projected entity)
+```
+
+What was a 4-hop path through entities is now a **1-hop direct edge** between
+passages. The multi-hop reasoning is baked into the graph topology, not the
+walk depth.
+
+This creates a clean **separation of concerns:**
+1. **Monopartite projection** = structural depth (collapses multi-hop → 1-hop)
+2. **APPNP propagation** = signal blending (reranker scores + neighbourhood smoothing)
+
+The original paper didn't need this separation because it operated on
+homogeneous graphs where all nodes were the same type and all edges were
+the same type. There was nothing to project.
+
+---
+
+#### Why the Reranker Replaces the MLP (and What Each Actually Predicts)
+
+This is a subtle but fundamental difference. The paper's MLP and our reranker
+are doing completely different things:
+
+**Paper MLP:** Predicts a **static node property**. "This paper is about
+Neural Networks." The prediction doesn't change depending on who's asking or
+what question is being asked. It's a fixed label for the node. The MLP sees
+only the node's features (bag-of-words vector) — it has no concept of a
+"query."
+
+**Our reranker:** Predicts **query-dependent relevance**. "How relevant is
+this passage to *this specific question*?" The prediction is different for
+every query. The reranker is a cross-encoder that sees the (query, passage)
+pair jointly — it reads both texts together and produces a relevance score.
+
+This means our APPNP predictions must be **recomputed for every query**,
+while the paper's MLP predictions could theoretically be computed once and
+cached forever.
+
+Could we train a small MLP instead of calling the reranker API? Yes:
+- Input: passage embedding (1024-d Voyage vector)
+- Labels: relevant/not-relevant from our question bank
+- Training: minutes on CPU
+- Inference: microseconds, free, no API call
+
+But it would be far weaker. A 2-layer MLP on embeddings captures basic
+similarity. The cross-encoder reranker captures nuanced relevance —
+paraphrases, negation, implicit information needs — because it was trained
+on massive internet-scale relevance data. The trade-off is **quality vs
+cost/latency** (one Voyage API call scoring all passages, ~380ms).
+
+---
+
+#### What APPNP Made Redundant in Our Pipeline
+
+Before APPNP, the Route 8 pipeline had multiple stages trying to compensate
+for standard PPR's limitations. APPNP eliminated three of them:
+
+1. **Post-PPR reranker (Step 4.5):** With standard PPR, you'd run the walk,
+   get structurally ranked passages, then rerank them with a cross-encoder to
+   fix quality. With APPNP, the reranker predictions are *already inside* the
+   propagation. Reranking the output would be redundant — you'd be reranking
+   what the reranker already scored. Preset: `"rerank": False`.
+
+2. **Entity embedding seeds:** Standard PPR starts its walk from entity nodes
+   matched by NER. APPNP with `seed_weight=0.0` ignores entity seeds entirely —
+   the starting signal comes 100% from the reranker's relevance scores, not
+   from entity matching. This sidesteps the entity-linking failure modes that
+   plagued earlier routes.
+
+3. **Community passage seeds:** Earlier routes injected community-derived
+   passages to ensure coverage. APPNP achieves 100% recall without them
+   because the reranker already scores all passages and the graph smoothing
+   boosts the structurally connected neighbourhood.
+
+---
+
+### The Densification Problem: When Monopartite Projection Creates Noise
+
+The monopartite projection is powerful but has a cost: **graph densification.**
+When an entity connects *d* passages, projecting it creates up to d×(d−1)/2
+new passage-passage edges, forming a clique. A common entity like "invoice"
+connecting 200 passages generates ~20,000 edges.
+
+This matters because APPNP propagates signal through these dense cliques.
+When a truly relevant passage sits in an entity clique, its high reranker
+score bleeds into all clique neighbours via the (1−α) graph smoothing term.
+Those neighbours get a boosted score even though they're **semantically similar
+but factually different** from the real answer.
+
+This is the worst kind of noise — it's high-quality camouflage. The noisy
+passages are:
+- **Topically related** (same entities, same document section)
+- **Semantically similar** (high cosine similarity, high reranker score)
+- **Structurally close** (1-hop neighbours in the monopartite graph)
+- But **factually distinct** (different sentences, different facts)
+
+The reranker can't filter them because they genuinely *are* semantically
+relevant to the query. The graph can't filter them because they're direct
+neighbours with high edge weights. They pass every existing gate.
+
+#### Current Denoising Stack and Its Limitations
+
+| Pipeline Stage | What It Does | Why It Doesn't Catch Clique Noise |
+|---|---|---|
+| **Step 3.5 — Reranker gate** (threshold 0.1) | Drops passages below a minimum cross-encoder score before APPNP | Noisy passages score high on the reranker — they are semantically relevant, just redundant |
+| **Step 4.5 — Dynamic cutoff** (threshold 0.25) | Drops passages below a relevance threshold after APPNP | Same problem — similar passages pass the threshold comfortably |
+| **Step 4.10 — Semantic dedup** (cosine clustering) | Greedy clustering at a cosine threshold; keeps one representative per cluster | Catches near-identical text (>85% cosine) but clique noise is similar-not-identical (~70-80% cosine), falling below typical thresholds |
+| **Step 4.11 — LLM dedup** (gpt-4.1 drop-or-keep) | LLM decides if a passage's facts are fully covered by other kept passages | Best current tool, but query-blind variant needed — when the LLM sees the query, it conflates "irrelevant to question" with "redundant content" |
+
+The gap: nothing currently targets the specific pattern of "structurally
+boosted similar-but-different passages from the same entity clique."
+
+#### Where to Add Denoising: Five Approaches and Their Pipeline Positions
+
+The pipeline flow after APPNP (Step 4) is:
+
+```
+Step 4    → APPNP output (passage_scores)
+Step 4.5  → post-PPR rerank / dynamic cutoff
+Step 4.55 → community diversity guarantee
+Step 4.6  → corpus-wide cross-encoder merge
+Step 4.8  → entity-bridge structural filter
+Step 4.9  → document-interleaved selection
+Step 4.10 → semantic dedup (cosine clustering)
+Step 4.11 → LLM dedup (gpt-4.1)
+            → final passage_scores sent to synthesis
+```
+
+Each denoising approach fits naturally at a different point:
+
+**1. MMR Re-ranking → replace or augment Step 4.10**
+
+The most straightforward improvement. MMR (Maximal Marginal Relevance)
+iteratively selects passages that are both relevant *and* different from
+what's already been selected:
+
+```
+MMR(p) = λ · relevance(p) − (1−λ) · max_similarity(p, already_selected)
+```
+
+It directly targets clique noise: all clique members are similar to each
+other, so after picking the first one, the rest get penalised. Unlike the
+current Step 4.10 cosine-threshold clustering (which uses a hard cutoff and
+misses moderate similarity), MMR is a soft, greedy selection that naturally
+promotes diversity.
+
+- **Where:** Replace Step 4.10's greedy clustering with MMR selection using
+  the same cached passage embeddings.
+- **Cost:** ~1ms for 75 passages. No API calls. Deterministic.
+- **Advantage over current Step 4.10:** No threshold to tune — λ balances
+  relevance vs diversity smoothly.
+
+**2. Entity-Aware Score Discount → new Step 4.45 (between APPNP and rerank)**
+
+During APPNP propagation, track *how much* of each passage's final score
+came from entity-clique edges vs the reranker's original prediction. If a
+passage's APPNP score is 0.72 but its pre-propagation reranker score was only
+0.15, most of its score came from structural boost — discount it.
+
+```
+discount(p) = appnp_score(p) × (β + (1−β) × reranker_score(p) / appnp_score(p))
+```
+
+This separates "genuinely relevant" (high reranker + high APPNP) from
+"structurally lucky" (low reranker + high APPNP via clique propagation).
+
+- **Where:** New Step 4.45, right after APPNP output, before any post-processing.
+  Requires storing pre-propagation reranker scores (already available as
+  `pre_ppr_reranker_scores`).
+- **Cost:** ~0ms. Simple arithmetic on existing data.
+- **Risk:** Might discount genuinely useful passages that the reranker
+  underscored but the graph correctly boosted — the exact case APPNP is
+  designed for. Needs careful β tuning.
+
+**3. Score-Gap Detection (Elbow Method) → augment Step 4.5 dynamic cutoff**
+
+Instead of a fixed relevance threshold (currently 0.25), look for natural
+breaks in the APPNP score distribution. True answers often cluster at the top
+with a visible gap before the noise floor. Find the largest score drop in the
+top-K and cut there.
+
+```
+gaps[i] = scores[i] - scores[i+1]
+cutoff_idx = argmax(gaps[:max_k])
+```
+
+- **Where:** Replace the fixed threshold in Step 4.5 with adaptive gap-based
+  cutoff.
+- **Cost:** ~0ms. Just sorting and diffing.
+- **Risk:** Score distributions aren't always bimodal. If there's no clear
+  gap (gradual decay), this degrades to "keep everything" or picks an
+  arbitrary point. Works best when the reranker creates clear separation.
+
+**4. Cluster-then-Select → replace Step 4.10**
+
+Similar to MMR but explicit: cluster the top-K passages by embedding
+similarity (agglomerative clustering with a distance threshold), then keep
+only the highest-APPNP-scored passage from each cluster.
+
+- **Where:** Replace Step 4.10. Uses the same embedding matrix already loaded.
+- **Cost:** ~2-5ms for 75 passages. No API calls.
+- **Advantage over current Step 4.10:** The current implementation uses a
+  fixed greedy walk. Agglomerative clustering produces better groupings
+  because it considers global structure, not just sequential neighbours.
+- **Advantage over MMR:** More interpretable — you can inspect clusters.
+  Disadvantage: still needs a distance threshold.
+
+**5. Propagation-Aware Dedup → requires changes inside `run_appnp()`**
+
+The most invasive but most precise approach. During APPNP power iteration,
+record which edges contributed to each passage's score increase. If two
+passages received their boost from the same set of projected-entity edges,
+they're clique siblings — keep the one with the higher reranker (pre-
+propagation) score.
+
+- **Where:** Inside `hipporag2_ppr.py:run_appnp()`, with results passed to a
+  new Step 4.45 filter.
+- **Cost:** Moderate — adds tracking overhead to each propagation step.
+  O(edges × iterations) bookkeeping.
+- **Risk:** Implementation complexity. The propagation is currently a clean
+  matrix-vector multiply; adding per-edge tracking breaks that simplicity.
+- **Advantage:** The only approach that targets the *root cause* (clique edge
+  propagation) rather than the *symptom* (similar output scores).
+
+#### Recommended Priority
+
+| Priority | Approach | Effort | Expected Impact |
+|----------|----------|--------|-----------------|
+| 🥇 1st | **MMR re-ranking** (replace Step 4.10) | Low — ~50 lines, uses existing embeddings | High — directly penalises clique redundancy |
+| 🥈 2nd | **Entity-aware discount** (new Step 4.45) | Low — arithmetic on existing scores | Medium — separates structural boost from real relevance |
+| 🥉 3rd | **Score-gap detection** (augment Step 4.5) | Low — ~20 lines | Medium — helps when score distribution is bimodal |
+| 4th | **Cluster-then-select** (replace Step 4.10) | Medium — clustering library | Similar to MMR, less flexible |
+| 5th | **Propagation-aware dedup** (modify run_appnp) | High — invasive core change | Highest precision but risky |
+
+MMR is the recommended first experiment because it's fast, well-understood,
+requires no threshold tuning (just λ), and directly addresses the failure
+mode: clique-boosted passages are redundant with each other, and MMR
+penalises exactly that.
+
+---
+
+### Summary
+
+APPNP in our app is "inspired by" rather than a faithful reproduction of
+Gasteiger et al. We borrow the core formula but everything around it is
+different — the predictor (cross-encoder vs MLP), the graph (monopartite-
+projected vs homogeneous), the task (retrieval vs classification), and the
+α regime (0.80 vs 0.1).
+
+The architecture works because of a clean separation that the original paper
+didn't need:
+- The **reranker** is a far stronger predictor than a 2-layer MLP, so high α
+  (trust the predictor) is justified
+- The **monopartite projection** pre-computes structural depth by collapsing
+  multi-hop entity paths into direct passage edges, so shallow walks suffice
+- **Projection handles depth; APPNP handles blending** — two stages, each
+  doing one thing well
+
+The remaining challenge is **densification noise** from the monopartite
+projection: entity cliques boost similar-but-different passages that pass
+every existing filter. MMR re-ranking at Step 4.10 and entity-aware score
+discount at Step 4.45 are the most promising first experiments.
